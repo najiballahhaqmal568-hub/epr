@@ -54,8 +54,8 @@ export default function Inventory() {
   const [adjusting, setAdjusting] = useState<{ v: Variant; p: Product } | null>(null)
   const [showReorder, setShowReorder] = useState(false)
 
-  const products = useLiveQuery(() => db.products.orderBy('name').toArray(), [])
-  const variants = useLiveQuery(() => db.variants.toArray(), [])
+  const products = useLiveQuery(() => db.products.orderBy('name').filter((p) => !p.deleted).toArray(), [])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
 
   const byProduct = new Map<number, Variant[]>()
   variants?.forEach((v) => {
@@ -237,7 +237,7 @@ function AdjustModal({ variant, product, onClose }: { variant: Variant; product:
 
 function ReorderModal({ onClose }: { onClose: () => void }) {
   const products = useLiveQuery(() => db.products.toArray(), [])
-  const variants = useLiveQuery(() => db.variants.toArray(), [])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const low = (variants ?? []).filter((v) => v.stockQty <= v.lowStock)
   const productMap = new Map(products?.map((p) => [p.id!, p]))
 
@@ -314,7 +314,7 @@ function ProductModal({
         }
         const keptIds = new Set(valid.map((f) => f.id).filter(Boolean))
         for (const v of variants) {
-          if (!keptIds.has(v.id)) await db.variants.delete(v.id!)
+          if (!keptIds.has(v.id)) await db.variants.update(v.id!, { deleted: true })
         }
         for (const f of valid) {
           const data = {
@@ -345,8 +345,8 @@ function ProductModal({
     if (!product?.id) return
     if (!confirm('این بوت و همه سایزهای آن حذف شود؟')) return
     await db.transaction('rw', db.products, db.variants, async () => {
-      await db.variants.where('productId').equals(product.id!).delete()
-      await db.products.delete(product.id!)
+      await db.variants.where('productId').equals(product.id!).modify({ deleted: true })
+      await db.products.update(product.id!, { deleted: true })
     })
     onClose()
   }

@@ -10,7 +10,10 @@ import Purchases from './pages/Purchases'
 import Customers from './pages/Customers'
 import Expenses from './pages/Expenses'
 import Settings from './pages/Settings'
+import Login from './pages/Login'
 import { useExpenseReminder } from './lib/useExpenseReminder'
+import { getSupa, getProfile, type Profile } from './lib/supa'
+import { startSync, syncNow } from './lib/sync'
 
 const tabs = [
   { id: 'dashboard', label: 'داشبورد', icon: '🏠' },
@@ -27,7 +30,41 @@ export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
   const [unlocked, setUnlocked] = useState(false)
   const [pinError, setPinError] = useState('')
+  // auth: 'none' = بدون سرور، 'anon' = سرور هست ولی وارد نشده
+  const [auth, setAuth] = useState<'loading' | 'none' | 'anon' | Profile>('loading')
   const reminder = useExpenseReminder()
+
+  const serverCfg = useLiveQuery(async () => {
+    const url = (await db.settings.get('supaUrl'))?.value
+    const key = (await db.settings.get('supaKey'))?.value
+    return Boolean(url && key)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function check() {
+      if (serverCfg === undefined) return
+      if (!serverCfg) {
+        setAuth('none')
+        return
+      }
+      const supa = await getSupa()
+      const { data } = await supa!.auth.getSession()
+      if (cancelled) return
+      if (!data.session) {
+        setAuth('anon')
+        return
+      }
+      const profile = await getProfile()
+      if (cancelled) return
+      setAuth(profile ?? 'anon')
+      if (profile) startSync()
+    }
+    void check()
+    return () => {
+      cancelled = true
+    }
+  }, [serverCfg])
 
   const pinHash = useLiveQuery(async () => {
     const s = await db.settings.get('pinHash')
@@ -39,7 +76,25 @@ export default function App() {
     if (pinHash === null) setUnlocked(true)
   }, [pinHash])
 
-  if (pinHash === undefined) return null
+  if (pinHash === undefined || auth === 'loading') return null
+
+  if (auth === 'anon') {
+    return (
+      <Login
+        onDone={async () => {
+          const profile = await getProfile()
+          setAuth(profile ?? 'anon')
+          if (profile) {
+            startSync()
+            void syncNow()
+          }
+        }}
+      />
+    )
+  }
+
+  const isStaff = typeof auth === 'object' && auth.role === 'staff'
+
   if (pinHash && !unlocked) {
     return (
       <PinPad
@@ -78,14 +133,14 @@ export default function App() {
           </div>
         </div>
       )}
-      {tab === 'dashboard' && <Dashboard goTo={(t) => setTab(t as TabId)} />}
+      {tab === 'dashboard' && <Dashboard goTo={(t) => setTab(t as TabId)} isStaff={isStaff} />}
       {tab === 'sales' && <Sales />}
       {tab === 'inventory' && <Inventory />}
       {tab === 'purchases' && <Purchases />}
       {tab === 'expenses' && <Expenses />}
       {tab === 'customers' && <Customers />}
-      {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} />}
-      {tab === 'reports' && <Reports onBack={() => setTab('dashboard')} />}
+      {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} isStaff={isStaff} onLogout={() => setAuth('anon')} />}
+      {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('dashboard')} />}
 
       <nav className="fixed bottom-0 right-0 left-0 z-40 mx-auto flex max-w-lg border-t border-slate-200 bg-white">
         {tabs.map((t) => (

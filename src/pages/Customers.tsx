@@ -113,7 +113,7 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
   const [amount, setAmount] = useState('')
 
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
-  const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).reverse().sortBy('date'), [customer.id])
+  const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
   const payments = useLiveQuery(
     () => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).reverse().sortBy('date'),
     [customer.id]

@@ -1,17 +1,36 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type Variant } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear } from '../lib/format'
+import { useSyncStatus, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
 
-export default function Dashboard({ goTo }: { goTo: (tab: string) => void }) {
+function SyncChip() {
+  const s = useSyncStatus()
+  if (s.state === 'off') return null
+  const label =
+    s.state === 'syncing' ? '⏳ همگام‌سازی...' : s.state === 'offline' ? '📴 آفلاین' : s.state === 'error' ? '⚠️ خطای سرور' : '☁️ همگام'
+  return (
+    <button
+      onClick={() => void syncNow()}
+      title={s.message}
+      className={`rounded-full px-2 py-1 text-xs font-bold ${
+        s.state === 'ok' ? 'bg-teal-50 text-teal-700' : s.state === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => void; isStaff?: boolean }) {
   const dayStart = startOfDay()
   const monthStart = startOfMonth()
   const yearStart = startOfYear()
 
-  const sales = useLiveQuery(() => db.sales.where('date').aboveOrEqual(yearStart).toArray(), [yearStart])
-  const expenses = useLiveQuery(() => db.expenses.where('date').aboveOrEqual(yearStart).toArray(), [yearStart])
-  const variants = useLiveQuery(() => db.variants.toArray(), [])
-  const products = useLiveQuery(() => db.products.toArray(), [])
+  const sales = useLiveQuery(() => db.sales.where('date').aboveOrEqual(yearStart).filter((s) => !s.deleted).toArray(), [yearStart])
+  const expenses = useLiveQuery(() => db.expenses.where('date').aboveOrEqual(yearStart).filter((e) => !e.deleted).toArray(), [yearStart])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
+  const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const customers = useLiveQuery(() => db.customers.toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.toArray(), [])
@@ -58,10 +77,13 @@ export default function Dashboard({ goTo }: { goTo: (tab: string) => void }) {
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-800">داشبورد</h1>
-        <div className="flex gap-2">
-          <button onClick={() => goTo('reports')} className="rounded-full bg-teal-50 px-3 py-1.5 text-sm font-bold text-teal-800">
-            📊 راپورها
-          </button>
+        <div className="flex items-center gap-2">
+          <SyncChip />
+          {!isStaff && (
+            <button onClick={() => goTo('reports')} className="rounded-full bg-teal-50 px-3 py-1.5 text-sm font-bold text-teal-800">
+              📊 راپورها
+            </button>
+          )}
           <button onClick={() => goTo('settings')} className="rounded-full bg-slate-100 px-3 py-1.5 text-lg" aria-label="تنظیمات">
             ⚙️
           </button>

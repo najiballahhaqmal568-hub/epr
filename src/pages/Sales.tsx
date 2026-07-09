@@ -8,7 +8,7 @@ import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../compone
 export default function Sales() {
   const [showNew, setShowNew] = useState(false)
   const [returning, setReturning] = useState<Sale | null>(null)
-  const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().limit(100).toArray(), [])
+  const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().filter((s) => !s.deleted).limit(100).toArray(), [])
 
   return (
     <div className="p-4">
@@ -167,8 +167,8 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('')
 
   const customers = useLiveQuery(() => db.customers.orderBy('name').toArray(), [])
-  const products = useLiveQuery(() => db.products.toArray(), [])
-  const variants = useLiveQuery(() => db.variants.toArray(), [])
+  const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
 
   const productMap = new Map<number, Product>()
   products?.forEach((p) => productMap.set(p.id!, p))

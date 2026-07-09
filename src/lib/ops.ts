@@ -44,7 +44,7 @@ export async function addSale(sale: Sale): Promise<number> {
 export async function deleteSale(saleId: number): Promise<void> {
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
     const sale = await db.sales.get(saleId)
-    if (!sale) return
+    if (!sale || sale.deleted) return
     for (const line of sale.lines) {
       const v = await db.variants.get(line.variantId)
       if (v) await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty })
@@ -55,7 +55,7 @@ export async function deleteSale(saleId: number): Promise<void> {
       if (c) await db.customers.update(sale.customerId, { balance: c.balance - remainder })
     }
     await movement({ date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, note: 'حذف فروش' })
-    await db.sales.delete(saleId)
+    await db.sales.update(saleId, { deleted: true })
   })
 }
 
@@ -122,7 +122,7 @@ export async function addExpense(expense: Expense): Promise<number> {
 export async function deleteExpense(expenseId: number): Promise<void> {
   return db.transaction('rw', db.expenses, db.cashMovements, async () => {
     const e = await db.expenses.get(expenseId)
-    if (!e) return
+    if (!e || e.deleted) return
     await movement({
       date: Date.now(),
       type: EXPENSE_MOVE[e.type],
@@ -130,7 +130,7 @@ export async function deleteExpense(expenseId: number): Promise<void> {
       amount: e.amount,
       note: `حذف: ${e.categoryName}`
     })
-    await db.expenses.delete(expenseId)
+    await db.expenses.update(expenseId, { deleted: true })
   })
 }
 

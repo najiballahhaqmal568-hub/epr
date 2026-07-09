@@ -56,8 +56,8 @@ function ExpenseList() {
   const [filter, setFilter] = useState<number | 'all' | ExpenseType>('all')
   const monthStart = startOfMonth()
 
-  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').toArray(), [])
-  const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().limit(300).toArray(), [])
+  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
+  const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().filter((e) => !e.deleted).limit(300).toArray(), [])
 
   const filtered = expenses?.filter((e) => {
     if (filter === 'all') return true
@@ -147,7 +147,7 @@ function FilterChip({ active, onClick, label }: { active: boolean; onClick: () =
 }
 
 function CategoryManager({ onClose }: { onClose: () => void }) {
-  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').toArray(), [])
+  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [newCat, setNewCat] = useState('')
@@ -200,7 +200,7 @@ function CategoryManager({ onClose }: { onClose: () => void }) {
                 <button
                   className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-bold text-white"
                   onClick={async () => {
-                    await db.expenseCategories.delete(c.id!)
+                    await db.expenseCategories.update(c.id!, { deleted: true })
                     setConfirmingId(null)
                   }}
                 >
@@ -234,7 +234,7 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
   const [showNewCat, setShowNewCat] = useState(false)
   const [error, setError] = useState('')
 
-  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').toArray(), [])
+  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
 
   async function save() {
     const amt = parseNum(amount)

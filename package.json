@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.1",
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",
     "react": "^18.3.1",

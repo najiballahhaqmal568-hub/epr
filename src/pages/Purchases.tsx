@@ -100,8 +100,8 @@ function SupplierReturnModal({ supplier, onClose }: { supplier: Supplier; onClos
   const [settlement, setSettlement] = useState<'reduceDebt' | 'cashRefund'>(supplier.balance > 0 ? 'reduceDebt' : 'cashRefund')
   const [error, setError] = useState('')
 
-  const products = useLiveQuery(() => db.products.toArray(), [])
-  const variants = useLiveQuery(() => db.variants.toArray(), [])
+  const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const productMap = new Map<number, Product>()
   products?.forEach((p) => productMap.set(p.id!, p))
 
@@ -287,8 +287,8 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('')
 
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').toArray(), [])
-  const products = useLiveQuery(() => db.products.toArray(), [])
-  const variants = useLiveQuery(() => db.variants.toArray(), [])
+  const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
 
   const productMap = new Map<number, Product>()
   products?.forEach((p) => productMap.set(p.id!, p))
