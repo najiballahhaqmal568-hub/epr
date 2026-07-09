@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type SaleLine, type Variant, type Product } from '../db'
-import { addSale, deleteSale } from '../lib/ops'
-import { fmtNum, fmtMoney, fmtDate, parseNum } from '../lib/format'
+import { db, type Sale, type SaleLine, type Variant, type Product } from '../db'
+import { addSale, deleteSale, addCustomerReturn } from '../lib/ops'
+import { fmtNum, fmtMoney, fmtDate, parseNum, fromDateInput } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
 export default function Sales() {
   const [showNew, setShowNew] = useState(false)
+  const [returning, setReturning] = useState<Sale | null>(null)
   const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().limit(100).toArray(), [])
 
   return (
@@ -35,20 +36,123 @@ export default function Sales() {
             <p className="mt-1 text-sm text-slate-600">
               {s.lines.map((l) => `${l.productName} ${l.size} ×${fmtNum(l.qty)}`).join('، ')}
             </p>
-            <button
-              className="mt-1 text-xs text-red-500"
-              onClick={async () => {
-                if (confirm('این فروش حذف شود؟ اجناس به گدام برمی‌گردد.')) await deleteSale(s.id!)
-              }}
-            >
-              حذف فروش
-            </button>
+            <div className="mt-1 flex gap-4">
+              <button className="text-xs font-bold text-teal-700" onClick={() => setReturning(s)}>
+                مرجوعی
+              </button>
+              <button
+                className="text-xs text-red-500"
+                onClick={async () => {
+                  if (confirm('این فروش حذف شود؟ اجناس به گدام برمی‌گردد.')) await deleteSale(s.id!)
+                }}
+              >
+                حذف فروش
+              </button>
+            </div>
           </Card>
         )
       })}
       <Fab onClick={() => setShowNew(true)} label="فروش جدید" />
       {showNew && <NewSaleModal onClose={() => setShowNew(false)} />}
+      {returning && <ReturnModal sale={returning} onClose={() => setReturning(null)} />}
     </div>
+  )
+}
+
+function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+  const [qtys, setQtys] = useState<Record<number, number>>({})
+  const [restock, setRestock] = useState(true)
+  const [reason, setReason] = useState('سایز غلط')
+  const [settlement, setSettlement] = useState<'cashRefund' | 'reduceDebt'>(sale.customerId ? 'reduceDebt' : 'cashRefund')
+  const [error, setError] = useState('')
+
+  const customer = useLiveQuery(
+    async () => (sale.customerId ? await db.customers.get(sale.customerId) : undefined),
+    [sale.customerId]
+  )
+
+  const amount = sale.lines.reduce((s, l, i) => s + (qtys[i] ?? 0) * l.unitPrice, 0)
+
+  async function save() {
+    const lines = sale.lines
+      .map((l, i) => ({ ...l, qty: qtys[i] ?? 0, restock }))
+      .filter((l) => l.qty > 0)
+    if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
+    if (settlement === 'reduceDebt' && !sale.customerId) return setError('این فروش مشتری ندارد — بازپرداخت نقدی را انتخاب کنید')
+    try {
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: sale.customerId,
+        partyName: sale.customerName ?? 'مشتری نقدی',
+        refId: sale.id,
+        lines,
+        reason,
+        settlement,
+        amount
+      })
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <Modal title="مرجوعی فروش" onClose={onClose}>
+      <p className="mb-2 text-sm text-slate-600">
+        {sale.customerName || 'مشتری نقدی'} — {fmtDate(sale.date)}
+      </p>
+      {sale.lines.map((l, i) => (
+        <div key={i} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 p-2">
+          <div className="text-sm">
+            <p className="font-bold">
+              {l.productName} {l.size} {l.color}
+            </p>
+            <p className="text-slate-500">
+              فروخته: {fmtNum(l.qty)} × {fmtMoney(l.unitPrice)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
+              −
+            </button>
+            <span className="w-6 text-center font-bold">{fmtNum(qtys[i] ?? 0)}</span>
+            <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
+              ＋
+            </button>
+          </div>
+        </div>
+      ))}
+
+      <Field label="دلیل مرجوعی">
+        <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
+          <option>سایز غلط</option>
+          <option>خرابی جنس</option>
+          <option>تبدیلی</option>
+          <option>پشیمانی مشتری</option>
+          <option>دیگر</option>
+        </select>
+      </Field>
+
+      <label className="mb-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} className="h-4 w-4" />
+        جنس سالم است — به گدام برگردد (اگر داغمه است تیک را بردارید)
+      </label>
+
+      <Field label="تصفیه پول">
+        <select className={inputCls} value={settlement} onChange={(e) => setSettlement(e.target.value as 'cashRefund' | 'reduceDebt')}>
+          <option value="cashRefund">بازپرداخت نقدی از صندوق</option>
+          {sale.customerId && <option value="reduceDebt">کم شدن از قرض مشتری{customer ? ` (قرض فعلی: ${fmtMoney(customer.balance)})` : ''}</option>}
+        </select>
+      </Field>
+
+      <p className="mb-3 font-bold text-slate-800">مبلغ مرجوعی: {fmtMoney(amount)}</p>
+      <p className="mb-3 text-xs text-slate-400">برای تبدیلی: مرجوعی را ثبت کنید و بعد یک فروش جدید برای جنس نو بزنید.</p>
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <PrimaryBtn onClick={save} disabled={amount <= 0}>
+        ثبت مرجوعی
+      </PrimaryBtn>
+    </Modal>
   )
 }
 
@@ -58,6 +162,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<SaleLine[]>([])
   const [paidStr, setPaidStr] = useState('')
   const [paidTouched, setPaidTouched] = useState(false)
+  const [promise, setPromise] = useState('')
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
 
@@ -110,7 +215,8 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
         saleType,
         lines,
         total,
-        paid
+        paid,
+        promiseDate: remainder > 0 && promise ? fromDateInput(promise) : undefined
       })
       onClose()
     } catch (e) {
@@ -228,6 +334,11 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
           />
         </Field>
         {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض مشتری): {fmtMoney(remainder)}</p>}
+        {remainder > 0 && (
+          <Field label="وعدهٔ پرداخت (اختیاری)">
+            <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
+          </Field>
+        )}
         {remainder < 0 && <p className="text-sm font-bold text-amber-600">بازگشت به مشتری: {fmtMoney(-remainder)}</p>}
       </div>
 

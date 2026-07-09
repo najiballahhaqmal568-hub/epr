@@ -5,6 +5,7 @@ export interface Product {
   name: string
   brand?: string
   category?: string
+  photo?: string
   createdAt: number
 }
 
@@ -13,10 +14,12 @@ export interface Variant {
   productId: number
   size: string
   color: string
+  sku?: string
   purchasePrice: number
   retailPrice: number
   wholesalePrice: number
   stockQty: number
+  /** حد سفارش مجدد */
   lowStock: number
 }
 
@@ -27,6 +30,9 @@ export interface Customer {
   type: 'retail' | 'wholesale'
   /** مثبت = مشتری قرضدار است */
   balance: number
+  flag?: 'good' | 'bad' | null
+  /** وعدهٔ بعدی پرداخت */
+  promiseDate?: number
 }
 
 export interface Supplier {
@@ -55,6 +61,7 @@ export interface Sale {
   lines: SaleLine[]
   total: number
   paid: number
+  promiseDate?: number
 }
 
 export interface PurchaseLine {
@@ -86,6 +93,93 @@ export interface Payment {
   note?: string
 }
 
+export interface ExpenseCategory {
+  id?: number
+  name: string
+  isDefault?: boolean
+}
+
+export interface Expense {
+  id?: number
+  date: number
+  categoryId?: number
+  categoryName: string
+  amount: number
+  note?: string
+  type: 'business' | 'withdrawal'
+}
+
+export type CashMovementType =
+  | 'sale'
+  | 'purchase'
+  | 'expense'
+  | 'withdrawal'
+  | 'customerPayment'
+  | 'supplierPayment'
+  | 'refund'
+  | 'openingSet'
+
+export interface CashMovement {
+  id?: number
+  date: number
+  type: CashMovementType
+  refId?: number
+  /** مثبت = ورود به صندوق، منفی = خروج */
+  amount: number
+  note?: string
+}
+
+export interface Reconciliation {
+  id?: number
+  date: number
+  expected: number
+  counted: number
+  difference: number
+  note?: string
+}
+
+export type AdjustReason = 'damaged' | 'lost' | 'correction' | 'returnDamaged'
+
+export interface Adjustment {
+  id?: number
+  date: number
+  variantId: number
+  productName: string
+  size: string
+  color: string
+  qtyChange: number
+  reason: AdjustReason
+  note?: string
+}
+
+export interface ReturnLine {
+  variantId: number
+  productName: string
+  size: string
+  color: string
+  qty: number
+  unitPrice: number
+  restock: boolean
+}
+
+export interface ReturnDoc {
+  id?: number
+  date: number
+  kind: 'customer' | 'supplier'
+  partyId?: number
+  partyName: string
+  refId?: number
+  lines: ReturnLine[]
+  reason: string
+  settlement: 'cashRefund' | 'reduceDebt' | 'none'
+  amount: number
+}
+
+export interface Setting {
+  key: string
+  value: unknown
+}
+
 export const db = new Dexie('shoeErp') as Dexie & {
   products: EntityTable<Product, 'id'>
   variants: EntityTable<Variant, 'id'>
@@ -94,6 +188,13 @@ export const db = new Dexie('shoeErp') as Dexie & {
   sales: EntityTable<Sale, 'id'>
   purchases: EntityTable<Purchase, 'id'>
   payments: EntityTable<Payment, 'id'>
+  expenseCategories: EntityTable<ExpenseCategory, 'id'>
+  expenses: EntityTable<Expense, 'id'>
+  cashMovements: EntityTable<CashMovement, 'id'>
+  reconciliations: EntityTable<Reconciliation, 'id'>
+  adjustments: EntityTable<Adjustment, 'id'>
+  returns: EntityTable<ReturnDoc, 'id'>
+  settings: Dexie.Table<Setting, string>
 }
 
 db.version(1).stores({
@@ -105,3 +206,51 @@ db.version(1).stores({
   purchases: '++id, date, supplierId',
   payments: '++id, date, [partyType+partyId]'
 })
+
+export const DEFAULT_EXPENSE_CATEGORIES = [
+  'کرایه',
+  'برق',
+  'انترنت',
+  'ترانسپورت',
+  'چای و خوراکه',
+  'خریطه و بسته‌بندی',
+  'ترمیم',
+  'متفرقه'
+]
+
+db.version(2)
+  .stores({
+    products: '++id, name, createdAt',
+    variants: '++id, productId, size',
+    customers: '++id, name',
+    suppliers: '++id, name',
+    sales: '++id, date, customerId',
+    purchases: '++id, date, supplierId',
+    payments: '++id, date, [partyType+partyId]',
+    expenseCategories: '++id, name',
+    expenses: '++id, date, categoryId, type',
+    cashMovements: '++id, date, type',
+    reconciliations: '++id, date',
+    adjustments: '++id, date, variantId',
+    returns: '++id, date, kind',
+    settings: 'key'
+  })
+  .upgrade(async (tx) => {
+    for (const name of DEFAULT_EXPENSE_CATEGORIES) {
+      await tx.table('expenseCategories').add({ name, isDefault: true })
+    }
+    const variants = await tx.table('variants').toArray()
+    for (const v of variants) {
+      if (!v.sku) await tx.table('variants').update(v.id, { sku: makeSku(v.id, v.size) })
+    }
+  })
+
+db.on('populate', async (tx) => {
+  for (const name of DEFAULT_EXPENSE_CATEGORIES) {
+    await tx.table('expenseCategories').add({ name, isDefault: true })
+  }
+})
+
+export function makeSku(id: number, size: string): string {
+  return `B${String(id).padStart(4, '0')}-${size.replace(/\s/g, '')}`
+}

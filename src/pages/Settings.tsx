@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { exportBackup, importBackup } from '../lib/ops'
 import { Card } from '../components/ui'
 
-export default function Settings() {
+export default function Settings({ onBack }: { onBack?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [msg, setMsg] = useState('')
 
@@ -30,7 +30,14 @@ export default function Settings() {
 
   return (
     <div className="p-4">
-      <h1 className="mb-3 text-xl font-bold text-slate-800">تنظیمات</h1>
+      <div className="mb-3 flex items-center gap-2">
+        {onBack && (
+          <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+            →
+          </button>
+        )}
+        <h1 className="text-xl font-bold text-slate-800">تنظیمات</h1>
+      </div>
 
       <Card>
         <p className="mb-1 font-bold text-slate-800">بکاپ اطلاعات</p>

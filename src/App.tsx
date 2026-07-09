@@ -4,6 +4,7 @@ import Sales from './pages/Sales'
 import Inventory from './pages/Inventory'
 import Purchases from './pages/Purchases'
 import Customers from './pages/Customers'
+import Expenses from './pages/Expenses'
 import Settings from './pages/Settings'
 
 const tabs = [
@@ -11,11 +12,11 @@ const tabs = [
   { id: 'sales', label: 'فروش', icon: '🧾' },
   { id: 'inventory', label: 'گدام', icon: '👞' },
   { id: 'purchases', label: 'خرید', icon: '📦' },
-  { id: 'customers', label: 'مشتریان', icon: '👥' },
-  { id: 'settings', label: 'تنظیمات', icon: '⚙️' }
+  { id: 'expenses', label: 'مصارف', icon: '💵' },
+  { id: 'customers', label: 'مشتریان', icon: '👥' }
 ] as const
 
-type TabId = (typeof tabs)[number]['id']
+type TabId = (typeof tabs)[number]['id'] | 'settings'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
@@ -26,8 +27,9 @@ export default function App() {
       {tab === 'sales' && <Sales />}
       {tab === 'inventory' && <Inventory />}
       {tab === 'purchases' && <Purchases />}
+      {tab === 'expenses' && <Expenses />}
       {tab === 'customers' && <Customers />}
-      {tab === 'settings' && <Settings />}
+      {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} />}
 
       <nav className="fixed bottom-0 right-0 left-0 z-40 mx-auto flex max-w-lg border-t border-slate-200 bg-white">
         {tabs.map((t) => (

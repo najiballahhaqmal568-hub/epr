@@ -27,3 +27,27 @@ export function parseNum(s: string): number {
   const n = parseFloat(toLatinDigits(s).replace(/[,،]/g, ''))
   return isNaN(n) ? 0 : n
 }
+
+export function startOfDay(ts = Date.now()): number {
+  return new Date(ts).setHours(0, 0, 0, 0)
+}
+
+export function startOfMonth(ts = Date.now()): number {
+  const d = new Date(ts)
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+}
+
+export function startOfYear(ts = Date.now()): number {
+  return new Date(new Date(ts).getFullYear(), 0, 1).getTime()
+}
+
+/** برای input[type=date] — تاریخ میلادی به YYYY-MM-DD */
+export function toDateInput(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function fromDateInput(s: string): number {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d, 12).getTime()
+}

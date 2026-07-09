@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../db'
 import { addPayment } from '../lib/ops'
-import { fmtMoney, fmtDate, parseNum } from '../lib/format'
+import { fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput, startOfDay } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
 export default function Customers() {
@@ -19,15 +19,23 @@ export default function Customers() {
       <input className={inputCls} placeholder="جستجو..." value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="mt-3">
         {filtered?.length === 0 && <Empty text="مشتری‌ای ثبت نشده." />}
-        {filtered?.map((c) => (
+        {filtered?.map((c) => {
+          const overdue = c.balance > 0 && c.promiseDate && c.promiseDate < startOfDay()
+          return (
           <Card key={c.id} onClick={() => setSelected(c)}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-bold text-slate-800">
+                  {c.flag === 'good' && '⭐ '}
+                  {c.flag === 'bad' && '⚠️ '}
                   {c.name}{' '}
                   <span className="text-xs font-normal text-slate-400">({c.type === 'retail' ? 'پرچون' : 'عمده'})</span>
                 </p>
                 {c.phone && <p className="text-sm text-slate-500" dir="ltr">{c.phone}</p>}
+                {overdue && <p className="text-xs font-bold text-red-600">وعده گذشته: {fmtDateShort(c.promiseDate!)}</p>}
+                {!overdue && c.balance > 0 && c.promiseDate && (
+                  <p className="text-xs text-slate-500">وعده: {fmtDateShort(c.promiseDate)}</p>
+                )}
               </div>
               <div className="text-left">
                 <p className={`font-bold ${c.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(c.balance))}</p>
@@ -35,7 +43,8 @@ export default function Customers() {
               </div>
             </div>
           </Card>
-        ))}
+          )
+        })}
       </div>
       <Fab onClick={() => setShowNew(true)} label="مشتری جدید" />
       {showNew && <CustomerModal customer={null} onClose={() => setShowNew(false)} />}
@@ -48,6 +57,8 @@ function CustomerModal({ customer, onClose }: { customer: Customer | null; onClo
   const [name, setName] = useState(customer?.name ?? '')
   const [phone, setPhone] = useState(customer?.phone ?? '')
   const [type, setType] = useState<'retail' | 'wholesale'>(customer?.type ?? 'retail')
+  const [flag, setFlag] = useState<'good' | 'bad' | ''>(customer?.flag ?? '')
+  const [promise, setPromise] = useState(customer?.promiseDate ? toDateInput(customer.promiseDate) : '')
 
   return (
     <Modal title={customer ? 'ویرایش مشتری' : 'مشتری جدید'} onClose={onClose}>
@@ -63,11 +74,30 @@ function CustomerModal({ customer, onClose }: { customer: Customer | null; onClo
           <option value="wholesale">عمده</option>
         </select>
       </Field>
+      <Field label="نشان مشتری">
+        <select className={inputCls} value={flag} onChange={(e) => setFlag(e.target.value as 'good' | 'bad' | '')}>
+          <option value="">عادی</option>
+          <option value="good">⭐ مشتری خوب</option>
+          <option value="bad">⚠️ قرض بد / احتیاط</option>
+        </select>
+      </Field>
+      {customer && customer.balance > 0 && (
+        <Field label="وعدهٔ پرداخت قرض">
+          <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
+        </Field>
+      )}
       <PrimaryBtn
         disabled={!name.trim()}
         onClick={async () => {
-          if (customer?.id) await db.customers.update(customer.id, { name: name.trim(), phone: phone.trim(), type })
-          else await db.customers.add({ name: name.trim(), phone: phone.trim(), type, balance: 0 })
+          const data = {
+            name: name.trim(),
+            phone: phone.trim(),
+            type,
+            flag: (flag || null) as 'good' | 'bad' | null,
+            promiseDate: promise ? fromDateInput(promise) : undefined
+          }
+          if (customer?.id) await db.customers.update(customer.id, data)
+          else await db.customers.add({ ...data, balance: 0 })
           onClose()
         }}
       >
