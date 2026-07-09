@@ -241,6 +241,9 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
           await db.table(table).update(existing.id, { ...rec, id: existing.id })
         } else {
           delete rec.id
+          // مقادیر مشتقی همیشه از اسناد بازسازی می‌شوند
+          if (table === 'variants') rec.stockQty = 0
+          if (table === 'customers' || table === 'suppliers') rec.balance = 0
           await db.table(table).add(rec)
         }
       } else {

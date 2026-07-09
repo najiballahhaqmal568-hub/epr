@@ -304,7 +304,7 @@ function ProductModal({
     const valid = forms.filter((f) => f.size.trim())
     if (!valid.length) return setError('حداقل یک سایز اضافه کنید')
     try {
-      await db.transaction('rw', db.products, db.variants, async () => {
+      await db.transaction('rw', db.products, db.variants, db.adjustments, async () => {
         let productId = product?.id
         const pData = { name: name.trim(), brand: brand.trim(), category: category.trim(), photo }
         if (productId) {
@@ -327,11 +327,27 @@ function ProductModal({
             stockQty: parseNum(f.stockQty),
             lowStock: parseNum(f.lowStock)
           }
+          // تغییر موجودی از فورم به شکل سند تعدیل ثبت می‌شود تا بین دستگاه‌ها درست همگام شود
+          const baselineDoc = (variantId: number, delta: number, note: string) =>
+            db.adjustments.add({
+              date: Date.now(),
+              variantId,
+              productName: name.trim(),
+              size: data.size,
+              color: data.color,
+              qtyChange: delta,
+              reason: 'correction',
+              note
+            })
           if (f.id) {
+            const prev = variants.find((v) => v.id === f.id)
             await db.variants.update(f.id, data)
+            const delta = data.stockQty - (prev?.stockQty ?? 0)
+            if (delta !== 0) await baselineDoc(f.id, delta, 'تصحیح از فورم بوت')
           } else {
             const vid = (await db.variants.add(data)) as number
             await db.variants.update(vid, { sku: makeSku(vid, data.size) })
+            if (data.stockQty !== 0) await baselineDoc(vid, data.stockQty, 'موجودی اولیه')
           }
         }
       })

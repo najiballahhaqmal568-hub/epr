@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { db } from '../db'
+import { db, newUuid } from '../db'
 
 let client: SupabaseClient | null = null
 let clientKey = ''
@@ -57,9 +57,11 @@ export async function registerOwner(email: string, password: string, name: strin
   if (error) throw error
   const userId = data.user?.id ?? (await supa.auth.getUser()).data.user?.id
   if (!userId) throw new Error('ثبت‌نام ناکام شد — شاید تأیید ایمیل فعال است؛ آن را در Supabase غیرفعال کنید')
-  const { data: shop, error: shopErr } = await supa.from('shops').insert({ name: shopName }).select().single()
+  // شناسهٔ دکان را خود کلاینت می‌سازد؛ خواندن ردیف تازه قبل از داشتن پروفایل توسط RLS بسته است
+  const shopId = newUuid()
+  const { error: shopErr } = await supa.from('shops').insert({ id: shopId, name: shopName })
   if (shopErr) throw shopErr
-  const { error: profErr } = await supa.from('profiles').insert({ user_id: userId, shop_id: shop.id, role: 'owner', name })
+  const { error: profErr } = await supa.from('profiles').insert({ user_id: userId, shop_id: shopId, role: 'owner', name })
   if (profErr) throw profErr
 }
 

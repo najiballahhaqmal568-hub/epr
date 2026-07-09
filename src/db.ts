@@ -326,6 +326,84 @@ db.version(3)
     }
   })
 
+/**
+ * نسخهٔ ۴: سند «موجودی/بیلانس اولیه» برای دادهٔ موجود.
+ * در همگام‌سازی، موجودی گدام و قرض‌ها فقط از روی اسناد بازسازی می‌شوند؛
+ * پس باید تفاوت وضعیت فعلی با مجموع اثر اسناد به شکل سند پایه ثبت شود.
+ */
+db.version(4).upgrade(async (tx) => {
+  const sales = (await tx.table('sales').toArray()).filter((s) => !s.deleted)
+  const purchases = await tx.table('purchases').toArray()
+  const adjustments = await tx.table('adjustments').toArray()
+  const returns = await tx.table('returns').toArray()
+  const payments = await tx.table('payments').toArray()
+
+  const stockEffect = new Map<number, number>()
+  const addFx = (id: number | undefined, d: number) => {
+    if (typeof id === 'number') stockEffect.set(id, (stockEffect.get(id) ?? 0) + d)
+  }
+  sales.forEach((s) => s.lines.forEach((l: { variantId: number; qty: number }) => addFx(l.variantId, -l.qty)))
+  purchases.forEach((p) => p.lines.forEach((l: { variantId: number; qty: number }) => addFx(l.variantId, l.qty)))
+  adjustments.forEach((a) => addFx(a.variantId, a.qtyChange))
+  returns.forEach((r) =>
+    r.lines.forEach((l: { variantId: number; qty: number; restock: boolean }) =>
+      addFx(l.variantId, r.kind === 'customer' ? (l.restock ? l.qty : 0) : -l.qty)
+    )
+  )
+
+  const variants = await tx.table('variants').toArray()
+  for (const v of variants) {
+    const baseline = (v.stockQty ?? 0) - (stockEffect.get(v.id) ?? 0)
+    if (baseline !== 0) {
+      await tx.table('adjustments').add({
+        date: 1,
+        variantId: v.id,
+        productName: '',
+        size: v.size,
+        color: v.color,
+        qtyChange: baseline,
+        reason: 'correction',
+        note: 'موجودی اولیه'
+      })
+    }
+  }
+
+  const balEffect = new Map<string, number>()
+  const addBal = (t: string, id: number | undefined, d: number) => {
+    if (typeof id === 'number') balEffect.set(`${t}:${id}`, (balEffect.get(`${t}:${id}`) ?? 0) + d)
+  }
+  sales.forEach((s) => {
+    const rem = s.total - s.paid
+    if (rem > 0) addBal('customer', s.customerId, rem)
+  })
+  purchases.forEach((p) => {
+    const rem = p.total - p.paid
+    if (rem > 0) addBal('supplier', p.supplierId, rem)
+  })
+  payments.forEach((p) => addBal(p.partyType, p.partyId, -p.amount))
+  returns.forEach((r) => {
+    if (r.settlement === 'reduceDebt') addBal(r.kind === 'customer' ? 'customer' : 'supplier', r.partyId, -r.amount)
+  })
+
+  for (const t of ['customers', 'suppliers'] as const) {
+    const rows = await tx.table(t).toArray()
+    const kind = t === 'customers' ? 'customer' : 'supplier'
+    for (const r of rows) {
+      const baseline = (r.balance ?? 0) - (balEffect.get(`${kind}:${r.id}`) ?? 0)
+      if (baseline !== 0) {
+        await tx.table('payments').add({
+          date: 1,
+          partyType: kind,
+          partyId: r.id,
+          partyName: r.name,
+          amount: -baseline,
+          note: 'بیلانس اولیه'
+        })
+      }
+    }
+  }
+})
+
 db.on('populate', async (tx) => {
   for (const name of DEFAULT_EXPENSE_CATEGORIES) {
     await tx.table('expenseCategories').add({ name, isDefault: true })

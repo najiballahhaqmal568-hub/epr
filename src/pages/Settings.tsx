@@ -130,7 +130,6 @@ function ServerCard() {
               await setServerConfig({ url, anonKey: key })
               setMsg('✅ ذخیره شد. حالا از صفحهٔ ورود، ثبت‌نام یا ورود کنید.')
               setExpanded(false)
-              setTimeout(() => window.location.reload(), 1200)
             }}
           >
             ذخیره و اتصال

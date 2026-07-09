@@ -164,8 +164,10 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
       <p className="mb-2 font-bold text-slate-700">تاریخچه</p>
       {payments?.map((p) => (
         <div key={`p${p.id}`} className="mb-2 flex justify-between rounded-lg bg-teal-50 p-2 text-sm">
-          <span>دریافت پول — {fmtDate(p.date)}</span>
-          <span className="font-bold text-teal-700">{fmtMoney(p.amount)}</span>
+          <span>
+            {p.note === 'بیلانس اولیه' ? 'بیلانس اولیه' : `دریافت پول — ${fmtDate(p.date)}`}
+          </span>
+          <span className="font-bold text-teal-700">{fmtMoney(p.note === 'بیلانس اولیه' ? -p.amount : p.amount)}</span>
         </div>
       ))}
       {sales?.map((s) => (

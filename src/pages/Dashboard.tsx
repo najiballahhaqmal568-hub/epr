@@ -12,6 +12,7 @@ function SyncChip() {
   return (
     <button
       onClick={() => void syncNow()}
+      aria-label="sync"
       title={s.message}
       className={`rounded-full px-2 py-1 text-xs font-bold ${
         s.state === 'ok' ? 'bg-teal-50 text-teal-700' : s.state === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'
