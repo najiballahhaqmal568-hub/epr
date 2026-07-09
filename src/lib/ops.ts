@@ -208,6 +208,46 @@ export async function addSupplierReturn(ret: ReturnDoc): Promise<number> {
   })
 }
 
+export interface StocktakeResult {
+  matched: number
+  fixed: number
+  valueDiff: number
+}
+
+/** شمارش فزیکی گدام: اختلاف هر جنس به شکل سند تصحیح ثبت می‌شود */
+export async function applyStocktake(entries: { variantId: number; counted: number }[]): Promise<StocktakeResult> {
+  const stamp = `شمارش گدام ${new Intl.DateTimeFormat('fa-AF', { dateStyle: 'short' }).format(Date.now())}`
+  return db.transaction('rw', db.variants, db.adjustments, db.products, async () => {
+    let matched = 0
+    let fixed = 0
+    let valueDiff = 0
+    for (const e of entries) {
+      const v = await db.variants.get(e.variantId)
+      if (!v || v.deleted) continue
+      const diff = e.counted - v.stockQty
+      if (diff === 0) {
+        matched++
+        continue
+      }
+      const p = await db.products.get(v.productId)
+      await db.variants.update(v.id!, { stockQty: e.counted })
+      await db.adjustments.add({
+        date: Date.now(),
+        variantId: v.id!,
+        productName: p?.name ?? '',
+        size: v.size,
+        color: v.color,
+        qtyChange: diff,
+        reason: 'correction',
+        note: stamp
+      })
+      fixed++
+      valueDiff += diff * v.purchasePrice
+    }
+    return { matched, fixed, valueDiff }
+  })
+}
+
 export async function cashBalance(): Promise<number> {
   const all = await db.cashMovements.toArray()
   return all.reduce((s, m) => s + m.amount, 0)
