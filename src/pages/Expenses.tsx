@@ -151,6 +151,7 @@ function CategoryManager({ onClose }: { onClose: () => void }) {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [newCat, setNewCat] = useState('')
+  const [confirmingId, setConfirmingId] = useState<number | null>(null)
 
   return (
     <Modal title="مدیریت کتگوری‌ها" onClose={onClose}>
@@ -195,16 +196,27 @@ function CategoryManager({ onClose }: { onClose: () => void }) {
               >
                 تغییر نام
               </button>
-              <button
-                className="text-sm text-red-500"
-                onClick={async () => {
-                  if (confirm(`کتگوری «${c.name}» حذف شود؟ مصارف قبلی با همین نام باقی می‌مانند.`)) {
+              {confirmingId === c.id ? (
+                <button
+                  className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-bold text-white"
+                  onClick={async () => {
                     await db.expenseCategories.delete(c.id!)
-                  }
-                }}
-              >
-                حذف
-              </button>
+                    setConfirmingId(null)
+                  }}
+                >
+                  تأیید حذف؟
+                </button>
+              ) : (
+                <button
+                  className="text-sm text-red-500"
+                  onClick={() => {
+                    setConfirmingId(c.id!)
+                    setTimeout(() => setConfirmingId((id) => (id === c.id ? null : id)), 4000)
+                  }}
+                >
+                  حذف
+                </button>
+              )}
             </>
           )}
         </div>
