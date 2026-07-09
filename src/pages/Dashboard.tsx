@@ -58,9 +58,14 @@ export default function Dashboard({ goTo }: { goTo: (tab: string) => void }) {
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-800">داشبورد</h1>
-        <button onClick={() => goTo('settings')} className="rounded-full bg-slate-100 px-3 py-1.5 text-lg" aria-label="تنظیمات">
-          ⚙️
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => goTo('reports')} className="rounded-full bg-teal-50 px-3 py-1.5 text-sm font-bold text-teal-800">
+            📊 راپورها
+          </button>
+          <button onClick={() => goTo('settings')} className="rounded-full bg-slate-100 px-3 py-1.5 text-lg" aria-label="تنظیمات">
+            ⚙️
+          </button>
+        </div>
       </div>
 
       <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white">

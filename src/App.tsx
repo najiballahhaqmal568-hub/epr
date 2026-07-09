@@ -1,4 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from './db'
+import { PinPad, hashPin } from './components/PinLock'
+import Reports from './pages/Reports'
 import Dashboard from './pages/Dashboard'
 import Sales from './pages/Sales'
 import Inventory from './pages/Inventory'
@@ -17,11 +21,41 @@ const tabs = [
   { id: 'customers', label: 'مشتریان', icon: '👥' }
 ] as const
 
-type TabId = (typeof tabs)[number]['id'] | 'settings'
+type TabId = (typeof tabs)[number]['id'] | 'settings' | 'reports'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
+  const [unlocked, setUnlocked] = useState(false)
+  const [pinError, setPinError] = useState('')
   const reminder = useExpenseReminder()
+
+  const pinHash = useLiveQuery(async () => {
+    const s = await db.settings.get('pinHash')
+    return (s?.value as string | undefined) ?? null
+  }, [])
+
+  // اگر هنگام باز شدن اپ قفلی نبود، فعال‌کردن قفل وسط کار نباید همان لحظه قفل کند
+  useEffect(() => {
+    if (pinHash === null) setUnlocked(true)
+  }, [pinHash])
+
+  if (pinHash === undefined) return null
+  if (pinHash && !unlocked) {
+    return (
+      <PinPad
+        title="کود قفل را وارد کنید"
+        error={pinError}
+        onSubmit={async (pin) => {
+          if ((await hashPin(pin)) === pinHash) {
+            setUnlocked(true)
+            setPinError('')
+          } else {
+            setPinError('کود اشتباه است')
+          }
+        }}
+      />
+    )
+  }
 
   return (
     <div className="mx-auto min-h-dvh max-w-lg pb-20">
@@ -51,6 +85,7 @@ export default function App() {
       {tab === 'expenses' && <Expenses />}
       {tab === 'customers' && <Customers />}
       {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} />}
+      {tab === 'reports' && <Reports onBack={() => setTab('dashboard')} />}
 
       <nav className="fixed bottom-0 right-0 left-0 z-40 mx-auto flex max-w-lg border-t border-slate-200 bg-white">
         {tabs.map((t) => (
