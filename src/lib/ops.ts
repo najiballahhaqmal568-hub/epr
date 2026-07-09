@@ -97,13 +97,20 @@ export async function addPayment(payment: Payment): Promise<number> {
   })
 }
 
-/** ثبت مصرف یا برداشت مالک: خروج نقد از صندوق */
+const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'personalExpense' | 'withdrawal'> = {
+  business: 'expense',
+  home: 'homeExpense',
+  personal: 'personalExpense',
+  withdrawal: 'withdrawal'
+}
+
+/** ثبت مصرف (تجارت/خانه/شخصی) یا برداشت مالک: خروج نقد از صندوق */
 export async function addExpense(expense: Expense): Promise<number> {
   return db.transaction('rw', db.expenses, db.cashMovements, async () => {
     const id = (await db.expenses.add(expense)) as number
     await movement({
       date: expense.date,
-      type: expense.type === 'withdrawal' ? 'withdrawal' : 'expense',
+      type: EXPENSE_MOVE[expense.type],
       refId: id,
       amount: -expense.amount,
       note: expense.categoryName
@@ -118,12 +125,20 @@ export async function deleteExpense(expenseId: number): Promise<void> {
     if (!e) return
     await movement({
       date: Date.now(),
-      type: e.type === 'withdrawal' ? 'withdrawal' : 'expense',
+      type: EXPENSE_MOVE[e.type],
       refId: expenseId,
       amount: e.amount,
       note: `حذف: ${e.categoryName}`
     })
     await db.expenses.delete(expenseId)
+  })
+}
+
+/** تغییر نام کتگوری در لیست و در سوابق مصارف */
+export async function renameCategory(categoryId: number, newName: string): Promise<void> {
+  return db.transaction('rw', db.expenseCategories, db.expenses, async () => {
+    await db.expenseCategories.update(categoryId, { name: newName })
+    await db.expenses.where('categoryId').equals(categoryId).modify({ categoryName: newName })
   })
 }
 

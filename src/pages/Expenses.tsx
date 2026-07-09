@@ -1,19 +1,35 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Expense, type CashMovementType } from '../db'
-import { addExpense, deleteExpense, reconcile } from '../lib/ops'
+import { db, type ExpenseType, type Expense, type CashMovementType } from '../db'
+import { addExpense, deleteExpense, renameCategory, reconcile } from '../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
 const MOVE_LABELS: Record<CashMovementType, string> = {
   sale: 'فروش',
   purchase: 'خرید',
-  expense: 'مصرف',
+  expense: 'مصرف تجارت',
+  homeExpense: 'مصرف خانه',
+  personalExpense: 'مصرف شخصی',
   withdrawal: 'برداشت مالک',
   customerPayment: 'دریافت از مشتری',
   supplierPayment: 'پرداخت به تأمین‌کننده',
   refund: 'مرجوعی',
   openingSet: 'تصفیه صندوق'
+}
+
+export const TYPE_LABELS: Record<ExpenseType, string> = {
+  business: 'تجارت',
+  home: 'خانه',
+  personal: 'شخصی',
+  withdrawal: 'برداشت مالک'
+}
+
+const TYPE_COLORS: Record<ExpenseType, string> = {
+  business: 'text-red-600',
+  home: 'text-amber-600',
+  personal: 'text-purple-600',
+  withdrawal: 'text-amber-700'
 }
 
 export default function Expenses() {
@@ -36,38 +52,53 @@ export default function Expenses() {
 
 function ExpenseList() {
   const [showNew, setShowNew] = useState(false)
-  const [filterCat, setFilterCat] = useState<number | 'all' | 'withdrawal'>('all')
+  const [showCats, setShowCats] = useState(false)
+  const [filter, setFilter] = useState<number | 'all' | ExpenseType>('all')
   const monthStart = startOfMonth()
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').toArray(), [])
   const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().limit(300).toArray(), [])
 
-  const filtered = expenses?.filter((e) =>
-    filterCat === 'all' ? true : filterCat === 'withdrawal' ? e.type === 'withdrawal' : e.categoryId === filterCat
-  )
-  const monthTotal = expenses?.filter((e) => e.date >= monthStart && e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
-  const monthWithdrawals = expenses?.filter((e) => e.date >= monthStart && e.type === 'withdrawal').reduce((s, e) => s + e.amount, 0) ?? 0
+  const filtered = expenses?.filter((e) => {
+    if (filter === 'all') return true
+    if (typeof filter === 'number') return e.categoryId === filter
+    return e.type === filter
+  })
+
+  const monthOf = (t: ExpenseType) =>
+    expenses?.filter((e) => e.date >= monthStart && e.type === t).reduce((s, e) => s + e.amount, 0) ?? 0
+  const monthBusiness = monthOf('business')
+  const monthNonBusiness = monthOf('home') + monthOf('personal') + monthOf('withdrawal')
 
   return (
     <>
       <div className="mb-3 grid grid-cols-2 gap-2">
         <div className="rounded-xl bg-white p-3 shadow-sm">
-          <p className="text-sm text-slate-500">مصارف این ماه</p>
-          <p className="text-lg font-bold text-red-600">{fmtMoney(monthTotal)}</p>
+          <p className="text-sm text-slate-500">مصارف تجارت این ماه</p>
+          <p className="text-lg font-bold text-red-600">{fmtMoney(monthBusiness)}</p>
+          <p className="text-xs text-slate-400">از مفاد کم می‌شود</p>
         </div>
         <div className="rounded-xl bg-white p-3 shadow-sm">
-          <p className="text-sm text-slate-500">برداشت مالک این ماه</p>
-          <p className="text-lg font-bold text-amber-600">{fmtMoney(monthWithdrawals)}</p>
+          <p className="text-sm text-slate-500">خانه، شخصی و برداشت</p>
+          <p className="text-lg font-bold text-amber-600">{fmtMoney(monthNonBusiness)}</p>
+          <p className="text-xs text-slate-400">خانه {fmtMoney(monthOf('home'))} · شخصی {fmtMoney(monthOf('personal'))}</p>
         </div>
       </div>
 
       <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
-        <FilterChip active={filterCat === 'all'} onClick={() => setFilterCat('all')} label="همه" />
-        <FilterChip active={filterCat === 'withdrawal'} onClick={() => setFilterCat('withdrawal')} label="برداشت مالک" />
+        <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="همه" />
+        <FilterChip active={filter === 'business'} onClick={() => setFilter('business')} label="تجارت" />
+        <FilterChip active={filter === 'home'} onClick={() => setFilter('home')} label="خانه" />
+        <FilterChip active={filter === 'personal'} onClick={() => setFilter('personal')} label="شخصی" />
+        <FilterChip active={filter === 'withdrawal'} onClick={() => setFilter('withdrawal')} label="برداشت" />
         {categories?.map((c) => (
-          <FilterChip key={c.id} active={filterCat === c.id} onClick={() => setFilterCat(c.id!)} label={c.name} />
+          <FilterChip key={c.id} active={filter === c.id} onClick={() => setFilter(c.id!)} label={c.name} />
         ))}
       </div>
+
+      <button onClick={() => setShowCats(true)} className="mb-3 text-sm font-bold text-teal-700">
+        ⚙ مدیریت کتگوری‌ها
+      </button>
 
       {filtered?.length === 0 && <Empty text="مصرفی ثبت نشده." />}
       {filtered?.map((e) => (
@@ -76,12 +107,15 @@ function ExpenseList() {
             <div>
               <p className="font-bold text-slate-800">
                 {e.type === 'withdrawal' ? 'برداشت مالک' : e.categoryName}
-                {e.note && <span className="mr-1 text-sm font-normal text-slate-500">— {e.note}</span>}
+                <span className={`mr-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal ${TYPE_COLORS[e.type]}`}>
+                  {TYPE_LABELS[e.type]}
+                </span>
               </p>
+              {e.note && <p className="text-sm text-slate-500">{e.note}</p>}
               <p className="text-xs text-slate-500">{fmtDate(e.date)}</p>
             </div>
             <div className="text-left">
-              <p className={`font-bold ${e.type === 'withdrawal' ? 'text-amber-600' : 'text-red-600'}`}>{fmtMoney(e.amount)}</p>
+              <p className={`font-bold ${TYPE_COLORS[e.type]}`}>{fmtMoney(e.amount)}</p>
               <button
                 className="text-xs text-red-400"
                 onClick={async () => {
@@ -96,6 +130,7 @@ function ExpenseList() {
       ))}
       <Fab onClick={() => setShowNew(true)} label="مصرف جدید" />
       {showNew && <NewExpenseModal onClose={() => setShowNew(false)} />}
+      {showCats && <CategoryManager onClose={() => setShowCats(false)} />}
     </>
   )
 }
@@ -111,8 +146,75 @@ function FilterChip({ active, onClick, label }: { active: boolean; onClick: () =
   )
 }
 
+function CategoryManager({ onClose }: { onClose: () => void }) {
+  const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').toArray(), [])
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
+  const [newCat, setNewCat] = useState('')
+
+  return (
+    <Modal title="مدیریت کتگوری‌ها" onClose={onClose}>
+      <div className="mb-4 flex gap-2">
+        <input className={inputCls} value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="کتگوری جدید..." />
+        <button
+          className="whitespace-nowrap rounded-xl bg-teal-700 px-4 font-bold text-white disabled:opacity-40"
+          disabled={!newCat.trim()}
+          onClick={async () => {
+            await db.expenseCategories.add({ name: newCat.trim() })
+            setNewCat('')
+          }}
+        >
+          افزودن
+        </button>
+      </div>
+
+      {categories?.map((c) => (
+        <div key={c.id} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2">
+          {editingId === c.id ? (
+            <>
+              <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <button
+                className="whitespace-nowrap rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-bold text-white"
+                onClick={async () => {
+                  if (editName.trim()) await renameCategory(c.id!, editName.trim())
+                  setEditingId(null)
+                }}
+              >
+                ذخیره
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="flex-1 font-bold text-slate-700">{c.name}</span>
+              <button
+                className="text-sm text-teal-700"
+                onClick={() => {
+                  setEditingId(c.id!)
+                  setEditName(c.name)
+                }}
+              >
+                تغییر نام
+              </button>
+              <button
+                className="text-sm text-red-500"
+                onClick={async () => {
+                  if (confirm(`کتگوری «${c.name}» حذف شود؟ مصارف قبلی با همین نام باقی می‌مانند.`)) {
+                    await db.expenseCategories.delete(c.id!)
+                  }
+                }}
+              >
+                حذف
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+    </Modal>
+  )
+}
+
 function NewExpenseModal({ onClose }: { onClose: () => void }) {
-  const [type, setType] = useState<'business' | 'withdrawal'>('business')
+  const [type, setType] = useState<ExpenseType>('business')
   const [categoryId, setCategoryId] = useState<number | ''>('')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
@@ -127,7 +229,7 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
     if (amt <= 0) return setError('مبلغ را وارد کنید')
     let catId = categoryId as number | undefined
     let catName = 'برداشت مالک'
-    if (type === 'business') {
+    if (type !== 'withdrawal') {
       if (!categoryId) return setError('کتگوری را انتخاب کنید')
       catName = categories?.find((c) => c.id === categoryId)?.name ?? ''
     } else {
@@ -140,16 +242,22 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="ثبت مصرف" onClose={onClose}>
-      <div className="mb-3 flex gap-2">
-        <button onClick={() => setType('business')} className={`flex-1 rounded-xl py-2 font-bold ${type === 'business' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}>
-          مصرف تجارت
-        </button>
-        <button onClick={() => setType('withdrawal')} className={`flex-1 rounded-xl py-2 font-bold ${type === 'withdrawal' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-          برداشت مالک
-        </button>
+      <div className="mb-1 grid grid-cols-4 gap-1">
+        {(Object.keys(TYPE_LABELS) as ExpenseType[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setType(t)}
+            className={`rounded-xl py-2 text-sm font-bold ${type === t ? (t === 'business' ? 'bg-teal-700 text-white' : 'bg-amber-600 text-white') : 'bg-slate-100 text-slate-600'}`}
+          >
+            {TYPE_LABELS[t]}
+          </button>
+        ))}
       </div>
+      <p className="mb-3 text-xs text-slate-400">
+        {type === 'business' ? 'از مفاد تجارت کم می‌شود.' : 'از صندوق کم می‌شود اما در مفاد تجارت حساب نمی‌شود.'}
+      </p>
 
-      {type === 'business' && (
+      {type !== 'withdrawal' && (
         <>
           <Field label="کتگوری *">
             <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : '')}>

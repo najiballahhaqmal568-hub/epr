@@ -6,6 +6,7 @@ import Purchases from './pages/Purchases'
 import Customers from './pages/Customers'
 import Expenses from './pages/Expenses'
 import Settings from './pages/Settings'
+import { useExpenseReminder } from './lib/useExpenseReminder'
 
 const tabs = [
   { id: 'dashboard', label: 'داشبورد', icon: '🏠' },
@@ -20,9 +21,29 @@ type TabId = (typeof tabs)[number]['id'] | 'settings'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
+  const reminder = useExpenseReminder()
 
   return (
     <div className="mx-auto min-h-dvh max-w-lg pb-20">
+      {reminder.show && (
+        <div className="fixed right-0 left-0 bottom-16 z-50 mx-auto max-w-lg px-3">
+          <div className="flex items-center gap-2 rounded-xl bg-amber-500 p-3 text-white shadow-lg">
+            <span className="flex-1 text-sm font-bold">💵 مصارف امروز را ثبت نکرده‌اید!</span>
+            <button
+              className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
+              onClick={() => {
+                setTab('expenses')
+                reminder.dismissToday()
+              }}
+            >
+              ثبت مصرف
+            </button>
+            <button className="px-1" onClick={() => reminder.dismissToday()}>
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {tab === 'dashboard' && <Dashboard goTo={(t) => setTab(t as TabId)} />}
       {tab === 'sales' && <Sales />}
       {tab === 'inventory' && <Inventory />}

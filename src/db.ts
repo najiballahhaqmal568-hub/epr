@@ -99,6 +99,8 @@ export interface ExpenseCategory {
   isDefault?: boolean
 }
 
+export type ExpenseType = 'business' | 'home' | 'personal' | 'withdrawal'
+
 export interface Expense {
   id?: number
   date: number
@@ -106,13 +108,15 @@ export interface Expense {
   categoryName: string
   amount: number
   note?: string
-  type: 'business' | 'withdrawal'
+  type: ExpenseType
 }
 
 export type CashMovementType =
   | 'sale'
   | 'purchase'
   | 'expense'
+  | 'homeExpense'
+  | 'personalExpense'
   | 'withdrawal'
   | 'customerPayment'
   | 'supplierPayment'
