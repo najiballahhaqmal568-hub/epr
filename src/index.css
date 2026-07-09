@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+html {
+  font-family: 'Vazirmatn', system-ui, sans-serif;
+}
+
+body {
+  background-color: #f1f5f9;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type='number'] {
+  direction: ltr;
+  text-align: right;
+}
