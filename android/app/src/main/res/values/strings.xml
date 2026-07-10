@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">بوت فروشی</string>
-    <string name="title_activity_main">بوت فروشی</string>
+    <string name="app_name">فروشگاه اتال</string>
+    <string name="title_activity_main">فروشگاه اتال</string>
     <string name="package_name">com.shoeerp.app</string>
     <string name="custom_url_scheme">com.shoeerp.app</string>
 </resources>

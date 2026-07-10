@@ -92,7 +92,7 @@ export default function Settings({
 
       {msg && <p className="mt-3 rounded-xl bg-white p-3 text-sm">{msg}</p>}
 
-      <p className="mt-6 text-center text-xs text-slate-400">سیستم مدیریت بوت فروشی — نسخه ۱.۰</p>
+      <p className="mt-6 text-center text-xs text-slate-400">فروشگاه اتال — سیستم مدیریت</p>
     </div>
   )
 }
