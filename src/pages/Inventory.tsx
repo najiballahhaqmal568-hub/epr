@@ -309,7 +309,7 @@ function AdjustModal({ variant, product, onClose }: { variant: Variant; product:
   const live = useLiveQuery(() => db.variants.get(variant.id!), [variant.id])
   const v = live ?? variant
 
-  const history = useLiveQuery(() => db.adjustments.where('variantId').equals(variant.id!).reverse().sortBy('date'), [variant.id])
+  const history = useLiveQuery(() => db.adjustments.where('variantId').equals(variant.id!).filter((a) => !a.deleted).reverse().sortBy('date'), [variant.id])
 
   const reasons: { id: AdjustReason; label: string; sign: -1 | 1 | 0 }[] = [
     { id: 'damaged', label: 'داغمه (کم شود)', sign: -1 },

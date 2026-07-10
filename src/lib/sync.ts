@@ -42,6 +42,7 @@ const listeners = new Set<() => void>()
 
 function setStatus(patch: Partial<SyncStatus>) {
   status = { ...status, ...patch }
+  if (typeof window !== 'undefined') (window as unknown as Record<string, unknown>).__syncStatus = status
   listeners.forEach((l) => l())
 }
 

@@ -109,6 +109,7 @@ export default function App() {
     return (
       <Login
         onDone={async () => {
+          setTab('dashboard')
           const profile = await getProfile().catch(() => null)
           if (profile) await db.settings.put({ key: 'cachedProfile', value: profile })
           setAuth(profile ?? 'anon')

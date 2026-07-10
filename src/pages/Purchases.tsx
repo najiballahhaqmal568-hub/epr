@@ -12,8 +12,8 @@ export default function Purchases() {
   const [payingSupplier, setPayingSupplier] = useState<number | null>(null)
   const [returningTo, setReturningTo] = useState<Supplier | null>(null)
 
-  const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().limit(100).toArray(), [])
-  const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').toArray(), [])
+  const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
+  const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
 
   return (
     <div className="p-4">
@@ -286,7 +286,7 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
 
-  const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').toArray(), [])
+  const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
 

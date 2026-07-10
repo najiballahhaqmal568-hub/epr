@@ -10,7 +10,7 @@ export default function Customers() {
   const [selected, setSelected] = useState<Customer | null>(null)
   const [search, setSearch] = useState('')
 
-  const customers = useLiveQuery(() => db.customers.orderBy('name').toArray(), [])
+  const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const filtered = customers?.filter((c) => !search || c.name.includes(search) || (c.phone ?? '').includes(search))
 
   return (
@@ -115,7 +115,7 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
   const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
   const payments = useLiveQuery(
-    () => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).reverse().sortBy('date'),
+    () => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).filter((p) => !p.deleted).reverse().sortBy('date'),
     [customer.id]
   )
 

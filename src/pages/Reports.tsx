@@ -43,13 +43,13 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const now = Date.now()
 
   const sales = useLiveQuery(() => db.sales.where('date').between(from, to, true, true).filter((s) => !s.deleted).toArray(), [from, to])
-  const purchases = useLiveQuery(() => db.purchases.where('date').between(from, to, true, true).toArray(), [from, to])
+  const purchases = useLiveQuery(() => db.purchases.where('date').between(from, to, true, true).filter((p) => !p.deleted).toArray(), [from, to])
   const expenses = useLiveQuery(() => db.expenses.where('date').between(from, to, true, true).filter((e) => !e.deleted).toArray(), [from, to])
-  const payments = useLiveQuery(() => db.payments.where('date').between(from, to, true, true).toArray(), [from, to])
-  const returns = useLiveQuery(() => db.returns.where('date').between(from, to, true, true).toArray(), [from, to])
+  const payments = useLiveQuery(() => db.payments.where('date').between(from, to, true, true).filter((p) => !p.deleted).toArray(), [from, to])
+  const returns = useLiveQuery(() => db.returns.where('date').between(from, to, true, true).filter((r) => !r.deleted).toArray(), [from, to])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
-  const customers = useLiveQuery(() => db.customers.toArray(), [])
+  const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
   const allSales = useLiveQuery(() => db.sales.filter((s) => !s.deleted).toArray(), [])
 
   const variantMap = new Map<number, Variant>()

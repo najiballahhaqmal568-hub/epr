@@ -32,9 +32,9 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const expenses = useLiveQuery(() => db.expenses.where('date').aboveOrEqual(yearStart).filter((e) => !e.deleted).toArray(), [yearStart])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
-  const customers = useLiveQuery(() => db.customers.toArray(), [])
-  const suppliers = useLiveQuery(() => db.suppliers.toArray(), [])
-  const movements = useLiveQuery(() => db.cashMovements.toArray(), [])
+  const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
+  const suppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
+  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))

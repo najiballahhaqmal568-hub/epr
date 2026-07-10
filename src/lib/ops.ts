@@ -249,14 +249,14 @@ export async function applyStocktake(entries: { variantId: number; counted: numb
 }
 
 export async function cashBalance(): Promise<number> {
-  const all = await db.cashMovements.toArray()
+  const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
   return all.reduce((s, m) => s + m.amount, 0)
 }
 
 /** تصفیه صندوق: مقایسهٔ شمارش با موجودی مورد انتظار */
 export async function reconcile(counted: number, note?: string): Promise<number> {
   return db.transaction('rw', db.cashMovements, db.reconciliations, async () => {
-    const all = await db.cashMovements.toArray()
+    const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
     const expected = all.reduce((s, m) => s + m.amount, 0)
     const difference = counted - expected
     if (difference !== 0) {
@@ -309,4 +309,32 @@ export async function importBackup(json: string): Promise<void> {
       if (!v.sku) await db.variants.update(v.id!, { sku: makeSku(v.id!, v.size) })
     }
   })
+}
+
+/** ریست کامل: همهٔ اسناد و اجناس در همه‌جا حذف (نرم) می‌شوند و به دستگاه‌های دیگر هم می‌رسد */
+export async function resetAllData(): Promise<void> {
+  const { SYNC_TABLES, DEFAULT_EXPENSE_CATEGORIES } = await import('../db')
+  await db.transaction('rw', [...SYNC_TABLES.map((t) => db.table(t))], async () => {
+    for (const t of SYNC_TABLES) {
+      await db.table(t).filter((r) => !r.deleted).modify({ deleted: true })
+    }
+    for (const name of DEFAULT_EXPENSE_CATEGORIES) {
+      await db.expenseCategories.add({ name, isDefault: true })
+    }
+  })
+  await db.syncState.delete('expenseReminderDismissed')
+}
+
+const KEEP_SETTINGS = ['supaUrl', 'supaKey', 'pinHash', 'cachedProfile', 'expenseReminderOn', 'expenseReminderHour']
+
+/** ریست این دستگاه: دیتابیس محلی پاک می‌شود؛ اطلاعات با همگام‌سازی از سرور برمی‌گردد */
+export async function resetLocalDevice(): Promise<void> {
+  const kept: { key: string; value: unknown }[] = []
+  for (const k of KEEP_SETTINGS) {
+    const s = await db.settings.get(k)
+    if (s) kept.push(s)
+  }
+  localStorage.setItem('restoreSettings', JSON.stringify(kept))
+  await db.delete()
+  window.location.reload()
 }

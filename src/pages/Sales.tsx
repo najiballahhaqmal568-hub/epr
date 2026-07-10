@@ -166,7 +166,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
 
-  const customers = useLiveQuery(() => db.customers.orderBy('name').toArray(), [])
+  const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
 

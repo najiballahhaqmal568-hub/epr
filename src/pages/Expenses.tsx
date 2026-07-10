@@ -324,8 +324,8 @@ function CashView() {
   const [result, setResult] = useState<string>('')
   const dayStart = startOfDay()
 
-  const movements = useLiveQuery(() => db.cashMovements.toArray(), [])
-  const reconciliations = useLiveQuery(() => db.reconciliations.orderBy('date').reverse().limit(10).toArray(), [])
+  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
+  const reconciliations = useLiveQuery(() => db.reconciliations.orderBy('date').reverse().filter((r) => !r.deleted).limit(10).toArray(), [])
 
   const balance = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
   const today = movements?.filter((m) => m.date >= dayStart).sort((a, b) => b.date - a.date) ?? []
