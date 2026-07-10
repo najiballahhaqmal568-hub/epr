@@ -2,3 +2,9 @@ node_modules
 dist
 dev-dist
 *.log
+
+# Android build outputs
+android/build/
+android/app/build/
+android/.gradle/
+shoe-erp.apk
