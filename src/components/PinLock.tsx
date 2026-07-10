@@ -22,7 +22,7 @@ export function PinPad({ title, onSubmit, error }: { title: string; onSubmit: (p
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-teal-800 p-6 text-white">
-      <img src="./icon-192.png" alt="اتال" className="mb-3 h-20 w-20 rounded-2xl" />
+      <img src="./icon-192.png" alt="اتل" className="mb-3 h-20 w-20 rounded-2xl" />
       <p className="mb-6 text-lg font-bold">{title}</p>
       <div className="mb-6 flex gap-3">
         {[0, 1, 2, 3].map((i) => (

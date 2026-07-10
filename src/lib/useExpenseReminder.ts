@@ -32,7 +32,7 @@ export function useExpenseReminder() {
       if (!sessionStorage.getItem(key)) {
         sessionStorage.setItem(key, '1')
         try {
-          new Notification('فروشگاه اتال', { body: 'مصارف امروز را ثبت نکرده‌اید. فراموش نشود!' })
+          new Notification('فروشگاه اتل', { body: 'مصارف امروز را ثبت نکرده‌اید. فراموش نشود!' })
         } catch {
           /* بعضی مرورگرها در PWA اجازه نمی‌دهند — بنر داخل اپ کافی است */
         }

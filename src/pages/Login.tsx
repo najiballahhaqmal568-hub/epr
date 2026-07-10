@@ -27,7 +27,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center p-6">
-      <img src="./icon-192.png" alt="اتال" className="mx-auto mb-3 h-24 w-24 rounded-3xl" />
+      <img src="./icon-192.png" alt="اتل" className="mx-auto mb-3 h-24 w-24 rounded-3xl" />
       <h1 className="mb-6 text-center text-xl font-bold text-slate-800">
         {mode === 'login' ? 'ورود به حساب' : 'ثبت‌نام مالک دکان'}
       </h1>

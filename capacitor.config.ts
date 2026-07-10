@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.shoeerp.app',
-  appName: 'فروشگاه اتال',
+  appName: 'فروشگاه اتل',
   webDir: 'dist'
 };
 

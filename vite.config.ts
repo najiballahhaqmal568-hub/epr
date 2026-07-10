@@ -12,9 +12,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['fonts/*.woff2'],
       manifest: {
-        name: 'فروشگاه اتال',
-        short_name: 'اتال',
-        description: 'فروشگاه اتال — سیستم مدیریت گدام، فروش و مشتریان',
+        name: 'فروشگاه اتل',
+        short_name: 'اتل',
+        description: 'فروشگاه اتل — سیستم مدیریت گدام، فروش و مشتریان',
         dir: 'rtl',
         lang: 'fa',
         theme_color: '#0f766e',
