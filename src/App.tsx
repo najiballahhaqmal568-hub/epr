@@ -48,17 +48,44 @@ export default function App() {
         setAuth('none')
         return
       }
-      const supa = await getSupa()
-      const { data } = await supa!.auth.getSession()
-      if (cancelled) return
-      if (!data.session) {
-        setAuth('anon')
-        return
+      // پروفایل ذخیره‌شده: در حالت آفلاین اپ باید بدون انترنت باز شود
+      const cached = ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null
+      try {
+        const supa = await getSupa()
+        const { data } = await supa!.auth.getSession()
+        if (cancelled) return
+        if (!data.session) {
+          // سشن یافت نشد: اگر قبلاً وارد شده بودیم و حالا آفلاین هستیم، با پروفایل ذخیره‌شده ادامه بده
+          if (cached && !navigator.onLine) {
+            setAuth(cached)
+            startSync()
+            return
+          }
+          setAuth('anon')
+          return
+        }
+        const profile = await getProfile().catch(() => null)
+        if (cancelled) return
+        if (profile) {
+          await db.settings.put({ key: 'cachedProfile', value: profile })
+          setAuth(profile)
+          startSync()
+        } else if (cached) {
+          setAuth(cached)
+          startSync()
+        } else {
+          setAuth('anon')
+        }
+      } catch {
+        // خطای شبکه (آفلاین): با پروفایل ذخیره‌شده ادامه بده
+        if (cancelled) return
+        if (cached) {
+          setAuth(cached)
+          startSync()
+        } else {
+          setAuth('anon')
+        }
       }
-      const profile = await getProfile()
-      if (cancelled) return
-      setAuth(profile ?? 'anon')
-      if (profile) startSync()
     }
     void check()
     return () => {
@@ -82,7 +109,8 @@ export default function App() {
     return (
       <Login
         onDone={async () => {
-          const profile = await getProfile()
+          const profile = await getProfile().catch(() => null)
+          if (profile) await db.settings.put({ key: 'cachedProfile', value: profile })
           setAuth(profile ?? 'anon')
           if (profile) {
             startSync()
