@@ -60,7 +60,10 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const pairsSold = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
   const grossProfit =
     sales?.reduce(
-      (sum, sale) => sum + sale.lines.reduce((s, l) => s + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0),
+      (sum, sale) =>
+        sum +
+        sale.lines.reduce((s, l) => s + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0) -
+        (sale.discount ?? 0),
       0
     ) ?? 0
   const purchasesTotal = purchases?.reduce((s, x) => s + x.total, 0) ?? 0

@@ -42,7 +42,9 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const grossProfit = (list: Sale[]) =>
     list.reduce(
       (sum, sale) =>
-        sum + sale.lines.reduce((s, l) => s + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0),
+        sum +
+        sale.lines.reduce((s, l) => s + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0) -
+        (sale.discount ?? 0),
       0
     )
 

@@ -49,6 +49,8 @@ export interface Supplier extends Synced {
   phone?: string
   /** مثبت = ما به تأمین‌کننده قرضدار هستیم */
   balance: number
+  /** 'sarraf' = صراف (حواله‌دار) */
+  kind?: 'supplier' | 'sarraf'
 }
 
 export interface SaleLine {
@@ -69,6 +71,7 @@ export interface Sale extends Synced {
   lines: SaleLine[]
   total: number
   paid: number
+  discount?: number
   promiseDate?: number
 }
 
@@ -89,6 +92,12 @@ export interface Purchase extends Synced {
   lines: PurchaseLine[]
   total: number
   paid: number
+  /** false = جنس هنوز نرسیده (در راه)؛ undefined/true = تحویل گدام شده */
+  received?: boolean
+  /** پرداخت از طریق صراف (حواله) */
+  sarrafId?: number
+  sarrafName?: string
+  sarrafAmount?: number
 }
 
 export interface Payment extends Synced {
@@ -99,6 +108,10 @@ export interface Payment extends Synced {
   partyName: string
   amount: number
   note?: string
+  /** پرداخت از صندوق یا از طریق صراف */
+  via?: 'cash' | 'sarraf'
+  sarrafId?: number
+  sarrafName?: string
 }
 
 export interface ExpenseCategory extends Synced {

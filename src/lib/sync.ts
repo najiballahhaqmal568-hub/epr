@@ -97,13 +97,17 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
   }
   if (table === 'variants') await enc('productId', 'products', 'productUuid')
   if (table === 'sales') await enc('customerId', 'customers', 'customerUuid')
-  if (table === 'purchases') await enc('supplierId', 'suppliers', 'supplierUuid')
+  if (table === 'purchases') {
+    await enc('supplierId', 'suppliers', 'supplierUuid')
+    await enc('sarrafId', 'suppliers', 'sarrafUuid')
+  }
   if (table === 'expenses') await enc('categoryId', 'expenseCategories', 'categoryUuid')
   if (table === 'adjustments') await enc('variantId', 'variants', 'variantUuid')
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string
     await enc('partyId', kind === 'customer' ? 'customers' : 'suppliers', 'partyUuid')
   }
+  if (table === 'payments') await enc('sarrafId', 'suppliers', 'sarrafUuid')
   if ('lines' in out && Array.isArray(out.lines)) {
     const vmap = await idMap('variants')
     out.lines = (out.lines as Array<Record<string, unknown>>).map((l) => ({
@@ -126,13 +130,17 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
   }
   if (table === 'variants') await dec('productUuid', 'products', 'productId')
   if (table === 'sales') await dec('customerUuid', 'customers', 'customerId')
-  if (table === 'purchases') await dec('supplierUuid', 'suppliers', 'supplierId')
+  if (table === 'purchases') {
+    await dec('supplierUuid', 'suppliers', 'supplierId')
+    await dec('sarrafUuid', 'suppliers', 'sarrafId')
+  }
   if (table === 'expenses') await dec('categoryUuid', 'expenseCategories', 'categoryId')
   if (table === 'adjustments') await dec('variantUuid', 'variants', 'variantId')
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string
     await dec('partyUuid', kind === 'customer' ? 'customers' : 'suppliers', 'partyId')
   }
+  if (table === 'payments') await dec('sarrafUuid', 'suppliers', 'sarrafId')
   if ('lines' in out && Array.isArray(out.lines)) {
     const vmap = await uuidMap('variants')
     out.lines = (out.lines as Array<Record<string, unknown>>).map((l) => {
@@ -160,12 +168,18 @@ async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, r
     if (remainder > 0) await bump('customers', s.customerId, 'balance', remainder * sign)
   } else if (table === 'purchases') {
     const p = rec as unknown as Purchase
-    for (const l of p.lines) await bump('variants', l.variantId, 'stockQty', l.qty * sign)
-    const remainder = p.total - p.paid
+    // جنس «در راه» موجودی ندارد؛ رسیدش بعداً به شکل سند تعدیل می‌آید
+    if (p.received !== false) {
+      for (const l of p.lines) await bump('variants', l.variantId, 'stockQty', l.qty * sign)
+    }
+    const hawala = p.sarrafAmount ?? 0
+    const remainder = p.total - p.paid - hawala
     if (remainder > 0) await bump('suppliers', p.supplierId, 'balance', remainder * sign)
+    if (hawala > 0) await bump('suppliers', p.sarrafId, 'balance', hawala * sign)
   } else if (table === 'payments') {
     const p = rec as unknown as Payment
     await bump(p.partyType === 'customer' ? 'customers' : 'suppliers', p.partyId, 'balance', -p.amount * sign)
+    if (p.via === 'sarraf') await bump('suppliers', p.sarrafId, 'balance', p.amount * sign)
   } else if (table === 'adjustments') {
     const a = rec as unknown as Adjustment
     await bump('variants', a.variantId, 'stockQty', a.qtyChange * sign)
@@ -256,6 +270,9 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
         } else if (row.deleted && !existing.deleted) {
           await db.table(table).update(existing.id, { deleted: true })
           await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
+        } else if (table === 'purchases' && existing.received === false && (rec as { received?: boolean }).received !== false) {
+          // رسیدِ خرید در دستگاه دیگر ثبت شده — موجودی از سند تعدیل می‌آید، فقط وضعیت را به‌روز کن
+          await db.table(table).update(existing.id, { received: true })
         }
       }
     } finally {

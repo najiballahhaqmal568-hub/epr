@@ -30,6 +30,7 @@ export default function Sales() {
               </div>
               <div className="text-left">
                 <p className="font-bold text-teal-700">{fmtMoney(s.total)}</p>
+                {(s.discount ?? 0) > 0 && <p className="text-xs text-amber-600">تخفیف: {fmtMoney(s.discount!)}</p>}
                 {remainder > 0 && <p className="text-xs text-red-600">باقی: {fmtMoney(remainder)}</p>}
               </div>
             </div>
@@ -116,7 +117,12 @@ function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
             <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
               −
             </button>
-            <span className="w-6 text-center font-bold">{fmtNum(qtys[i] ?? 0)}</span>
+            <input
+              className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+              inputMode="numeric"
+              value={qtys[i] ?? 0}
+              onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
+            />
             <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
               ＋
             </button>
@@ -162,6 +168,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<SaleLine[]>([])
   const [paidStr, setPaidStr] = useState('')
   const [paidTouched, setPaidTouched] = useState(false)
+  const [discountStr, setDiscountStr] = useState('')
   const [promise, setPromise] = useState('')
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
@@ -188,7 +195,9 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
           .slice(0, 12)
       : []
 
-  const total = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
+  const subtotal = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
+  const discount = Math.min(parseNum(discountStr), subtotal)
+  const total = subtotal - discount
   const paid = paidTouched ? parseNum(paidStr) : total
   const remainder = total - paid
 
@@ -216,6 +225,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
         lines,
         total,
         paid,
+        discount: discount > 0 ? discount : undefined,
         promiseDate: remainder > 0 && promise ? fromDateInput(promise) : undefined
       })
       onClose()
@@ -303,7 +313,12 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
             <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>
               −
             </button>
-            <span className="w-6 text-center font-bold">{fmtNum(l.qty)}</span>
+            <input
+              className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+              inputMode="numeric"
+              value={l.qty}
+              onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
+            />
             <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
               ＋
             </button>
@@ -315,8 +330,15 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
       ))}
 
       <div className="mt-3 rounded-xl bg-teal-50 p-3">
+        <div className="flex justify-between text-slate-600">
+          <span>مجموع اجناس</span>
+          <span>{fmtMoney(subtotal)}</span>
+        </div>
+        <Field label="تخفیف (اختیاری)">
+          <input className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
+        </Field>
         <div className="flex justify-between font-bold text-slate-800">
-          <span>مجموع</span>
+          <span>قابل پرداخت{discount > 0 ? ` (با ${fmtMoney(discount)} تخفیف)` : ''}</span>
           <span>{fmtMoney(total)}</span>
         </div>
         <Field label="مبلغ دریافتی (نقد)">

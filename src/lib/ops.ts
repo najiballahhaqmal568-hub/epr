@@ -65,19 +65,52 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
     for (const line of purchase.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
-      await db.variants.update(line.variantId, {
-        stockQty: v.stockQty + line.qty,
-        purchasePrice: line.unitCost
-      })
+      // جنس «در راه» تا وقت رسیدن به گدام اضافه نمی‌شود
+      if (purchase.received !== false) {
+        await db.variants.update(line.variantId, {
+          stockQty: v.stockQty + line.qty,
+          purchasePrice: line.unitCost
+        })
+      }
     }
-    const remainder = purchase.total - purchase.paid
+    const hawala = purchase.sarrafAmount ?? 0
+    const remainder = purchase.total - purchase.paid - hawala
     if (remainder > 0) {
       const s = await db.suppliers.get(purchase.supplierId)
       if (s) await db.suppliers.update(purchase.supplierId, { balance: s.balance + remainder })
     }
+    if (hawala > 0 && purchase.sarrafId) {
+      const sf = await db.suppliers.get(purchase.sarrafId)
+      if (sf) await db.suppliers.update(purchase.sarrafId, { balance: sf.balance + hawala })
+    }
     const id = (await db.purchases.add(purchase)) as number
     await movement({ date: purchase.date, type: 'purchase', refId: id, amount: -purchase.paid, note: purchase.supplierName })
     return id
+  })
+}
+
+/** رسید جنسِ خرید «در راه»: ورود به گدام به شکل سند تعدیل (تا به دستگاه‌های دیگر هم برسد) */
+export async function receivePurchase(purchaseId: number): Promise<void> {
+  return db.transaction('rw', db.purchases, db.variants, db.adjustments, async () => {
+    const p = await db.purchases.get(purchaseId)
+    if (!p || p.deleted || p.received !== false) return
+    for (const line of p.lines) {
+      const v = await db.variants.get(line.variantId)
+      if (v) {
+        await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty, purchasePrice: line.unitCost })
+      }
+      await db.adjustments.add({
+        date: Date.now(),
+        variantId: line.variantId,
+        productName: line.productName,
+        size: line.size,
+        color: line.color,
+        qtyChange: line.qty,
+        reason: 'correction',
+        note: `رسید خرید — ${p.supplierName}`
+      })
+    }
+    await db.purchases.update(purchaseId, { received: true })
   })
 }
 
@@ -91,7 +124,13 @@ export async function addPayment(payment: Payment): Promise<number> {
     } else {
       const s = await db.suppliers.get(payment.partyId)
       if (s) await db.suppliers.update(payment.partyId, { balance: s.balance - payment.amount })
-      await movement({ date: payment.date, type: 'supplierPayment', amount: -payment.amount, note: payment.partyName })
+      if (payment.via === 'sarraf' && payment.sarrafId) {
+        // حواله: پول از صندوق نمی‌رود؛ قرض ما به صراف زیاد می‌شود
+        const sf = await db.suppliers.get(payment.sarrafId)
+        if (sf) await db.suppliers.update(payment.sarrafId, { balance: sf.balance + payment.amount })
+      } else {
+        await movement({ date: payment.date, type: 'supplierPayment', amount: -payment.amount, note: payment.partyName })
+      }
     }
     return (await db.payments.add(payment)) as number
   })
