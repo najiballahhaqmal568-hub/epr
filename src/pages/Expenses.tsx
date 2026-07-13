@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type ExpenseType, type Expense, type CashMovementType } from '../db'
 import { addExpense, deleteExpense, renameCategory, reconcile } from '../lib/ops'
-import { fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../lib/format'
+import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
 const MOVE_LABELS: Record<CashMovementType, string> = {
@@ -33,20 +33,120 @@ const TYPE_COLORS: Record<ExpenseType, string> = {
 }
 
 export default function Expenses() {
-  const [view, setView] = useState<'expenses' | 'cash'>('expenses')
+  const [view, setView] = useState<'expenses' | 'cash' | 'stats'>('expenses')
+  const tabCls = (v: string) =>
+    `flex-1 rounded-xl py-2 font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
   return (
     <div className="p-4">
       <h1 className="mb-3 text-xl font-bold text-slate-800">مصارف و صندوق</h1>
       <div className="mb-3 flex gap-2">
-        <button onClick={() => setView('expenses')} className={`flex-1 rounded-xl py-2 font-bold ${view === 'expenses' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}>
+        <button onClick={() => setView('expenses')} className={tabCls('expenses')}>
           مصارف
         </button>
-        <button onClick={() => setView('cash')} className={`flex-1 rounded-xl py-2 font-bold ${view === 'cash' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}>
+        <button onClick={() => setView('cash')} className={tabCls('cash')}>
           صندوق
         </button>
+        <button onClick={() => setView('stats')} className={tabCls('stats')}>
+          آمار
+        </button>
       </div>
-      {view === 'expenses' ? <ExpenseList /> : <CashView />}
+      {view === 'expenses' ? <ExpenseList /> : view === 'cash' ? <CashView /> : <ExpenseStats />}
     </div>
+  )
+}
+
+type StatsPeriod = 'today' | 'week' | 'month' | 'prevMonth'
+
+const STATS_PERIODS: { id: StatsPeriod; label: string }[] = [
+  { id: 'today', label: 'امروز' },
+  { id: 'week', label: '۷ روز' },
+  { id: 'month', label: 'این ماه' },
+  { id: 'prevMonth', label: 'ماه گذشته' }
+]
+
+/** آمار مصارف: مجموع دوره به تفکیک نوع + کتگوری */
+function ExpenseStats() {
+  const [period, setPeriod] = useState<StatsPeriod>('today')
+
+  // from/to باید بین رندرها ثابت باشند تا liveQuery درست کار کند
+  let from: number
+  let to = Number.MAX_SAFE_INTEGER
+  const now = new Date()
+  switch (period) {
+    case 'today':
+      from = startOfDay()
+      break
+    case 'week':
+      from = startOfDay() - 6 * 86400000
+      break
+    case 'month':
+      from = startOfMonth()
+      break
+    case 'prevMonth':
+      from = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime()
+      to = new Date(now.getFullYear(), now.getMonth(), 1).getTime() - 1
+      break
+  }
+
+  const expenses = useLiveQuery(
+    () => db.expenses.where('date').between(from, to, true, true).filter((e) => !e.deleted).toArray(),
+    [from, to]
+  )
+
+  const total = expenses?.reduce((s, e) => s + e.amount, 0) ?? 0
+  const ofType = (t: ExpenseType) => expenses?.filter((e) => e.type === t).reduce((s, e) => s + e.amount, 0) ?? 0
+
+  const byCat = new Map<string, number>()
+  expenses?.forEach((e) => {
+    const key = e.type === 'withdrawal' ? 'برداشت مالک' : e.categoryName
+    byCat.set(key, (byCat.get(key) ?? 0) + e.amount)
+  })
+  const catRows = [...byCat.entries()].sort((a, b) => b[1] - a[1])
+
+  return (
+    <>
+      <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
+        {STATS_PERIODS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPeriod(p.id)}
+            className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${period === p.id ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-3 rounded-2xl bg-red-700 p-4 text-white">
+        <p className="text-sm opacity-80">مجموع مصارف {STATS_PERIODS.find((p) => p.id === period)?.label}</p>
+        <p className="text-3xl font-bold">{fmtMoney(total)}</p>
+        <p className="mt-2 text-sm">{fmtNum(expenses?.length ?? 0)} مصرف</p>
+      </div>
+
+      <Card>
+        <p className="mb-2 font-bold text-slate-700">به تفکیک نوع</p>
+        {(Object.keys(TYPE_LABELS) as ExpenseType[]).map((t) => (
+          <div key={t} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+            <span className="text-slate-600">
+              {TYPE_LABELS[t]}
+              {t === 'business' && <span className="mr-1 text-xs text-slate-400">(از مفاد کم می‌شود)</span>}
+            </span>
+            <span className={`font-bold ${TYPE_COLORS[t]}`}>{fmtMoney(ofType(t))}</span>
+          </div>
+        ))}
+      </Card>
+
+      <Card>
+        <p className="mb-2 font-bold text-slate-700">به تفکیک کتگوری</p>
+        {catRows.length === 0 && <p className="text-sm text-slate-400">مصرفی در این دوره نیست.</p>}
+        {catRows.map(([name, amt]) => (
+          <div key={name} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+            <span className="text-slate-600">{name}</span>
+            <span className="font-bold text-slate-800">{fmtMoney(amt)}</span>
+          </div>
+        ))}
+      </Card>
+    </>
   )
 }
 
