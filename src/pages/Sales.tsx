@@ -2,18 +2,33 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../db'
 import { addSale, deleteSale, addCustomerReturn, addExchange } from '../lib/ops'
-import { fmtNum, fmtMoney, fmtDate, parseNum, fromDateInput } from '../lib/format'
+import { fmtNum, fmtMoney, fmtDate, parseNum, fromDateInput, startOfDay, startOfMonth } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
 export default function Sales() {
+  const [view, setView] = useState<'list' | 'stats'>('list')
   const [showNew, setShowNew] = useState(false)
   const [returning, setReturning] = useState<Sale | null>(null)
   const [exchanging, setExchanging] = useState<Sale | null>(null)
   const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().filter((s) => !s.deleted).limit(100).toArray(), [])
 
+  const tabCls = (v: string) =>
+    `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
+
   return (
     <div className="p-4">
       <h1 className="mb-3 text-xl font-bold text-slate-800">فروش</h1>
+      <div className="mb-3 flex gap-2">
+        <button onClick={() => setView('list')} className={tabCls('list')}>
+          فروش‌ها
+        </button>
+        <button onClick={() => setView('stats')} className={tabCls('stats')}>
+          آمار
+        </button>
+      </div>
+      {view === 'stats' && <SalesStats />}
+      {view === 'list' && (
+        <>
       {sales?.length === 0 && <Empty text="هنوز فروشی ثبت نشده." />}
       {sales?.map((s) => {
         const remainder = s.total - s.paid
@@ -58,10 +73,121 @@ export default function Sales() {
         )
       })}
       <Fab onClick={() => setShowNew(true)} label="فروش جدید" />
+        </>
+      )}
       {showNew && <NewSaleModal onClose={() => setShowNew(false)} />}
       {returning && <ReturnModal sale={returning} onClose={() => setReturning(null)} />}
       {exchanging && <ExchangeModal sale={exchanging} onClose={() => setExchanging(null)} />}
     </div>
+  )
+}
+
+type StatsPeriod = 'today' | 'week' | 'month' | 'prevMonth'
+
+const STATS_PERIODS: { id: StatsPeriod; label: string }[] = [
+  { id: 'today', label: 'امروز' },
+  { id: 'week', label: '۷ روز' },
+  { id: 'month', label: 'این ماه' },
+  { id: 'prevMonth', label: 'ماه گذشته' }
+]
+
+/** آمار فروش: مجموع دوره + پرفروش‌ترین اجناس + بهترین مشتریان */
+function SalesStats() {
+  const [period, setPeriod] = useState<StatsPeriod>('today')
+
+  // from/to باید بین رندرها ثابت باشند تا liveQuery درست کار کند
+  let from: number
+  let to = Number.MAX_SAFE_INTEGER
+  const now = new Date()
+  switch (period) {
+    case 'today':
+      from = startOfDay()
+      break
+    case 'week':
+      from = startOfDay() - 6 * 86400000
+      break
+    case 'month':
+      from = startOfMonth()
+      break
+    case 'prevMonth':
+      from = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime()
+      to = new Date(now.getFullYear(), now.getMonth(), 1).getTime() - 1
+      break
+  }
+
+  const sales = useLiveQuery(() => db.sales.where('date').between(from, to, true, true).filter((s) => !s.deleted).toArray(), [from, to])
+
+  const total = sales?.reduce((s, x) => s + x.total, 0) ?? 0
+  const cash = sales?.reduce((s, x) => s + x.paid, 0) ?? 0
+  const pairs = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
+  const credit = Math.max(0, total - cash)
+
+  const soldBy = new Map<string, { qty: number; revenue: number }>()
+  sales?.forEach((s) =>
+    s.lines.forEach((l) => {
+      const key = `${l.productName} ${l.size} ${l.color}`.trim()
+      const cur = soldBy.get(key) ?? { qty: 0, revenue: 0 }
+      soldBy.set(key, { qty: cur.qty + l.qty, revenue: cur.revenue + l.qty * l.unitPrice })
+    })
+  )
+  const topProducts = [...soldBy.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 8)
+
+  const custBy = new Map<string, number>()
+  sales?.forEach((s) => {
+    if (s.customerName) custBy.set(s.customerName, (custBy.get(s.customerName) ?? 0) + s.total)
+  })
+  const topCustomers = [...custBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+
+  return (
+    <>
+      <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
+        {STATS_PERIODS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPeriod(p.id)}
+            className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${period === p.id ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white">
+        <p className="text-sm opacity-80">مجموع فروش {STATS_PERIODS.find((p) => p.id === period)?.label}</p>
+        <p className="text-3xl font-bold">{fmtMoney(total)}</p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <span>نقد: {fmtMoney(cash)}</span>
+          {credit > 0 && <span>قرضی: {fmtMoney(credit)}</span>}
+          <span>{fmtNum(sales?.length ?? 0)} فروش</span>
+          <span>{fmtNum(pairs)} جوړه</span>
+        </div>
+      </div>
+
+      <Card>
+        <p className="mb-2 font-bold text-slate-700">🔥 پرفروش‌ترین اجناس</p>
+        {topProducts.length === 0 && <p className="text-sm text-slate-400">فروشی در این دوره نیست.</p>}
+        {topProducts.map(([name, d]) => (
+          <div key={name} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+            <span className="text-slate-600">{name}</span>
+            <span className="text-left">
+              <span className="font-bold text-slate-800">{fmtNum(d.qty)} جوړه</span>
+              <span className="block text-xs text-slate-400">{fmtMoney(d.revenue)}</span>
+            </span>
+          </div>
+        ))}
+      </Card>
+
+      <Card>
+        <p className="mb-2 font-bold text-slate-700">⭐ بهترین مشتریان</p>
+        {topCustomers.length === 0 && <p className="text-sm text-slate-400">فروش با نام مشتری در این دوره ثبت نشده.</p>}
+        {topCustomers.map(([name, t]) => (
+          <div key={name} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+            <span className="text-slate-600">{name}</span>
+            <span className="font-bold text-slate-800">{fmtMoney(t)}</span>
+          </div>
+        ))}
+      </Card>
+    </>
   )
 }
 
