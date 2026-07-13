@@ -48,19 +48,20 @@ export default function App() {
         setAuth('none')
         return
       }
-      // پروفایل ذخیره‌شده: در حالت آفلاین اپ باید بدون انترنت باز شود
+      // پروفایل ذخیره‌شده: اپ باید فوراً باز شود (آفلاین یا انترنت کند)؛
+      // بررسی سرور در پس‌زمینه انجام می‌شود و لازم نیست کاربر منتظر بماند
       const cached = ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null
+      if (cached && !cancelled) {
+        setAuth(cached)
+        startSync()
+      }
       try {
         const supa = await getSupa()
         const { data } = await supa!.auth.getSession()
         if (cancelled) return
         if (!data.session) {
-          // سشن یافت نشد: اگر قبلاً وارد شده بودیم و حالا آفلاین هستیم، با پروفایل ذخیره‌شده ادامه بده
-          if (cached && !navigator.onLine) {
-            setAuth(cached)
-            startSync()
-            return
-          }
+          // سشن یافت نشد: آفلاین با پروفایل ذخیره‌شده ادامه می‌دهیم، آنلاین یعنی واقعاً خارج شده
+          if (cached && !navigator.onLine) return
           setAuth('anon')
           return
         }
@@ -70,21 +71,13 @@ export default function App() {
           await db.settings.put({ key: 'cachedProfile', value: profile })
           setAuth(profile)
           startSync()
-        } else if (cached) {
-          setAuth(cached)
-          startSync()
-        } else {
+        } else if (!cached) {
           setAuth('anon')
         }
       } catch {
-        // خطای شبکه (آفلاین): با پروفایل ذخیره‌شده ادامه بده
+        // خطای شبکه: اگر پروفایل ذخیره‌شده داریم اپ از قبل باز است؛ وگرنه صفحهٔ ورود
         if (cancelled) return
-        if (cached) {
-          setAuth(cached)
-          startSync()
-        } else {
-          setAuth('anon')
-        }
+        if (!cached) setAuth('anon')
       }
     }
     void check()
@@ -103,7 +96,15 @@ export default function App() {
     if (pinHash === null) setUnlocked(true)
   }, [pinHash])
 
-  if (pinHash === undefined || auth === 'loading') return null
+  if (pinHash === undefined || auth === 'loading') {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 text-slate-500">
+        <span className="text-4xl">👞</span>
+        <p className="font-bold">فروشگاه اتل</p>
+        <p className="animate-pulse text-sm">در حال باز شدن...</p>
+      </div>
+    )
+  }
 
   if (auth === 'anon') {
     return (
