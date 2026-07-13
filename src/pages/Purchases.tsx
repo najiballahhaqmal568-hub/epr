@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, makeSku, type PurchaseLine, type Product, type Supplier, type ReturnLine } from '../db'
+import { db, makeSku, type Purchase, type PurchaseLine, type Product, type Supplier, type ReturnLine } from '../db'
 import { addPurchase, addPayment, addSupplierReturn, receivePurchase } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
@@ -30,6 +30,7 @@ export default function Purchases() {
   const [showNewSupplier, setShowNewSupplier] = useState<'supplier' | 'sarraf' | null>(null)
   const [payingSupplier, setPayingSupplier] = useState<number | null>(null)
   const [returningTo, setReturningTo] = useState<Supplier | null>(null)
+  const [returningPurchase, setReturningPurchase] = useState<Purchase | null>(null)
   const [detail, setDetail] = useState<Supplier | null>(null)
 
   const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
@@ -85,12 +86,16 @@ export default function Purchases() {
                 <p className="mt-1 text-sm text-slate-600">
                   {p.lines.map((l) => `${l.productName} ${l.size} ×${fmtNum(l.qty)}`).join('، ')}
                 </p>
-                {pending && (
+                {pending ? (
                   <button
                     onClick={() => void receivePurchase(p.id!)}
                     className="mt-2 w-full rounded-xl bg-teal-700 py-2 text-sm font-bold text-white"
                   >
                     ✓ جنس رسید — به گدام اضافه شود
+                  </button>
+                ) : (
+                  <button className="mt-1 text-xs font-bold text-amber-700" onClick={() => setReturningPurchase(p)}>
+                    مرجوعی به تأمین‌کننده
                   </button>
                 )}
               </Card>
@@ -183,6 +188,7 @@ export default function Purchases() {
       {showNewSupplier && <NewSupplierModal kind={showNewSupplier} onClose={() => setShowNewSupplier(null)} />}
       {payingSupplier != null && <PaySupplierModal supplierId={payingSupplier} onClose={() => setPayingSupplier(null)} />}
       {returningTo && <SupplierReturnModal supplier={returningTo} onClose={() => setReturningTo(null)} />}
+      {returningPurchase && <PurchaseReturnModal purchase={returningPurchase} onClose={() => setReturningPurchase(null)} />}
       {detail && <SupplierDetailModal supplier={detail} onClose={() => setDetail(null)} />}
     </div>
   )
@@ -278,6 +284,99 @@ function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClos
         ))}
       </div>
       <p className="mt-2 text-center text-xs text-slate-400">قرمز = قرض ما زیاد شد · سبز = پرداخت/کم شد</p>
+    </Modal>
+  )
+}
+
+/** مرجوعی مستقیم از روی یک خرید: اجناس همان فاکتور با قیمت خرید همان فاکتور */
+function PurchaseReturnModal({ purchase, onClose }: { purchase: Purchase; onClose: () => void }) {
+  const [qtys, setQtys] = useState<Record<number, number>>({})
+  const [reason, setReason] = useState('خرابی جنس')
+  const [settlement, setSettlement] = useState<'reduceDebt' | 'cashRefund'>('reduceDebt')
+  const [error, setError] = useState('')
+  const supplier = useLiveQuery(() => db.suppliers.get(purchase.supplierId), [purchase.supplierId])
+
+  const amount = purchase.lines.reduce((s, l, i) => s + (qtys[i] ?? 0) * l.unitCost, 0)
+
+  async function save() {
+    const lines: ReturnLine[] = purchase.lines
+      .map((l, i) => ({
+        variantId: l.variantId,
+        productName: l.productName,
+        size: l.size,
+        color: l.color,
+        qty: qtys[i] ?? 0,
+        unitPrice: l.unitCost,
+        restock: false
+      }))
+      .filter((l) => l.qty > 0)
+    if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
+    try {
+      await addSupplierReturn({
+        date: Date.now(),
+        kind: 'supplier',
+        partyId: purchase.supplierId,
+        partyName: purchase.supplierName,
+        refId: purchase.id,
+        lines,
+        reason,
+        settlement,
+        amount
+      })
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <Modal title={`مرجوعی به ${purchase.supplierName}`} onClose={onClose}>
+      <p className="mb-2 text-sm text-slate-600">خرید {fmtDate(purchase.date)}</p>
+      {purchase.lines.map((l, i) => (
+        <div key={i} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 p-2">
+          <div className="text-sm">
+            <p className="font-bold">
+              {l.productName} {l.size} {l.color}
+            </p>
+            <p className="text-slate-500">
+              خریده: {fmtNum(l.qty)} × {fmtMoney(l.unitCost)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
+              −
+            </button>
+            <input
+              className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+              inputMode="numeric"
+              value={qtys[i] ?? 0}
+              onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
+            />
+            <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
+              ＋
+            </button>
+          </div>
+        </div>
+      ))}
+      <Field label="دلیل">
+        <select className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)}>
+          <option>خرابی جنس</option>
+          <option>جنس اشتباه</option>
+          <option>کیفیت پایین</option>
+          <option>دیگر</option>
+        </select>
+      </Field>
+      <Field label="تصفیه پول">
+        <select className={inputCls} value={settlement} onChange={(e) => setSettlement(e.target.value as 'reduceDebt' | 'cashRefund')}>
+          <option value="reduceDebt">کم شدن از قرض ما{supplier ? ` (قرض فعلی: ${fmtMoney(supplier.balance)})` : ''}</option>
+          <option value="cashRefund">دریافت نقدی به صندوق</option>
+        </select>
+      </Field>
+      <p className="mb-3 font-bold text-slate-800">مبلغ مرجوعی: {fmtMoney(amount)}</p>
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <PrimaryBtn onClick={save} disabled={amount <= 0}>
+        ثبت مرجوعی
+      </PrimaryBtn>
     </Modal>
   )
 }
