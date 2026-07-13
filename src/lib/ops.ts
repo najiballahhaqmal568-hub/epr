@@ -224,6 +224,18 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
   })
 }
 
+/**
+ * تبادلهٔ جنس: مرجوعی + فروش جدید در یک تراکنش.
+ * مرجوعی به شکل «بازپرداخت نقدی» و فروش با paid شامل ارزش جنس برگشتی ثبت می‌شود،
+ * پس اثر خالص صندوق فقط تفاوت قیمت است و هر دو سند جداگانه همگام می‌شوند.
+ */
+export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
+  return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
+    await addCustomerReturn(ret)
+    await addSale(sale)
+  })
+}
+
 /** مرجوعی به تأمین‌کننده: خروج از گدام + کاهش قرض ما */
 export async function addSupplierReturn(ret: ReturnDoc): Promise<number> {
   return db.transaction('rw', db.returns, db.variants, db.suppliers, db.cashMovements, async () => {
