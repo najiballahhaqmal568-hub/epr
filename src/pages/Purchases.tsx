@@ -672,11 +672,36 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           .filter((v) => {
             const p = productMap.get(v.productId)
             if (!p) return false
-            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color}`
+            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`
             return search.trim().split(/\s+/).every((w) => hay.includes(w))
           })
           .slice(0, 12)
       : []
+
+  // جنس‌های کارتن‌دارِ مطابق جستجو — برای دکمهٔ «＋ یک کارتن»
+  const cartonProducts = [
+    ...new Map(
+      matches
+        .map((v) => productMap.get(v.productId)!)
+        .filter((p) => (p.carton?.items.length ?? 0) > 0)
+        .map((p) => [p.id!, p])
+    ).values()
+  ]
+
+  function addCarton(p: Product) {
+    const vs = variants?.filter((v) => v.productId === p.id) ?? []
+    setLines((ls) => {
+      let out = [...ls]
+      for (const it of p.carton!.items) {
+        const v = vs.find((x) => x.size === it.size && x.color === it.color)
+        if (!v) continue
+        const i = out.findIndex((l) => l.variantId === v.id)
+        if (i >= 0) out = out.map((l, j) => (j === i ? { ...l, qty: l.qty + it.qty } : l))
+        else out.push({ variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: it.qty, unitCost: v.purchasePrice })
+      }
+      return out
+    })
+  }
 
   const total = lines.reduce((s, l) => s + l.qty * l.unitCost, 0)
   const hawala = useSarraf ? Math.min(Math.max(0, parseNum(sarrafStr)), total) : 0
@@ -751,6 +776,22 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
       <Field label="جستجوی جنس">
         <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز یا رنگ..." />
       </Field>
+      {cartonProducts.map((p) => {
+        const pairs = p.carton!.items.reduce((s, it) => s + it.qty, 0)
+        return (
+          <button
+            key={`c${p.id}`}
+            onClick={() => addCarton(p)}
+            className="mb-2 flex w-full items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800 active:bg-amber-100"
+          >
+            <span>📦 {p.name} — ＋ یک کارتن</span>
+            <span className="text-sm font-normal">{fmtNum(pairs)} جوړه</span>
+          </button>
+        )
+      })}
+      {cartonProducts.length > 0 && (
+        <p className="-mt-1 mb-2 text-xs text-slate-400">هر ضربه یک کارتن کامل اضافه می‌کند؛ اگر شماره‌بندی این حمل فرق دارد، تعدادها را پایین ویرایش کنید.</p>
+      )}
       {matches.length > 0 && (
         <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
           {matches.map((v) => {

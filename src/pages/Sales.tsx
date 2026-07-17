@@ -563,6 +563,53 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
           .slice(0, 12)
       : []
 
+  // جنس‌های کارتن‌دارِ مطابق جستجو — برای فروش کارتنی
+  const cartonProducts = [
+    ...new Map(
+      matches
+        .map((v) => productMap.get(v.productId)!)
+        .filter((p) => (p.carton?.items.length ?? 0) > 0)
+        .map((p) => [p.id!, p])
+    ).values()
+  ]
+
+  /** چند کارتن کامل از این جنس در گدام موجود است؟ */
+  function cartonsInStock(p: Product): number {
+    const vs = variants?.filter((v) => v.productId === p.id) ?? []
+    return Math.min(
+      ...p.carton!.items.map((it) => {
+        const v = vs.find((x) => x.size === it.size && x.color === it.color)
+        return v ? Math.floor(v.stockQty / it.qty) : 0
+      })
+    )
+  }
+
+  function addCartonSale(p: Product) {
+    const vs = variants?.filter((v) => v.productId === p.id) ?? []
+    setLines((ls) => {
+      let out = [...ls]
+      for (const it of p.carton!.items) {
+        const v = vs.find((x) => x.size === it.size && x.color === it.color)
+        if (!v) continue
+        const price = saleType === 'retail' ? v.retailPrice : v.wholesalePrice
+        const i = out.findIndex((l) => l.variantId === v.id)
+        if (i >= 0) out = out.map((l, j) => (j === i ? { ...l, qty: l.qty + it.qty } : l))
+        else out.push({ variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: it.qty, unitPrice: price })
+      }
+      return out
+    })
+    // قیمت کارتنی: تفاوت با مجموع فی‌جوړه به شکل تخفیف ثبت می‌شود تا مجموع دقیقاً قیمت کارتن شود
+    if (saleType === 'wholesale' && p.carton?.price) {
+      const vs2 = variants?.filter((v) => v.productId === p.id) ?? []
+      const pairSum = p.carton.items.reduce((s, it) => {
+        const v = vs2.find((x) => x.size === it.size && x.color === it.color)
+        return s + it.qty * (v?.wholesalePrice ?? 0)
+      }, 0)
+      const diff = pairSum - p.carton.price
+      if (diff > 0) setDiscountStr((prev) => String(parseNum(prev) + diff))
+    }
+  }
+
   const selectedCustomer = customers?.find((c) => c.id === customerId)
   const custMatches =
     custSearch.trim() && customers
@@ -723,6 +770,24 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
       <Field label="جستجوی جنس">
         <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز، رنگ یا کود..." />
       </Field>
+      {cartonProducts.map((p) => {
+        const pairs = p.carton!.items.reduce((s, it) => s + it.qty, 0)
+        const avail = cartonsInStock(p)
+        return (
+          <button
+            key={`c${p.id}`}
+            onClick={() => addCartonSale(p)}
+            disabled={avail <= 0}
+            className="mb-2 flex w-full items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800 active:bg-amber-100 disabled:opacity-40"
+          >
+            <span>
+              📦 {p.name} — ＋ یک کارتن ({fmtNum(pairs)} جوړه)
+              {saleType === 'wholesale' && p.carton!.price ? <span className="block text-xs font-normal">قیمت کارتنی: {fmtMoney(p.carton!.price)}</span> : null}
+            </span>
+            <span className="text-sm font-normal">{avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل نیست'}</span>
+          </button>
+        )
+      })}
       {matches.length > 0 && (
         <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
           {matches.map((v) => {

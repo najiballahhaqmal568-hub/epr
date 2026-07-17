@@ -14,6 +14,7 @@ interface VariantForm {
   wholesalePrice: string
   stockQty: string
   lowStock: string
+  cartonQty: string
 }
 
 const emptyVariant = (): VariantForm => ({
@@ -23,7 +24,8 @@ const emptyVariant = (): VariantForm => ({
   retailPrice: '',
   wholesalePrice: '',
   stockQty: '0',
-  lowStock: '2'
+  lowStock: '2',
+  cartonQty: ''
 })
 
 /** عکس را کوچک می‌کند تا دیتابیس و بکاپ سنگین نشود */
@@ -117,6 +119,10 @@ export default function Inventory() {
                 </div>
                 <div className="text-left">
                   <p className={`font-bold ${low ? 'text-red-600' : 'text-teal-700'}`}>{fmtNum(totalStock)} جوړه</p>
+                  {(() => {
+                    const pairs = p.carton?.items.reduce((s, it) => s + it.qty, 0) ?? 0
+                    return pairs > 0 ? <p className="text-xs text-slate-400">≈ {fmtNum(Math.floor(totalStock / pairs))} کارتن ({fmtNum(pairs)}تایی)</p> : null
+                  })()}
                   {low && <p className="text-xs text-red-600">موجودی کم!</p>}
                 </div>
               </div>
@@ -440,10 +446,14 @@ function ProductModal({
           retailPrice: String(v.retailPrice),
           wholesalePrice: String(v.wholesalePrice),
           stockQty: String(v.stockQty),
-          lowStock: String(v.lowStock)
+          lowStock: String(v.lowStock),
+          cartonQty: String(
+            product?.carton?.items.find((it) => it.size === v.size && it.color === v.color)?.qty ?? ''
+          )
         }))
       : [emptyVariant()]
   )
+  const [cartonPrice, setCartonPrice] = useState(product?.carton?.price ? String(product.carton.price) : '')
   const [error, setError] = useState('')
 
   const brands = [...new Set(allProducts.map((p) => p.brand).filter(Boolean))] as string[]
@@ -459,7 +469,13 @@ function ProductModal({
     try {
       await db.transaction('rw', db.products, db.variants, db.adjustments, async () => {
         let productId = product?.id
-        const pData = { name: name.trim(), brand: brand.trim(), category: category.trim(), photo }
+        const cartonItems = valid
+          .filter((f) => parseNum(f.cartonQty) > 0)
+          .map((f) => ({ size: f.size.trim(), color: f.color.trim(), qty: parseNum(f.cartonQty) }))
+        const carton = cartonItems.length
+          ? { ...(parseNum(cartonPrice) > 0 ? { price: parseNum(cartonPrice) } : {}), items: cartonItems }
+          : undefined
+        const pData = { name: name.trim(), brand: brand.trim(), category: category.trim(), photo, carton }
         if (productId) {
           await db.products.update(productId, pData)
         } else {
@@ -598,6 +614,9 @@ function ProductModal({
             <Field label="حد خرید مجدد">
               <input className={inputCls} inputMode="numeric" value={f.lowStock} onChange={(e) => setForm(i, { lowStock: e.target.value })} />
             </Field>
+            <Field label="در هر کارتن (اختیاری)">
+              <input className={inputCls} inputMode="numeric" value={f.cartonQty} onChange={(e) => setForm(i, { cartonQty: e.target.value })} placeholder="۰" />
+            </Field>
           </div>
           {forms.length > 1 && (
             <button className="text-sm text-red-600" onClick={() => setForms((fs) => fs.filter((_, j) => j !== i))}>
@@ -612,6 +631,22 @@ function ProductModal({
       >
         ＋ افزودن سایز دیگر
       </button>
+
+      {(() => {
+        const pairs = forms.reduce((s, f) => s + (f.size.trim() ? parseNum(f.cartonQty) : 0), 0)
+        if (pairs <= 0) return null
+        return (
+          <div className="mb-4 rounded-xl bg-amber-50 p-3">
+            <p className="mb-2 text-sm font-bold text-amber-800">📦 کارتن‌بندی: {fmtNum(pairs)} جوړه در هر کارتن</p>
+            <Field label="قیمت عمده فی کارتن (اختیاری)">
+              <input className={inputCls} inputMode="numeric" value={cartonPrice} onChange={(e) => setCartonPrice(e.target.value)} />
+            </Field>
+            <p className="text-xs text-slate-500">
+              در خرید و فروش دکمهٔ «＋ یک کارتن» ظاهر می‌شود که همهٔ سایزها را با همین ترکیب اضافه می‌کند.
+            </p>
+          </div>
+        )
+      })()}
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <PrimaryBtn onClick={save}>ذخیره</PrimaryBtn>

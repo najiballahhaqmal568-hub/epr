@@ -8,12 +8,25 @@ interface Synced {
   localUpdatedAt?: number
 }
 
+export interface CartonItem {
+  size: string
+  color: string
+  qty: number
+}
+
+/** کارتن‌بندی: ترکیب سایزهای یک کارتن + قیمت عمدهٔ فی کارتن (اختیاری) */
+export interface CartonDef {
+  price?: number
+  items: CartonItem[]
+}
+
 export interface Product extends Synced {
   id?: number
   name: string
   brand?: string
   category?: string
   photo?: string
+  carton?: CartonDef
   createdAt: number
 }
 
