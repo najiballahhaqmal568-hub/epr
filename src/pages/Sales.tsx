@@ -525,8 +525,9 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [pickerFor, setPickerFor] = useState<number | null>(null)
-  // در عمده اول می‌پرسد: کارتن کامل یا نیم کارتن (انتخاب سایز)
-  const [pickerChoice, setPickerChoice] = useState(false)
+  // در عمده اول می‌پرسد: کارتن کامل یا نیم کارتن (خانه‌پری سایزها تا نصف کارتن)
+  const [pickerMode, setPickerMode] = useState<'choice' | 'single' | 'half'>('single')
+  const [halfQtys, setHalfQtys] = useState<Record<number, number>>({})
 
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
@@ -760,7 +761,8 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
                   key={e.p.id}
                   onClick={() => {
                     setPickerFor(e.p.id!)
-                    setPickerChoice(saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0)
+                    setPickerMode(saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0 ? 'choice' : 'single')
+                    setHalfQtys({})
                   }}
                   className="rounded-xl border border-slate-200 bg-white p-2 text-center active:bg-teal-50"
                 >
@@ -914,7 +916,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
             .filter((v) => v.productId === pickerFor)
             .sort((a, b) => a.color.localeCompare(b.color) || parseNum(a.size) - parseNum(b.size))
           if (!p) return null
-          if (pickerChoice && p.carton?.items.length) {
+          if (pickerMode === 'choice' && p.carton?.items.length) {
             const pairs = p.carton.items.reduce((s, it) => s + it.qty, 0)
             const avail = cartonsInStock(p)
             return (
@@ -934,12 +936,87 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
                   </span>
                 </button>
                 <button
-                  onClick={() => setPickerChoice(false)}
+                  onClick={() => setPickerMode('half')}
                   className="w-full rounded-xl bg-amber-100 p-4 text-right font-bold text-amber-800 active:bg-amber-200"
                 >
-                  <span className="block text-lg">✋ نیم کارتن / دانه‌ای</span>
-                  <span className="text-sm font-normal">سایزها را خودتان انتخاب کنید</span>
+                  <span className="block text-lg">✋ نیم کارتن ({fmtNum(Math.round(pairs / 2))} جوړه)</span>
+                  <span className="text-sm font-normal">سایزها را خودتان تا نصف کارتن انتخاب کنید</span>
                 </button>
+              </Modal>
+            )
+          }
+          if (pickerMode === 'half' && p.carton?.items.length) {
+            const pairs = p.carton.items.reduce((s, it) => s + it.qty, 0)
+            const target = Math.round(pairs / 2)
+            const filled = vs.reduce((s, v) => s + (halfQtys[v.id!] ?? 0), 0)
+            const setQ = (id: number, q: number, max: number) =>
+              setHalfQtys((hq) => ({ ...hq, [id]: Math.min(max, Math.max(0, q)) }))
+            return (
+              <Modal title={`✋ نیم کارتن — ${p.name}`} onClose={() => setPickerFor(null)}>
+                <p
+                  className={`mb-2 rounded-xl p-2 text-center text-sm font-bold ${
+                    filled === target ? 'bg-teal-50 text-teal-700' : filled > target ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                  }`}
+                >
+                  {filled === target
+                    ? `✅ پوره شد: ${fmtNum(target)} جوړه`
+                    : filled > target
+                      ? `⚠️ ${fmtNum(filled - target)} جوړه زیادتر از نیم کارتن!`
+                      : `${fmtNum(filled)} از ${fmtNum(target)} جوړه`}
+                </p>
+                {vs.map((v) => (
+                  <div key={v.id} className="mb-1 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                    <span className="text-sm font-bold text-slate-800">
+                      {v.size} <span className="font-normal text-slate-500">{v.color}</span>
+                      <span className={`block text-xs font-normal ${v.stockQty <= v.lowStock ? 'text-red-600' : 'text-slate-400'}`}>
+                        {fmtNum(v.stockQty)} موجود
+                      </span>
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="h-8 w-8 rounded-full bg-slate-200 font-bold"
+                        onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) - 1, v.stockQty)}
+                      >
+                        −
+                      </button>
+                      <input
+                        className="w-12 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+                        inputMode="numeric"
+                        value={halfQtys[v.id!] ?? 0}
+                        onChange={(e) => setQ(v.id!, parseNum(e.target.value) || 0, v.stockQty)}
+                      />
+                      <button
+                        className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800"
+                        disabled={v.stockQty <= (halfQtys[v.id!] ?? 0)}
+                        onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) + 1, v.stockQty)}
+                      >
+                        ＋
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div className="mt-3">
+                  <PrimaryBtn
+                    disabled={filled !== target}
+                    onClick={() => {
+                      setLines((ls) => {
+                        let out = [...ls]
+                        for (const v of vs) {
+                          const q = halfQtys[v.id!] ?? 0
+                          if (q <= 0) continue
+                          const price = saleType === 'retail' ? v.retailPrice : v.wholesalePrice
+                          const i = out.findIndex((l) => l.variantId === v.id)
+                          if (i >= 0) out = out.map((l, j) => (j === i ? { ...l, qty: l.qty + q } : l))
+                          else out.push({ variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: q, unitPrice: price })
+                        }
+                        return out
+                      })
+                      setPickerFor(null)
+                    }}
+                  >
+                    ✓ افزودن نیم کارتن به فاکتور
+                  </PrimaryBtn>
+                </div>
               </Modal>
             )
           }
