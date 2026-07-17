@@ -66,6 +66,17 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         (sale.discount ?? 0),
       0
     ) ?? 0
+  // زیان فروش زیر قیمت: خطوطی که قیمت فروش‌شان از قیمت خرید کمتر بوده
+  const belowCostLoss =
+    sales?.reduce(
+      (sum, sale) =>
+        sum +
+        sale.lines.reduce((s, l) => {
+          const cost = variantMap.get(l.variantId)?.purchasePrice ?? 0
+          return s + Math.max(0, (cost - l.unitPrice) * l.qty)
+        }, 0),
+      0
+    ) ?? 0
   const purchasesTotal = purchases?.reduce((s, x) => s + x.total, 0) ?? 0
   const businessExpenses = expenses?.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
   const otherSpending = expenses?.filter((e) => e.type !== 'business').reduce((s, e) => s + e.amount, 0) ?? 0
@@ -148,6 +159,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         <Row label="خرید جنس" value={fmtMoney(purchasesTotal)} red />
         <Row label="مصارف تجارت" value={fmtMoney(businessExpenses)} red />
         <Row label="مرجوعی مشتریان" value={fmtMoney(returnsTotal)} red />
+        {belowCostLoss > 0 && <Row label="زیان فروش زیر قیمت (در مفاد کم شده)" value={fmtMoney(belowCostLoss)} red />}
         <Row label="مفاد ناخالص" value={fmtMoney(grossProfit)} bold />
         <Row label="مفاد خالص (بعد از مصارف)" value={fmtMoney(netProfit)} bold teal={netProfit >= 0} red={netProfit < 0} />
         {otherSpending > 0 && <Row label="خانه/شخصی/برداشت (خارج از مفاد)" value={fmtMoney(otherSpending)} />}
