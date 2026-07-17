@@ -376,6 +376,7 @@ function PinCard() {
 function ReminderCard() {
   const on = useLiveQuery(async () => (await db.settings.get('expenseReminderOn'))?.value === true, [])
   const hour = useLiveQuery(async () => Number((await db.settings.get('expenseReminderHour'))?.value ?? 18), [])
+  const debtOn = useLiveQuery(async () => (await db.settings.get('debtReminderOn'))?.value, [])
 
   return (
     <Card>
@@ -416,6 +417,19 @@ function ReminderCard() {
             </select>
           </label>
         )}
+      </div>
+
+      <div className="mt-4 border-t border-slate-100 pt-3">
+        <p className="mb-1 font-bold text-slate-800">یادآوری روزانهٔ قرضداران</p>
+        <p className="mb-3 text-sm text-slate-500">
+          هر روز یک بار مشتریان قرضدار با مجموع قرض یادآوری می‌شوند تا تقاضای قرض فراموش نشود.
+        </p>
+        <button
+          onClick={() => void db.settings.put({ key: 'debtReminderOn', value: debtOn === false })}
+          className={`rounded-xl px-5 py-2 font-bold ${debtOn !== false ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+        >
+          {debtOn !== false ? 'فعال ✓' : 'غیرفعال'}
+        </button>
       </div>
     </Card>
   )
