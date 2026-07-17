@@ -930,14 +930,6 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [sarrafStr, setSarrafStr] = useState('')
   const [cartonEditFor, setCartonEditFor] = useState<Product | null>(null)
   const [npWizard, setNpWizard] = useState(false)
-  // فورم جنس جدید داخل خرید — لازم نیست اول به گدام برود
-  const [showNewProduct, setShowNewProduct] = useState(false)
-  const [npName, setNpName] = useState('')
-  const [npSize, setNpSize] = useState('')
-  const [npColor, setNpColor] = useState('')
-  const [npCost, setNpCost] = useState('')
-  const [npRetail, setNpRetail] = useState('')
-  const [npWholesale, setNpWholesale] = useState('')
 
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
@@ -983,34 +975,6 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const hawala = useSarraf ? Math.min(Math.max(0, parseNum(sarrafStr)), total) : 0
   const paid = paidTouched ? parseNum(paidStr) : Math.max(0, total - hawala)
   const remainder = total - paid - hawala
-
-  async function addNewProduct() {
-    const name = npName.trim()
-    if (!name || !npSize.trim()) return setError('نام و سایز جنس جدید را بنویسید')
-    const cost = parseNum(npCost)
-    const retail = parseNum(npRetail)
-    const pid = (await db.products.add({ name, createdAt: Date.now() })) as number
-    const vid = (await db.variants.add({
-      productId: pid,
-      size: npSize.trim(),
-      color: npColor.trim(),
-      purchasePrice: cost,
-      retailPrice: retail,
-      wholesalePrice: parseNum(npWholesale) || retail,
-      stockQty: 0,
-      lowStock: 2
-    })) as number
-    await db.variants.update(vid, { sku: makeSku(vid, npSize.trim()) })
-    setLines((ls) => [...ls, { variantId: vid, productName: name, size: npSize.trim(), color: npColor.trim(), qty: 1, unitCost: cost }])
-    setShowNewProduct(false)
-    setNpName('')
-    setNpSize('')
-    setNpColor('')
-    setNpCost('')
-    setNpRetail('')
-    setNpWholesale('')
-    setError('')
-  }
 
   async function save() {
     if (!supplierId) return setError('تأمین‌کننده را انتخاب کنید')
@@ -1101,56 +1065,12 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {!showNewProduct && (
-        <button
-          onClick={() => {
-            setShowNewProduct(true)
-            if (search.trim()) setNpName(search.trim())
-          }}
-          className="mb-3 w-full rounded-xl border-2 border-dashed border-teal-300 py-2 text-sm font-bold text-teal-700"
-        >
-          ＋ جنس جدید (در گدام نیست)
-        </button>
-      )}
-      {showNewProduct && (
-        <div className="mb-3 rounded-xl border border-teal-200 bg-teal-50/50 p-3">
-          <p className="mb-2 text-sm font-bold text-teal-800">جنس جدید — همراه با خرید ثبت می‌شود</p>
-          <Field label="نام جنس *">
-            <input className={inputCls} value={npName} onChange={(e) => setNpName(e.target.value)} />
-          </Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="سایز *">
-              <input className={inputCls} value={npSize} onChange={(e) => setNpSize(e.target.value)} />
-            </Field>
-            <Field label="رنگ">
-              <input className={inputCls} value={npColor} onChange={(e) => setNpColor(e.target.value)} />
-            </Field>
-            <Field label="قیمت خرید">
-              <input className={inputCls} inputMode="numeric" value={npCost} onChange={(e) => setNpCost(e.target.value)} />
-            </Field>
-            <Field label="قیمت فروش (پرچون)">
-              <input className={inputCls} inputMode="numeric" value={npRetail} onChange={(e) => setNpRetail(e.target.value)} />
-            </Field>
-            <Field label="قیمت عمده">
-              <input className={inputCls} inputMode="numeric" value={npWholesale} onChange={(e) => setNpWholesale(e.target.value)} />
-            </Field>
-          </div>
-          <button
-            onClick={() => setNpWizard(true)}
-            className="mb-2 w-full rounded-xl bg-amber-600 py-2.5 text-sm font-bold text-white active:bg-amber-700"
-          >
-            📦 خرید کارتنی — تعداد کارتن و شماره‌بندی
-          </button>
-          <div className="flex gap-2">
-            <button onClick={() => void addNewProduct()} className="flex-1 rounded-xl bg-teal-700 py-2 text-sm font-bold text-white">
-              افزودن یک سایز (بدون کارتن)
-            </button>
-            <button onClick={() => setShowNewProduct(false)} className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-bold text-slate-600">
-              لغو
-            </button>
-          </div>
-        </div>
-      )}
+      <button
+        onClick={() => setNpWizard(true)}
+        className="mb-3 w-full rounded-xl border-2 border-dashed border-amber-400 py-2.5 text-sm font-bold text-amber-700"
+      >
+        📦 جنس جدید — خرید کارتنی (در گدام نیست)
+      </button>
 
       {lines.map((l, i) => (
         <div key={l.variantId} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2">
@@ -1247,17 +1167,8 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
       {npWizard && (
         <CartonWizardModal
           variants={[]}
-          defaults={{ name: npName, color: npColor, cost: npCost, retail: npRetail, wholesale: npWholesale }}
-          onApply={(newLines) => {
-            setLines((ls) => [...ls, ...newLines])
-            setShowNewProduct(false)
-            setNpName('')
-            setNpSize('')
-            setNpColor('')
-            setNpCost('')
-            setNpRetail('')
-            setNpWholesale('')
-          }}
+          defaults={{ name: search.trim(), color: '', cost: '', retail: '', wholesale: '' }}
+          onApply={(newLines) => setLines((ls) => [...ls, ...newLines])}
           onClose={() => setNpWizard(false)}
         />
       )}
