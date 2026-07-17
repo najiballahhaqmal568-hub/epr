@@ -213,6 +213,21 @@ export interface ReturnDoc extends Synced {
   amount: number
 }
 
+/** جنس کاندید برای خرید آینده — با منبع (تلگرام/واتساپ) و مشخصات فروشگاه */
+export interface Candidate {
+  id?: number
+  name: string
+  source?: 'telegram' | 'whatsapp' | 'market' | 'other'
+  shopName?: string
+  /** آدرس یا لینک کانال/چت */
+  address?: string
+  phone?: string
+  price?: number
+  note?: string
+  photo?: string
+  createdAt: number
+}
+
 export interface Setting {
   key: string
   value: unknown
@@ -271,6 +286,7 @@ export const db = new Dexie('shoeErp') as Dexie & {
   reconciliations: EntityTable<Reconciliation, 'id'>
   adjustments: EntityTable<Adjustment, 'id'>
   returns: EntityTable<ReturnDoc, 'id'>
+  candidates: EntityTable<Candidate, 'id'>
   settings: Dexie.Table<Setting, string>
   outbox: EntityTable<OutboxRow, 'id'>
   syncState: Dexie.Table<SyncStateRow, string>
@@ -428,6 +444,11 @@ db.version(4).upgrade(async (tx) => {
       }
     }
   }
+})
+
+// نسخهٔ ۵: جدول کاندیدهای خرید (محلی — همگام نمی‌شود)
+db.version(5).stores({
+  candidates: '++id, name, createdAt'
 })
 
 db.on('populate', async (tx) => {

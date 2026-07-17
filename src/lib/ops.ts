@@ -371,6 +371,7 @@ const TABLES = [
   'reconciliations',
   'adjustments',
   'returns',
+  'candidates',
   'settings'
 ] as const
 
