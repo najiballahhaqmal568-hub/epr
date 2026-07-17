@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, makeSku, type Purchase, type PurchaseLine, type Product, type Supplier, type ReturnLine } from '../db'
+import { db, makeSku, type Purchase, type PurchaseLine, type Product, type Supplier, type ReturnLine, type Variant } from '../db'
 import { addPurchase, addPayment, addSupplierReturn, receivePurchase, addOpeningDebt } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
@@ -637,6 +637,176 @@ function PaySupplierModal({ supplierId, onClose }: { supplierId: number; onClose
   )
 }
 
+/**
+ * شماره‌بندی کارتن در وقت خرید: تعداد هر سایز در یک کارتن × تعداد کارتن.
+ * سایز جدید همان‌جا ساخته می‌شود و ترکیب می‌تواند به عنوان کارتن‌بندی جنس ذخیره شود.
+ */
+function CartonEditorModal({
+  product,
+  variants,
+  onApply,
+  onClose
+}: {
+  product: Product
+  variants: Variant[]
+  onApply: (lines: PurchaseLine[]) => void
+  onClose: () => void
+}) {
+  const first = variants[0]
+  const [rows, setRows] = useState(
+    variants.map((v) => ({
+      variantId: v.id!,
+      size: v.size,
+      color: v.color,
+      cost: String(v.purchasePrice),
+      qty: String(product.carton?.items.find((it) => it.size === v.size && it.color === v.color)?.qty ?? '')
+    }))
+  )
+  const [newRows, setNewRows] = useState<{ size: string; color: string; cost: string; qty: string }[]>([])
+  const [cartons, setCartons] = useState('1')
+  const [saveTemplate, setSaveTemplate] = useState(true)
+  const [error, setError] = useState('')
+
+  const perCarton =
+    rows.reduce((s, r) => s + parseNum(r.qty), 0) + newRows.reduce((s, r) => s + (r.size.trim() ? parseNum(r.qty) : 0), 0)
+  const nCartons = Math.max(1, parseNum(cartons))
+
+  async function apply() {
+    if (perCarton <= 0) return setError('تعداد حداقل یک سایز را بنویسید')
+    try {
+      const lines: PurchaseLine[] = []
+      const items: { size: string; color: string; qty: number }[] = []
+      for (const r of rows) {
+        const per = parseNum(r.qty)
+        if (per <= 0) continue
+        items.push({ size: r.size, color: r.color, qty: per })
+        lines.push({
+          variantId: r.variantId,
+          productName: product.name,
+          size: r.size,
+          color: r.color,
+          qty: per * nCartons,
+          unitCost: parseNum(r.cost)
+        })
+      }
+      for (const r of newRows) {
+        const per = parseNum(r.qty)
+        if (!r.size.trim() || per <= 0) continue
+        const cost = parseNum(r.cost)
+        const vid = (await db.variants.add({
+          productId: product.id!,
+          size: r.size.trim(),
+          color: r.color.trim(),
+          purchasePrice: cost,
+          retailPrice: first?.retailPrice ?? 0,
+          wholesalePrice: first?.wholesalePrice ?? 0,
+          stockQty: 0,
+          lowStock: first?.lowStock ?? 2
+        })) as number
+        await db.variants.update(vid, { sku: makeSku(vid, r.size.trim()) })
+        items.push({ size: r.size.trim(), color: r.color.trim(), qty: per })
+        lines.push({ variantId: vid, productName: product.name, size: r.size.trim(), color: r.color.trim(), qty: per * nCartons, unitCost: cost })
+      }
+      if (saveTemplate && items.length) {
+        await db.products.update(product.id!, {
+          carton: { ...(product.carton?.price ? { price: product.carton.price } : {}), items }
+        })
+      }
+      onApply(lines)
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <Modal title={`📦 شماره‌بندی کارتن — ${product.name}`} onClose={onClose}>
+      <p className="mb-2 text-sm text-slate-600">در هر کارتن از هر سایز چند جوړه است؟</p>
+      {rows.map((r, i) => (
+        <div key={r.variantId} className="mb-1 flex items-center gap-2 rounded-lg bg-slate-50 p-2">
+          <span className="flex-1 text-sm font-bold">
+            {r.size} {r.color}
+          </span>
+          <span className="text-xs text-slate-400">قیمت خرید</span>
+          <input
+            className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-center text-sm"
+            inputMode="numeric"
+            value={r.cost}
+            onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, cost: e.target.value } : x)))}
+          />
+          <input
+            className="w-16 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+            inputMode="numeric"
+            placeholder="۰"
+            value={r.qty}
+            onChange={(e) => setRows((rs) => rs.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))}
+          />
+        </div>
+      ))}
+      {newRows.map((r, i) => (
+        <div key={`n${i}`} className="mb-1 flex items-center gap-2 rounded-lg bg-teal-50 p-2">
+          <input
+            className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center text-sm"
+            placeholder="سایز"
+            value={r.size}
+            onChange={(e) => setNewRows((rs) => rs.map((x, j) => (j === i ? { ...x, size: e.target.value } : x)))}
+          />
+          <input
+            className="w-16 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center text-sm"
+            placeholder="رنگ"
+            value={r.color}
+            onChange={(e) => setNewRows((rs) => rs.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)))}
+          />
+          <input
+            className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-center text-sm"
+            inputMode="numeric"
+            placeholder="قیمت"
+            value={r.cost}
+            onChange={(e) => setNewRows((rs) => rs.map((x, j) => (j === i ? { ...x, cost: e.target.value } : x)))}
+          />
+          <input
+            className="w-16 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+            inputMode="numeric"
+            placeholder="۰"
+            value={r.qty}
+            onChange={(e) => setNewRows((rs) => rs.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))}
+          />
+        </div>
+      ))}
+      <button
+        className="mb-3 w-full rounded-xl border border-dashed border-teal-600 py-1.5 text-sm text-teal-700"
+        onClick={() => setNewRows((rs) => [...rs, { size: '', color: first?.color ?? '', cost: String(first?.purchasePrice ?? ''), qty: '' }])}
+      >
+        ＋ سایز جدید (در گدام نیست)
+      </button>
+
+      <div className="mb-2 flex items-center justify-between rounded-xl bg-amber-50 p-3">
+        <span className="text-sm font-bold text-amber-800">هر کارتن: {fmtNum(perCarton)} جوړه</span>
+        <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+          تعداد کارتن
+          <input
+            className="w-16 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+            inputMode="numeric"
+            value={cartons}
+            onChange={(e) => setCartons(e.target.value)}
+          />
+        </label>
+      </div>
+      <p className="mb-2 text-sm font-bold text-slate-800">
+        جمله: {fmtNum(perCarton * nCartons)} جوړه ({fmtNum(nCartons)} کارتن)
+      </p>
+      <label className="mb-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" className="h-4 w-4" checked={saveTemplate} onChange={(e) => setSaveTemplate(e.target.checked)} />
+        این ترکیب به عنوان کارتن‌بندی این جنس ذخیره شود
+      </label>
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <PrimaryBtn onClick={apply} disabled={perCarton <= 0}>
+        افزودن به خرید
+      </PrimaryBtn>
+    </Modal>
+  )
+}
+
 function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [supplierId, setSupplierId] = useState<number | ''>('')
   const [lines, setLines] = useState<PurchaseLine[]>([])
@@ -648,6 +818,7 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [useSarraf, setUseSarraf] = useState(false)
   const [sarrafId, setSarrafId] = useState<number | ''>('')
   const [sarrafStr, setSarrafStr] = useState('')
+  const [cartonEditFor, setCartonEditFor] = useState<Product | null>(null)
   // فورم جنس جدید داخل خرید — لازم نیست اول به گدام برود
   const [showNewProduct, setShowNewProduct] = useState(false)
   const [npName, setNpName] = useState('')
@@ -678,15 +849,9 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           .slice(0, 12)
       : []
 
-  // جنس‌های کارتن‌دارِ مطابق جستجو — برای دکمهٔ «＋ یک کارتن»
-  const cartonProducts = [
-    ...new Map(
-      matches
-        .map((v) => productMap.get(v.productId)!)
-        .filter((p) => (p.carton?.items.length ?? 0) > 0)
-        .map((p) => [p.id!, p])
-    ).values()
-  ]
+  // جنس‌های مطابق جستجو (یکتا) — برای دکمه‌های کارتن
+  const matchedProducts = [...new Map(matches.map((v) => [v.productId, productMap.get(v.productId)!])).values()]
+  const cartonProducts = matchedProducts.filter((p) => (p.carton?.items.length ?? 0) > 0)
 
   function addCarton(p: Product) {
     const vs = variants?.filter((v) => v.productId === p.id) ?? []
@@ -789,9 +954,15 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           </button>
         )
       })}
-      {cartonProducts.length > 0 && (
-        <p className="-mt-1 mb-2 text-xs text-slate-400">هر ضربه یک کارتن کامل اضافه می‌کند؛ اگر شماره‌بندی این حمل فرق دارد، تعدادها را پایین ویرایش کنید.</p>
-      )}
+      {matchedProducts.map((p) => (
+        <button
+          key={`ce${p.id}`}
+          onClick={() => setCartonEditFor(p)}
+          className="mb-2 w-full rounded-xl border border-dashed border-amber-400 px-3 py-2 text-right text-sm font-bold text-amber-700 active:bg-amber-50"
+        >
+          📦 {p.name} — شماره‌بندی کارتن (تعیین سایزها × تعداد کارتن)
+        </button>
+      ))}
       {matches.length > 0 && (
         <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
           {matches.map((v) => {
@@ -956,6 +1127,24 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           ثبت خرید
         </PrimaryBtn>
       </div>
+      {cartonEditFor && (
+        <CartonEditorModal
+          product={cartonEditFor}
+          variants={(variants ?? []).filter((v) => v.productId === cartonEditFor.id)}
+          onApply={(newLines) =>
+            setLines((ls) => {
+              let out = [...ls]
+              for (const nl of newLines) {
+                const i = out.findIndex((l) => l.variantId === nl.variantId)
+                if (i >= 0) out = out.map((l, j) => (j === i ? { ...l, qty: l.qty + nl.qty, unitCost: nl.unitCost } : l))
+                else out.push(nl)
+              }
+              return out
+            })
+          }
+          onClose={() => setCartonEditFor(null)}
+        />
+      )}
     </Modal>
   )
 }
