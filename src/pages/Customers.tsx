@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../db'
-import { addPayment } from '../lib/ops'
+import { addPayment, addOpeningDebt } from '../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput, startOfDay } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
@@ -59,6 +59,7 @@ function CustomerModal({ customer, onClose }: { customer: Customer | null; onClo
   const [type, setType] = useState<'retail' | 'wholesale'>(customer?.type ?? 'retail')
   const [flag, setFlag] = useState<'good' | 'bad' | ''>(customer?.flag ?? '')
   const [promise, setPromise] = useState(customer?.promiseDate ? toDateInput(customer.promiseDate) : '')
+  const [openingDebt, setOpeningDebt] = useState('')
 
   return (
     <Modal title={customer ? 'ویرایش مشتری' : 'مشتری جدید'} onClose={onClose}>
@@ -86,6 +87,16 @@ function CustomerModal({ customer, onClose }: { customer: Customer | null; onClo
           <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
         </Field>
       )}
+      {!customer && (
+        <>
+          <Field label="قرض قبلی (اختیاری)">
+            <input className={inputCls} inputMode="numeric" value={openingDebt} onChange={(e) => setOpeningDebt(e.target.value)} placeholder="۰" />
+          </Field>
+          {parseNum(openingDebt) > 0 && (
+            <p className="-mt-2 mb-3 text-xs text-slate-400">قرض فروش‌های گذشته — در فروش، مفاد و صندوق حساب نمی‌شود.</p>
+          )}
+        </>
+      )}
       <PrimaryBtn
         disabled={!name.trim()}
         onClick={async () => {
@@ -97,7 +108,11 @@ function CustomerModal({ customer, onClose }: { customer: Customer | null; onClo
             promiseDate: promise ? fromDateInput(promise) : undefined
           }
           if (customer?.id) await db.customers.update(customer.id, data)
-          else await db.customers.add({ ...data, balance: 0 })
+          else {
+            const id = (await db.customers.add({ ...data, balance: 0 })) as number
+            const debt = parseNum(openingDebt)
+            if (debt > 0) await addOpeningDebt('customer', id, data.name, debt)
+          }
           onClose()
         }}
       >
@@ -110,7 +125,10 @@ function CustomerModal({ customer, onClose }: { customer: Customer | null; onClo
 function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [showPay, setShowPay] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
+  const [showDebt, setShowDebt] = useState(false)
   const [amount, setAmount] = useState('')
+  const [debtStr, setDebtStr] = useState('')
+  const [debtNote, setDebtNote] = useState('')
 
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
   const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
@@ -132,10 +150,36 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
         <button className="flex-1 rounded-xl bg-teal-700 py-2 font-bold text-white" onClick={() => setShowPay(true)}>
           دریافت پول
         </button>
+        <button className="flex-1 rounded-xl bg-amber-100 py-2 font-bold text-amber-800" onClick={() => setShowDebt(true)}>
+          قرض قبلی
+        </button>
         <button className="flex-1 rounded-xl bg-slate-100 py-2 font-bold text-slate-700" onClick={() => setShowEdit(true)}>
           ویرایش
         </button>
       </div>
+
+      {showDebt && (
+        <div className="mb-4 rounded-xl border border-amber-200 p-3">
+          <p className="mb-2 text-xs text-slate-500">قرض فروش‌های گذشته (پیش از اپ) — در فروش، مفاد و صندوق حساب نمی‌شود.</p>
+          <Field label="مبلغ قرض قبلی">
+            <input className={inputCls} inputMode="numeric" value={debtStr} onChange={(e) => setDebtStr(e.target.value)} />
+          </Field>
+          <Field label="یادداشت (اختیاری)">
+            <input className={inputCls} value={debtNote} onChange={(e) => setDebtNote(e.target.value)} placeholder="مثلاً بابت خریدهای سال گذشته" />
+          </Field>
+          <PrimaryBtn
+            disabled={parseNum(debtStr) <= 0}
+            onClick={async () => {
+              await addOpeningDebt('customer', c.id!, c.name, parseNum(debtStr), debtNote)
+              setDebtStr('')
+              setDebtNote('')
+              setShowDebt(false)
+            }}
+          >
+            ثبت قرض قبلی
+          </PrimaryBtn>
+        </div>
+      )}
 
       {showPay && (
         <div className="mb-4 rounded-xl border border-teal-200 p-3">
@@ -162,14 +206,22 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
       )}
 
       <p className="mb-2 font-bold text-slate-700">تاریخچه</p>
-      {payments?.map((p) => (
-        <div key={`p${p.id}`} className="mb-2 flex justify-between rounded-lg bg-teal-50 p-2 text-sm">
-          <span>
-            {p.note === 'بیلانس اولیه' ? 'بیلانس اولیه' : `دریافت پول — ${fmtDate(p.date)}`}
-          </span>
-          <span className="font-bold text-teal-700">{fmtMoney(p.note === 'بیلانس اولیه' ? -p.amount : p.amount)}</span>
-        </div>
-      ))}
+      {payments?.map((p) =>
+        p.amount < 0 ? (
+          // قرض قبلی / بیلانس اولیه: قرض را بالا برده است
+          <div key={`p${p.id}`} className="mb-2 flex justify-between rounded-lg bg-amber-50 p-2 text-sm">
+            <span>
+              {p.note === 'بیلانس اولیه' ? 'بیلانس اولیه' : (p.note ?? 'قرض قبلی')} — {fmtDate(p.date)}
+            </span>
+            <span className="font-bold text-red-600">+{fmtMoney(-p.amount)}</span>
+          </div>
+        ) : (
+          <div key={`p${p.id}`} className="mb-2 flex justify-between rounded-lg bg-teal-50 p-2 text-sm">
+            <span>دریافت پول — {fmtDate(p.date)}</span>
+            <span className="font-bold text-teal-700">{fmtMoney(p.amount)}</span>
+          </div>
+        )
+      )}
       {sales?.map((s) => (
         <div key={`s${s.id}`} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
           <div className="flex justify-between">

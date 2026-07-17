@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, makeSku, type Purchase, type PurchaseLine, type Product, type Supplier, type ReturnLine } from '../db'
-import { addPurchase, addPayment, addSupplierReturn, receivePurchase } from '../lib/ops'
+import { addPurchase, addPayment, addSupplierReturn, receivePurchase, addOpeningDebt } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
@@ -196,6 +196,9 @@ export default function Purchases() {
 
 /** تاریخچهٔ کامل حساب یک تأمین‌کننده یا صراف */
 function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
+  const [showDebt, setShowDebt] = useState(false)
+  const [debtStr, setDebtStr] = useState('')
+  const [debtNote, setDebtNote] = useState('')
   const live = useLiveQuery(() => db.suppliers.get(supplier.id!), [supplier.id])
   const purchases = useLiveQuery(
     () => db.purchases.where('supplierId').equals(supplier.id!).filter((p) => !p.deleted).toArray(),
@@ -237,8 +240,9 @@ function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClos
     })
   })
   payments?.forEach((p) => {
-    if (p.note === 'بیلانس اولیه' && p.amount < 0) {
-      events.push({ date: p.date, label: 'بیلانس اولیه', amount: -p.amount, plus: true })
+    if (p.amount < 0) {
+      // بیلانس اولیه / قرض قبلی: قرض ما را بالا برده است
+      events.push({ date: p.date, label: p.note ?? 'قرض قبلی', amount: -p.amount, plus: true })
     } else {
       events.push({
         date: p.date,
@@ -266,6 +270,32 @@ function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClos
         <p className="text-sm text-slate-500">{bal > 0 ? 'قرض ما' : 'حساب تصفیه است'}</p>
         <p className={`text-2xl font-bold ${bal > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(bal)}</p>
       </div>
+      {!showDebt ? (
+        <button className="mb-3 w-full rounded-xl bg-amber-100 py-2 text-sm font-bold text-amber-800" onClick={() => setShowDebt(true)}>
+          ＋ ثبت قرض قبلی (پیش از اپ)
+        </button>
+      ) : (
+        <div className="mb-3 rounded-xl border border-amber-200 p-3">
+          <p className="mb-2 text-xs text-slate-500">قرض خریدهای گذشته — در خرید، مفاد و صندوق حساب نمی‌شود.</p>
+          <Field label="مبلغ قرض قبلی">
+            <input className={inputCls} inputMode="numeric" value={debtStr} onChange={(e) => setDebtStr(e.target.value)} />
+          </Field>
+          <Field label="یادداشت (اختیاری)">
+            <input className={inputCls} value={debtNote} onChange={(e) => setDebtNote(e.target.value)} placeholder="مثلاً بابت حمل گذشته" />
+          </Field>
+          <PrimaryBtn
+            disabled={parseNum(debtStr) <= 0}
+            onClick={async () => {
+              await addOpeningDebt('supplier', supplier.id!, supplier.name, parseNum(debtStr), debtNote)
+              setDebtStr('')
+              setDebtNote('')
+              setShowDebt(false)
+            }}
+          >
+            ثبت قرض قبلی
+          </PrimaryBtn>
+        </div>
+      )}
       <p className="mb-2 text-sm font-bold text-slate-700">تاریخچهٔ حساب</p>
       {events.length === 0 && <Empty text="هنوز سندی ثبت نشده." />}
       <div className="max-h-96 overflow-y-auto">
@@ -510,6 +540,7 @@ function SupplierReturnModal({ supplier, onClose }: { supplier: Supplier; onClos
 function NewSupplierModal({ kind, onClose }: { kind: 'supplier' | 'sarraf'; onClose: () => void }) {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [openingDebt, setOpeningDebt] = useState('')
   return (
     <Modal title={kind === 'sarraf' ? 'صراف جدید' : 'تأمین‌کننده جدید'} onClose={onClose}>
       <Field label="نام *">
@@ -518,10 +549,18 @@ function NewSupplierModal({ kind, onClose }: { kind: 'supplier' | 'sarraf'; onCl
       <Field label="شماره تلفن">
         <input className={inputCls} dir="ltr" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
+      <Field label="قرض قبلی ما (اختیاری)">
+        <input className={inputCls} inputMode="numeric" value={openingDebt} onChange={(e) => setOpeningDebt(e.target.value)} placeholder="۰" />
+      </Field>
+      {parseNum(openingDebt) > 0 && (
+        <p className="-mt-2 mb-3 text-xs text-slate-400">قرض خریدهای گذشته (پیش از اپ) — در خرید، مفاد و صندوق حساب نمی‌شود.</p>
+      )}
       <PrimaryBtn
         disabled={!name.trim()}
         onClick={async () => {
-          await db.suppliers.add({ name: name.trim(), phone: phone.trim(), balance: 0, kind })
+          const id = (await db.suppliers.add({ name: name.trim(), phone: phone.trim(), balance: 0, kind })) as number
+          const debt = parseNum(openingDebt)
+          if (debt > 0) await addOpeningDebt('supplier', id, name.trim(), debt)
           onClose()
         }}
       >

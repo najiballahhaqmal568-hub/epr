@@ -136,6 +136,35 @@ export async function addPayment(payment: Payment): Promise<number> {
   })
 }
 
+/**
+ * قرض قبلی (پیش از استفاده از اپ): فقط بیلانس طرف بالا می‌رود.
+ * سند پرداخت با مبلغ منفی ثبت می‌شود تا بین دستگاه‌ها همگام شود؛
+ * نه فروش است، نه در مفاد می‌آید و نه صندوق را تغییر می‌دهد.
+ */
+export async function addOpeningDebt(
+  partyType: 'customer' | 'supplier',
+  partyId: number,
+  partyName: string,
+  amount: number,
+  note?: string
+): Promise<void> {
+  if (amount <= 0) return
+  return db.transaction('rw', db.payments, db.customers, db.suppliers, async () => {
+    const table = partyType === 'customer' ? db.customers : db.suppliers
+    const row = await table.get(partyId)
+    if (!row) throw new Error('طرف حساب یافت نشد')
+    await table.update(partyId, { balance: row.balance + amount })
+    await db.payments.add({
+      date: Date.now(),
+      partyType,
+      partyId,
+      partyName,
+      amount: -amount,
+      note: note?.trim() ? `قرض قبلی — ${note.trim()}` : 'قرض قبلی'
+    })
+  })
+}
+
 const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'personalExpense' | 'withdrawal'> = {
   business: 'expense',
   home: 'homeExpense',
