@@ -348,8 +348,12 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
       catId = undefined
     }
     const e: Expense = { date: Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
-    await addExpense(e)
-    onClose()
+    try {
+      await addExpense(e)
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (

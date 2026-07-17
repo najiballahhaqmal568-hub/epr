@@ -10,8 +10,17 @@ import {
   type CashMovement
 } from '../db'
 
-function movement(m: Omit<CashMovement, 'id'>) {
-  if (m.amount === 0) return Promise.resolve(0)
+async function movement(m: Omit<CashMovement, 'id'>, opts?: { allowNegative?: boolean }) {
+  if (m.amount === 0) return 0
+  // صندوق نقدی نباید منفی شود — پیسه‌ای که نیست خرج نمی‌شود
+  if (m.amount < 0 && !opts?.allowNegative) {
+    const all = await db.cashMovements.filter((x) => !x.deleted).toArray()
+    const bal = all.reduce((s, x) => s + x.amount, 0)
+    if (bal + m.amount < 0) {
+      const nf = new Intl.NumberFormat('fa-AF')
+      throw new Error(`پیسه در صندوق کافی نیست! موجودی صندوق: ${nf.format(bal)} ؋`)
+    }
+  }
   return db.cashMovements.add(m)
 }
 
@@ -54,7 +63,8 @@ export async function deleteSale(saleId: number): Promise<void> {
       const c = await db.customers.get(sale.customerId)
       if (c) await db.customers.update(sale.customerId, { balance: c.balance - remainder })
     }
-    await movement({ date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, note: 'حذف فروش' })
+    // حذفِ اصلاحی است — حتی اگر صندوق کم شود باید ثبت گردد
+    await movement({ date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, note: 'حذف فروش' }, { allowNegative: true })
     await db.sales.update(saleId, { deleted: true })
   })
 }
@@ -260,8 +270,9 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
  */
 export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
-    await addCustomerReturn(ret)
+    // اول فروش (پول وارد صندوق)، بعد مرجوعی — تا در تبادله صندوق به اشتباه «کم» حساب نشود
     await addSale(sale)
+    await addCustomerReturn(ret)
   })
 }
 
