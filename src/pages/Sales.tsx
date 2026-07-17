@@ -51,7 +51,7 @@ export default function Sales() {
               </div>
             </div>
             <p className="mt-1 text-sm text-slate-600">
-              {s.lines.map((l) => `${l.productName} ${l.size} ×${fmtNum(l.qty)}`).join('، ')}
+              {s.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
             </p>
             <div className="mt-1 flex gap-4">
               <button className="text-xs font-bold text-teal-700" onClick={() => setReturning(s)}>

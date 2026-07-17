@@ -84,7 +84,7 @@ export default function Purchases() {
                   </div>
                 </div>
                 <p className="mt-1 text-sm text-slate-600">
-                  {p.lines.map((l) => `${l.productName} ${l.size} ×${fmtNum(l.qty)}`).join('، ')}
+                  {p.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
                 </p>
                 {pending ? (
                   <button

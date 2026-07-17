@@ -67,13 +67,19 @@ export default function Inventory() {
     byProduct.set(v.productId, list)
   })
 
-  const filtered = products?.filter(
-    (p) =>
-      !search ||
-      p.name.includes(search) ||
-      (p.brand ?? '').includes(search) ||
-      (byProduct.get(p.id!) ?? []).some((v) => (v.sku ?? '').toLowerCase().includes(search.toLowerCase()))
-  )
+  // جستجو با ترکیب نام، برند، سایز، رنگ و کود — مثلاً «اسکچرز 40 خاکی»
+  const filtered = products?.filter((p) => {
+    if (!search.trim()) return true
+    const vs = byProduct.get(p.id!) ?? []
+    const words = search.trim().split(/\s+/)
+    return (
+      vs.some((v) => {
+        const hay = `${p.name} ${p.brand ?? ''} ${p.category ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`.toLowerCase()
+        return words.every((w) => hay.includes(w.toLowerCase()))
+      }) ||
+      (vs.length === 0 && words.every((w) => `${p.name} ${p.brand ?? ''}`.toLowerCase().includes(w.toLowerCase())))
+    )
+  })
 
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
 
