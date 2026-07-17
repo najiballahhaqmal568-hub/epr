@@ -516,6 +516,7 @@ function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
 function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [saleType, setSaleType] = useState<'retail' | 'wholesale'>('retail')
   const [customerId, setCustomerId] = useState<number | ''>('')
+  const [custSearch, setCustSearch] = useState('')
   const [lines, setLines] = useState<SaleLine[]>([])
   const [paidStr, setPaidStr] = useState('')
   const [paidTouched, setPaidTouched] = useState(false)
@@ -527,9 +528,25 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
+  // فروش‌های ۳۰ روز اخیر برای کاشی‌های «پرفروش‌ها»
+  const recentSales = useLiveQuery(
+    () => db.sales.where('date').aboveOrEqual(Date.now() - 30 * 86400000).filter((s) => !s.deleted).toArray(),
+    []
+  )
 
   const productMap = new Map<number, Product>()
   products?.forEach((p) => productMap.set(p.id!, p))
+
+  // پرفروش‌ترین‌های ۳۰ روز اخیر؛ اگر فروشی نبود، اجناس با موجودی بیشتر
+  const soldCount = new Map<number, number>()
+  recentSales?.forEach((s) => s.lines.forEach((l) => soldCount.set(l.variantId, (soldCount.get(l.variantId) ?? 0) + l.qty)))
+  const quickTiles = (variants ?? [])
+    .filter((v) => v.stockQty > 0 && productMap.has(v.productId))
+    .sort((a, b) => {
+      const d = (soldCount.get(b.id!) ?? 0) - (soldCount.get(a.id!) ?? 0)
+      return d !== 0 ? d : b.stockQty - a.stockQty
+    })
+    .slice(0, 6)
 
   const matches =
     search.trim() && variants && products
@@ -537,7 +554,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
           .filter((v) => {
             const p = productMap.get(v.productId)
             if (!p) return false
-            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color}`
+            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`
             return search
               .trim()
               .split(/\s+/)
@@ -545,6 +562,20 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
           })
           .slice(0, 12)
       : []
+
+  const selectedCustomer = customers?.find((c) => c.id === customerId)
+  const custMatches =
+    custSearch.trim() && customers
+      ? customers.filter((c) => `${c.name} ${c.phone ?? ''}`.includes(custSearch.trim())).slice(0, 8)
+      : []
+
+  async function quickAddCustomer() {
+    const name = custSearch.trim()
+    if (!name) return
+    const id = (await db.customers.add({ name, type: saleType, balance: 0 })) as number
+    setCustomerId(id)
+    setCustSearch('')
+  }
 
   const subtotal = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
   const discount = Math.min(parseNum(discountStr), subtotal)
@@ -609,19 +640,88 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      <Field label="مشتری (برای فروش قرضی لازمی)">
-        <select className={inputCls} value={customerId} onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : '')}>
-          <option value="">مشتری نقدی</option>
-          {customers?.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
+      {selectedCustomer ? (
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-teal-50 p-2.5">
+          <div>
+            <p className="font-bold text-teal-800">👤 {selectedCustomer.name}</p>
+            {selectedCustomer.balance > 0 && (
+              <p className="text-xs text-red-600">قرض فعلی: {fmtMoney(selectedCustomer.balance)}</p>
+            )}
+          </div>
+          <button
+            className="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-500"
+            onClick={() => setCustomerId('')}
+            aria-label="حذف مشتری"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <Field label="مشتری (خالی = نقدی؛ برای قرضی لازمی)">
+          <input
+            className={inputCls}
+            value={custSearch}
+            onChange={(e) => setCustSearch(e.target.value)}
+            placeholder="جستجوی نام یا تلفن مشتری..."
+          />
+        </Field>
+      )}
+      {!selectedCustomer && custSearch.trim() && (
+        <div className="-mt-2 mb-3 overflow-hidden rounded-xl border border-slate-200">
+          {custMatches.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                setCustomerId(c.id!)
+                setCustSearch('')
+              }}
+              className="flex w-full items-center justify-between border-b border-slate-100 bg-white px-3 py-2 text-right last:border-0 active:bg-teal-50"
+            >
+              <span>{c.name}</span>
+              {c.balance > 0 ? (
+                <span className="text-xs text-red-600">قرض: {fmtMoney(c.balance)}</span>
+              ) : (
+                <span className="text-xs text-slate-400">{c.phone}</span>
+              )}
+            </button>
           ))}
-        </select>
-      </Field>
+          <button onClick={() => void quickAddCustomer()} className="w-full bg-teal-50 px-3 py-2 text-right font-bold text-teal-800">
+            ＋ مشتری جدید: «{custSearch.trim()}»
+          </button>
+        </div>
+      )}
+
+      {quickTiles.length > 0 && !search.trim() && (
+        <>
+          <p className="mb-1 text-sm font-bold text-slate-700">🔥 پرفروش‌ها — با یک ضربه اضافه کنید</p>
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            {quickTiles.map((v) => {
+              const p = productMap.get(v.productId)!
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => addLine(v)}
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-center active:bg-teal-50"
+                >
+                  {p.photo ? (
+                    <img src={p.photo} alt="" className="mx-auto mb-1 h-12 w-12 rounded-lg object-cover" />
+                  ) : (
+                    <span className="mb-1 block text-2xl">👞</span>
+                  )}
+                  <p className="truncate text-xs font-bold text-slate-800">{p.name}</p>
+                  <p className="truncate text-xs text-slate-500">
+                    {v.size} {v.color}
+                  </p>
+                  <p className="text-xs font-bold text-teal-700">{fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}</p>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       <Field label="جستجوی جنس">
-        <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز یا رنگ..." />
+        <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز، رنگ یا کود..." />
       </Field>
       {matches.length > 0 && (
         <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
@@ -716,10 +816,19 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
       </div>
 
       {error && <p className="my-2 text-sm text-red-600">{error}</p>}
-      <div className="mt-3">
-        <PrimaryBtn onClick={save} disabled={!lines.length}>
+      {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
+      <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-3 border-t border-slate-200 bg-white p-3 pb-4">
+        <div className="flex-1">
+          <p className="text-xs text-slate-500">قابل پرداخت</p>
+          <p className="text-xl font-bold text-teal-700">{fmtMoney(total)}</p>
+        </div>
+        <button
+          onClick={save}
+          disabled={!lines.length}
+          className="rounded-xl bg-teal-700 px-8 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
+        >
           ثبت فروش
-        </PrimaryBtn>
+        </button>
       </div>
     </Modal>
   )
