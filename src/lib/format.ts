@@ -8,12 +8,33 @@ export function fmtMoney(n: number): string {
   return `${nf.format(n)} ؋`
 }
 
+/** نام ماه‌های هجری شمسی در افغانستان */
+const AF_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سنبله', 'میزان', 'عقرب', 'قوس', 'جدی', 'دلو', 'حوت']
+
+const faDigits = (s: string | number): string => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
+
+function jalali(ts: number): { y: number; m: number; d: number } {
+  const parts = new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(ts)
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0)
+  return { y: get('year'), m: get('month'), d: get('day') }
+}
+
+/** ساعت ۱۲ ساعته */
+function fmtTime12(ts: number): string {
+  const d = new Date(ts)
+  let h = d.getHours()
+  const period = h < 12 ? 'ق.ظ' : 'ب.ظ'
+  h = h % 12 || 12
+  return `${faDigits(h)}:${faDigits(String(d.getMinutes()).padStart(2, '0'))} ${period}`
+}
+
 export function fmtDate(ts: number): string {
-  return new Intl.DateTimeFormat('fa-AF', { dateStyle: 'medium', timeStyle: 'short' }).format(ts)
+  return `${fmtDateShort(ts)}، ${fmtTime12(ts)}`
 }
 
 export function fmtDateShort(ts: number): string {
-  return new Intl.DateTimeFormat('fa-AF', { dateStyle: 'medium' }).format(ts)
+  const { y, m, d } = jalali(ts)
+  return `${faDigits(d)} ${AF_MONTHS[m - 1] ?? ''} ${faDigits(y)}`
 }
 
 /** تبدیل ارقام فارسی/عربی ورودی کاربر به لاتین */
