@@ -524,6 +524,7 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [promise, setPromise] = useState('')
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
+  const [pickerFor, setPickerFor] = useState<number | null>(null)
 
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
@@ -537,15 +538,22 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const productMap = new Map<number, Product>()
   products?.forEach((p) => productMap.set(p.id!, p))
 
-  // پرفروش‌ترین‌های ۳۰ روز اخیر؛ اگر فروشی نبود، اجناس با موجودی بیشتر
+  // پرفروش‌ترین مدل‌های ۳۰ روز اخیر — هر مدل یک کاشی؛ سایز/رنگ بعد از ضربه انتخاب می‌شود
   const soldCount = new Map<number, number>()
   recentSales?.forEach((s) => s.lines.forEach((l) => soldCount.set(l.variantId, (soldCount.get(l.variantId) ?? 0) + l.qty)))
-  const quickTiles = (variants ?? [])
-    .filter((v) => v.stockQty > 0 && productMap.has(v.productId))
-    .sort((a, b) => {
-      const d = (soldCount.get(b.id!) ?? 0) - (soldCount.get(a.id!) ?? 0)
-      return d !== 0 ? d : b.stockQty - a.stockQty
-    })
+  const byProd = new Map<number, { p: Product; vs: Variant[]; sold: number; stock: number }>()
+  variants?.forEach((v) => {
+    const p = productMap.get(v.productId)
+    if (!p) return
+    const e = byProd.get(p.id!) ?? { p, vs: [], sold: 0, stock: 0 }
+    e.vs.push(v)
+    e.sold += soldCount.get(v.id!) ?? 0
+    e.stock += v.stockQty
+    byProd.set(p.id!, e)
+  })
+  const quickProducts = [...byProd.values()]
+    .filter((e) => e.stock > 0)
+    .sort((a, b) => (b.sold !== a.sold ? b.sold - a.sold : b.stock - a.stock))
     .slice(0, 6)
 
   const matches =
@@ -738,28 +746,27 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {quickTiles.length > 0 && !search.trim() && (
+      {quickProducts.length > 0 && !search.trim() && (
         <>
-          <p className="mb-1 text-sm font-bold text-slate-700">🔥 پرفروش‌ها — با یک ضربه اضافه کنید</p>
+          <p className="mb-1 text-sm font-bold text-slate-700">🔥 پرفروش‌ها — ضربه بزنید و سایز را انتخاب کنید</p>
           <div className="mb-3 grid grid-cols-3 gap-2">
-            {quickTiles.map((v) => {
-              const p = productMap.get(v.productId)!
+            {quickProducts.map((e) => {
+              const inStock = e.vs.filter((v) => v.stockQty > 0)
+              const minPrice = Math.min(...inStock.map((v) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)))
               return (
                 <button
-                  key={v.id}
-                  onClick={() => addLine(v)}
+                  key={e.p.id}
+                  onClick={() => setPickerFor(e.p.id!)}
                   className="rounded-xl border border-slate-200 bg-white p-2 text-center active:bg-teal-50"
                 >
-                  {p.photo ? (
-                    <img src={p.photo} alt="" className="mx-auto mb-1 h-12 w-12 rounded-lg object-cover" />
+                  {e.p.photo ? (
+                    <img src={e.p.photo} alt="" className="mx-auto mb-1 h-12 w-12 rounded-lg object-cover" />
                   ) : (
                     <span className="mb-1 block text-2xl">👞</span>
                   )}
-                  <p className="truncate text-xs font-bold text-slate-800">{p.name}</p>
-                  <p className="truncate text-xs text-slate-500">
-                    {v.size} {v.color}
-                  </p>
-                  <p className="text-xs font-bold text-teal-700">{fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}</p>
+                  <p className="truncate text-xs font-bold text-slate-800">{e.p.name}</p>
+                  <p className="truncate text-xs text-slate-500">{fmtNum(inStock.length)} سایز/رنگ</p>
+                  <p className="text-xs font-bold text-teal-700">{fmtMoney(minPrice)}</p>
                 </button>
               )
             })}
@@ -895,6 +902,39 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
           ثبت فروش
         </button>
       </div>
+      {pickerFor != null &&
+        (() => {
+          const p = productMap.get(pickerFor)
+          const vs = (variants ?? [])
+            .filter((v) => v.productId === pickerFor)
+            .sort((a, b) => a.color.localeCompare(b.color) || parseNum(a.size) - parseNum(b.size))
+          if (!p) return null
+          return (
+            <Modal title={`انتخاب سایز — ${p.name}`} onClose={() => setPickerFor(null)}>
+              {vs.map((v) => (
+                <button
+                  key={v.id}
+                  disabled={v.stockQty <= 0}
+                  onClick={() => {
+                    addLine(v)
+                    setPickerFor(null)
+                  }}
+                  className="mb-1 flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-3 text-right active:bg-teal-50 disabled:opacity-40"
+                >
+                  <span className="text-lg font-bold text-slate-800">
+                    {v.size} <span className="text-sm font-normal text-slate-500">{v.color}</span>
+                  </span>
+                  <span className="text-left text-sm">
+                    <span className={`block font-bold ${v.stockQty <= v.lowStock ? 'text-red-600' : 'text-teal-700'}`}>
+                      {v.stockQty <= 0 ? 'ناموجود' : `${fmtNum(v.stockQty)} موجود`}
+                    </span>
+                    <span className="text-slate-500">{fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}</span>
+                  </span>
+                </button>
+              ))}
+            </Modal>
+          )
+        })()}
     </Modal>
   )
 }
