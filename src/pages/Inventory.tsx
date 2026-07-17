@@ -460,7 +460,38 @@ function ProductModal({
       : [emptyVariant()]
   )
   const [cartonPrice, setCartonPrice] = useState(product?.carton?.price ? String(product.carton.price) : '')
+  const [showBulk, setShowBulk] = useState(false)
+  const [bulkFrom, setBulkFrom] = useState('')
+  const [bulkTo, setBulkTo] = useState('')
+  const [bulkColor, setBulkColor] = useState('')
+  const [bulkCost, setBulkCost] = useState('')
+  const [bulkRetail, setBulkRetail] = useState('')
+  const [bulkWholesale, setBulkWholesale] = useState('')
   const [error, setError] = useState('')
+
+  function addBulkSizes() {
+    const from = parseNum(bulkFrom)
+    const to = parseNum(bulkTo)
+    if (from <= 0 || to < from) return setError('سایز شروع و پایان را درست بنویسید')
+    if (to - from > 30) return setError('حداکثر ۳۰ سایز یکجا')
+    const rows: VariantForm[] = []
+    for (let s = from; s <= to; s++) {
+      rows.push({
+        size: String(s),
+        color: bulkColor.trim(),
+        purchasePrice: bulkCost,
+        retailPrice: bulkRetail,
+        wholesalePrice: bulkWholesale || bulkRetail,
+        stockQty: '0',
+        lowStock: '2',
+        cartonQty: ''
+      })
+    }
+    // ردیف خالی اول را کنار بزن
+    setForms((fs) => [...fs.filter((f) => f.size.trim() || f.id), ...rows])
+    setShowBulk(false)
+    setError('')
+  }
 
   const brands = [...new Set(allProducts.map((p) => p.brand).filter(Boolean))] as string[]
   const categories = [...new Set(allProducts.map((p) => p.category).filter(Boolean))] as string[]
@@ -632,11 +663,52 @@ function ProductModal({
         </div>
       ))}
       <button
-        className="mb-4 w-full rounded-xl border border-dashed border-teal-600 py-2 text-teal-700"
+        className="mb-2 w-full rounded-xl border border-dashed border-teal-600 py-2 text-teal-700"
         onClick={() => setForms((fs) => [...fs, emptyVariant()])}
       >
         ＋ افزودن سایز دیگر
       </button>
+      {!showBulk ? (
+        <button
+          className="mb-4 w-full rounded-xl border border-dashed border-amber-500 py-2 text-amber-700"
+          onClick={() => setShowBulk(true)}
+        >
+          ⚡ افزودن چند سایز یکجا (مثلاً ۴۰ تا ۴۴)
+        </button>
+      ) : (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50/50 p-3">
+          <p className="mb-2 text-sm font-bold text-amber-800">برای هر سایز یک ردیف جدا ساخته می‌شود</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="از سایز *">
+              <input className={inputCls} inputMode="numeric" value={bulkFrom} onChange={(e) => setBulkFrom(e.target.value)} placeholder="۴۰" />
+            </Field>
+            <Field label="تا سایز *">
+              <input className={inputCls} inputMode="numeric" value={bulkTo} onChange={(e) => setBulkTo(e.target.value)} placeholder="۴۴" />
+            </Field>
+            <Field label="رنگ">
+              <input className={inputCls} value={bulkColor} onChange={(e) => setBulkColor(e.target.value)} placeholder="خاکی" />
+            </Field>
+            <Field label="قیمت خرید">
+              <input className={inputCls} inputMode="numeric" value={bulkCost} onChange={(e) => setBulkCost(e.target.value)} />
+            </Field>
+            <Field label="قیمت پرچون">
+              <input className={inputCls} inputMode="numeric" value={bulkRetail} onChange={(e) => setBulkRetail(e.target.value)} />
+            </Field>
+            <Field label="قیمت عمده">
+              <input className={inputCls} inputMode="numeric" value={bulkWholesale} onChange={(e) => setBulkWholesale(e.target.value)} />
+            </Field>
+          </div>
+          <p className="mb-2 text-xs text-slate-500">بعد از ساخته شدن، تعداد موجود هر سایز را در ردیف خودش بنویسید.</p>
+          <div className="flex gap-2">
+            <button onClick={addBulkSizes} className="flex-1 rounded-xl bg-amber-600 py-2 text-sm font-bold text-white">
+              بساز
+            </button>
+            <button onClick={() => setShowBulk(false)} className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-bold text-slate-600">
+              لغو
+            </button>
+          </div>
+        </div>
+      )}
 
       {(() => {
         const pairs = forms.reduce((s, f) => s + (f.size.trim() ? parseNum(f.cartonQty) : 0), 0)
