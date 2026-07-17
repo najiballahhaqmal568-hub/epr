@@ -525,6 +525,8 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [pickerFor, setPickerFor] = useState<number | null>(null)
+  // در عمده اول می‌پرسد: کارتن کامل یا نیم کارتن (انتخاب سایز)
+  const [pickerChoice, setPickerChoice] = useState(false)
 
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
@@ -756,7 +758,10 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
               return (
                 <button
                   key={e.p.id}
-                  onClick={() => setPickerFor(e.p.id!)}
+                  onClick={() => {
+                    setPickerFor(e.p.id!)
+                    setPickerChoice(saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0)
+                  }}
                   className="rounded-xl border border-slate-200 bg-white p-2 text-center active:bg-teal-50"
                 >
                   {e.p.photo ? (
@@ -909,6 +914,35 @@ function NewSaleModal({ onClose }: { onClose: () => void }) {
             .filter((v) => v.productId === pickerFor)
             .sort((a, b) => a.color.localeCompare(b.color) || parseNum(a.size) - parseNum(b.size))
           if (!p) return null
+          if (pickerChoice && p.carton?.items.length) {
+            const pairs = p.carton.items.reduce((s, it) => s + it.qty, 0)
+            const avail = cartonsInStock(p)
+            return (
+              <Modal title={`📦 ${p.name}`} onClose={() => setPickerFor(null)}>
+                <button
+                  disabled={avail <= 0}
+                  onClick={() => {
+                    addCartonSale(p)
+                    setPickerFor(null)
+                  }}
+                  className="mb-2 w-full rounded-xl bg-teal-700 p-4 text-right font-bold text-white active:bg-teal-800 disabled:opacity-40"
+                >
+                  <span className="block text-lg">📦 کارتن کامل ({fmtNum(pairs)} جوړه)</span>
+                  <span className="text-sm font-normal opacity-90">
+                    {avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل موجود نیست'}
+                    {p.carton.price ? ` · قیمت کارتنی: ${fmtMoney(p.carton.price)}` : ''}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setPickerChoice(false)}
+                  className="w-full rounded-xl bg-amber-100 p-4 text-right font-bold text-amber-800 active:bg-amber-200"
+                >
+                  <span className="block text-lg">✋ نیم کارتن / دانه‌ای</span>
+                  <span className="text-sm font-normal">سایزها را خودتان انتخاب کنید</span>
+                </button>
+              </Modal>
+            )
+          }
           return (
             <Modal title={`انتخاب سایز — ${p.name}`} onClose={() => setPickerFor(null)}>
               {vs.map((v) => (
