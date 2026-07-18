@@ -148,7 +148,7 @@ export default function App() {
   return (
     <div className="mx-auto min-h-dvh max-w-lg pb-20">
       {(reminder.show || debtReminder.show) && (
-        <div className="pointer-events-none fixed right-0 left-0 bottom-16 z-50 mx-auto flex max-w-lg flex-col gap-2 px-3">
+        <div className="pointer-events-none fixed right-0 left-0 bottom-36 z-50 mx-auto flex max-w-lg flex-col gap-2 px-3">
           {debtReminder.show && (
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-red-600 p-3 text-white shadow-lg">
               <span className="flex-1 text-sm font-bold">

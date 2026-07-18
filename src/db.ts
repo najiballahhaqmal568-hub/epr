@@ -49,6 +49,8 @@ export interface Customer extends Synced {
   name: string
   phone?: string
   type: 'retail' | 'wholesale'
+  /** نام خانواده — اعضای یک خانواده در دفتر قرض پرچون یکجا دیده می‌شوند */
+  family?: string
   /** مثبت = مشتری قرضدار است */
   balance: number
   flag?: 'good' | 'bad' | null
