@@ -35,7 +35,7 @@ export default function Purchases() {
 
   const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
-  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf')
+  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner')
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
 
   const tabCls = (v: string) =>
@@ -1139,7 +1139,7 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
-  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf')
+  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner')
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
 
   const productMap = new Map<number, Product>()

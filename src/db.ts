@@ -64,8 +64,10 @@ export interface Supplier extends Synced {
   phone?: string
   /** مثبت = ما به تأمین‌کننده قرضدار هستیم */
   balance: number
-  /** 'sarraf' = صراف (حواله‌دار) */
-  kind?: 'supplier' | 'sarraf'
+  /** 'sarraf' = صراف (حواله‌دار)، 'partner' = شریک فروشگاه */
+  kind?: 'supplier' | 'sarraf' | 'partner'
+  /** فیصدی سهم شریک از مفاد */
+  share?: number
 }
 
 export interface SaleLine {
@@ -158,6 +160,7 @@ export type CashMovementType =
   | 'supplierPayment'
   | 'refund'
   | 'openingSet'
+  | 'capitalIn'
 
 export interface CashMovement extends Synced {
   id?: number
@@ -167,6 +170,8 @@ export interface CashMovement extends Synced {
   /** مثبت = ورود به صندوق، منفی = خروج */
   amount: number
   note?: string
+  /** برای سرمایه‌گذاری و برداشت شریک */
+  partnerName?: string
 }
 
 export interface Reconciliation extends Synced {

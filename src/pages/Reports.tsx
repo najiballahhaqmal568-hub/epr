@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../db'
 import { fmtNum, fmtMoney, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
-import { inputCls, Card } from '../components/ui'
+import { Modal, Field, inputCls, PrimaryBtn, Card } from '../components/ui'
+import { addCapital, addPartnerWithdrawal } from '../lib/ops'
+import { parseNum } from '../lib/format'
 
 type Period = 'today' | 'week' | 'month' | 'year' | 'custom'
 
@@ -165,6 +167,8 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         {otherSpending > 0 && <Row label="خانه/شخصی/برداشت (خارج از مفاد)" value={fmtMoney(otherSpending)} />}
       </Card>
 
+      <PartnersCard netProfit={netProfit} />
+
       {catRows.length > 0 && (
         <Card>
           <p className="mb-2 font-bold text-slate-700">مصارف به تفکیک کتگوری</p>
@@ -220,5 +224,127 @@ function Row({ label, value, sub, bold, red, teal }: { label: string; value: str
         {sub && <span className="block text-xs font-normal text-slate-400">{sub}</span>}
       </span>
     </div>
+  )
+}
+
+/** شرکا و سرمایه: سرمایه‌گذاری نقدی، برداشت هر شریک و تقسیم مفاد طبق فیصدی دستی */
+function PartnersCard({ netProfit }: { netProfit: number }) {
+  const [showAdd, setShowAdd] = useState(false)
+  const [action, setAction] = useState<{ kind: 'capital' | 'withdraw'; id: number; name: string } | null>(null)
+  const [name, setName] = useState('')
+  const [share, setShare] = useState('')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [error, setError] = useState('')
+
+  const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
+  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted && Boolean(m.partnerName)).toArray(), [])
+
+  const invested = (n: string) => movements?.filter((m) => m.partnerName === n && m.type === 'capitalIn').reduce((s, m) => s + m.amount, 0) ?? 0
+  const withdrawn = (n: string) => movements?.filter((m) => m.partnerName === n && m.type === 'withdrawal').reduce((s, m) => s - m.amount, 0) ?? 0
+  const shareSum = partners?.reduce((s, p) => s + (p.share ?? 0), 0) ?? 0
+
+  return (
+    <Card>
+      <p className="mb-1 font-bold text-slate-700">🤝 شرکا و سرمایه</p>
+      <p className="mb-2 text-xs text-slate-400">سرمایه‌گذاری وارد صندوق می‌شود ولی در فروش و مفاد حساب نمی‌شود.</p>
+      {partners?.length === 0 && <p className="mb-2 text-sm text-slate-400">شریکی ثبت نشده.</p>}
+      {partners?.map((p) => (
+        <div key={p.id} className="mb-2 rounded-xl bg-slate-50 p-3">
+          <div className="flex items-center justify-between">
+            <p className="font-bold text-slate-800">
+              {p.name} <span className="text-xs font-normal text-teal-700">({fmtNum(p.share ?? 0)}٪ مفاد)</span>
+            </p>
+            <p className="text-sm font-bold text-teal-700">سرمایه: {fmtMoney(invested(p.name))}</p>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+            <span>برداشت: {fmtMoney(withdrawn(p.name))}</span>
+            <span>
+              سهم مفاد دوره: <b className={netProfit >= 0 ? 'text-teal-700' : 'text-red-600'}>{fmtMoney(Math.round((netProfit * (p.share ?? 0)) / 100))}</b>
+            </span>
+          </div>
+          <div className="mt-2 flex gap-4">
+            <button
+              className="text-xs font-bold text-teal-700"
+              onClick={() => {
+                setAction({ kind: 'capital', id: p.id!, name: p.name })
+                setAmount('')
+                setNote('')
+                setError('')
+              }}
+            >
+              ＋ سرمایه‌گذاری
+            </button>
+            <button
+              className="text-xs font-bold text-amber-700"
+              onClick={() => {
+                setAction({ kind: 'withdraw', id: p.id!, name: p.name })
+                setAmount('')
+                setError('')
+              }}
+            >
+              برداشت
+            </button>
+          </div>
+        </div>
+      ))}
+      {(partners?.length ?? 0) > 0 && shareSum !== 100 && (
+        <p className="mb-2 text-xs font-bold text-red-600">⚠️ مجموع فیصدی‌ها {fmtNum(shareSum)}٪ است — باید ۱۰۰٪ شود.</p>
+      )}
+      <button onClick={() => setShowAdd(true)} className="w-full rounded-xl border border-dashed border-teal-600 py-2 text-sm font-bold text-teal-700">
+        ＋ شریک جدید
+      </button>
+
+      {showAdd && (
+        <Modal title="شریک جدید" onClose={() => setShowAdd(false)}>
+          <Field label="نام شریک *">
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="فیصدی سهم از مفاد *">
+            <input className={inputCls} inputMode="numeric" value={share} onChange={(e) => setShare(e.target.value)} placeholder="مثلاً ۴۰" />
+          </Field>
+          <p className="mb-3 text-xs text-slate-400">خودتان را هم به عنوان شریک با فیصدی خودتان ثبت کنید تا مجموع ۱۰۰٪ شود.</p>
+          <PrimaryBtn
+            disabled={!name.trim() || parseNum(share) <= 0}
+            onClick={async () => {
+              await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share) })
+              setName('')
+              setShare('')
+              setShowAdd(false)
+            }}
+          >
+            ذخیره
+          </PrimaryBtn>
+        </Modal>
+      )}
+
+      {action && (
+        <Modal title={action.kind === 'capital' ? `سرمایه‌گذاری — ${action.name}` : `برداشت — ${action.name}`} onClose={() => setAction(null)}>
+          <Field label="مبلغ *">
+            <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          {action.kind === 'capital' && (
+            <Field label="یادداشت (اختیاری)">
+              <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
+            </Field>
+          )}
+          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+          <PrimaryBtn
+            disabled={parseNum(amount) <= 0}
+            onClick={async () => {
+              try {
+                if (action.kind === 'capital') await addCapital(action.name, parseNum(amount), note)
+                else await addPartnerWithdrawal(action.name, parseNum(amount))
+                setAction(null)
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            {action.kind === 'capital' ? 'ثبت سرمایه‌گذاری' : 'ثبت برداشت'}
+          </PrimaryBtn>
+        </Modal>
+      )}
+    </Card>
   )
 }

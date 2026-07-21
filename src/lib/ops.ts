@@ -175,6 +175,18 @@ export async function addOpeningDebt(
   })
 }
 
+/** سرمایه‌گذاری شریک: پول وارد صندوق می‌شود ولی در فروش و مفاد حساب نمی‌شود */
+export async function addCapital(partnerName: string, amount: number, note?: string): Promise<void> {
+  if (amount <= 0) return
+  await movement({ date: Date.now(), type: 'capitalIn', amount, partnerName, note: note?.trim() || undefined })
+}
+
+/** برداشت شریک از صندوق — در مفاد حساب نمی‌شود */
+export async function addPartnerWithdrawal(partnerName: string, amount: number): Promise<void> {
+  if (amount <= 0) return
+  await movement({ date: Date.now(), type: 'withdrawal', amount: -amount, partnerName, note: `برداشت ${partnerName}` })
+}
+
 const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'personalExpense' | 'withdrawal'> = {
   business: 'expense',
   home: 'homeExpense',
