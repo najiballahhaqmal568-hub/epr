@@ -64,7 +64,8 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const stockCount = variants?.reduce((s, v) => s + v.stockQty, 0) ?? 0
   const stockValue = variants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
   const receivable = customers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
-  const payable = suppliers?.reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
+  const payable = suppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
+  const suppCredit = suppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, -x.balance), 0) ?? 0
 
   const overdue = (customers ?? [])
     .filter((c) => c.balance > 0 && c.promiseDate && c.promiseDate < dayStart)
@@ -131,6 +132,7 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
             <div className="text-left">
               <p className="text-sm text-slate-500">قرض ما به تأمین‌کنندگان</p>
               <p className="text-lg font-bold text-amber-600">{fmtMoney(payable)}</p>
+              {suppCredit > 0 && <p className="text-xs font-bold text-teal-700">طلب ما (پیشکی): {fmtMoney(suppCredit)}</p>}
             </div>
           </div>
         </button>

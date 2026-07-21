@@ -121,22 +121,22 @@ export default function Purchases() {
                   {s.phone && <p className="text-sm text-slate-500" dir="ltr">{s.phone}</p>}
                 </div>
                 <div className="text-left">
-                  <p className={`font-bold ${s.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(s.balance)}</p>
-                  <p className="text-xs text-slate-400">{s.balance > 0 ? 'قرض ما' : 'تصفیه'}</p>
+                  <p className={`font-bold ${s.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(s.balance))}</p>
+                  <p className={`text-xs ${s.balance < 0 ? 'font-bold text-teal-700' : 'text-slate-400'}`}>
+                    {s.balance > 0 ? 'قرض ما' : s.balance < 0 ? 'طلب ما' : 'تصفیه'}
+                  </p>
                 </div>
               </div>
               <div className="mt-2 flex gap-4">
-                {s.balance > 0 && (
-                  <button
-                    className="text-sm font-bold text-teal-700"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPayingSupplier(s.id!)
-                    }}
-                  >
-                    پرداخت قرض
-                  </button>
-                )}
+                <button
+                  className="text-sm font-bold text-teal-700"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPayingSupplier(s.id!)
+                  }}
+                >
+                  {s.balance > 0 ? 'پرداخت قرض' : 'پیشکی'}
+                </button>
                 <button
                   className="text-sm font-bold text-amber-700"
                   onClick={(e) => {
@@ -165,22 +165,22 @@ export default function Purchases() {
                   {s.phone && <p className="text-sm text-slate-500" dir="ltr">{s.phone}</p>}
                 </div>
                 <div className="text-left">
-                  <p className={`font-bold ${s.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(s.balance)}</p>
-                  <p className="text-xs text-slate-400">{s.balance > 0 ? 'قرض ما به صراف' : 'تصفیه'}</p>
+                  <p className={`font-bold ${s.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(s.balance))}</p>
+                  <p className={`text-xs ${s.balance < 0 ? 'font-bold text-teal-700' : 'text-slate-400'}`}>
+                    {s.balance > 0 ? 'قرض ما به صراف' : s.balance < 0 ? 'طلب ما از صراف' : 'تصفیه'}
+                  </p>
                 </div>
               </div>
               <div className="mt-2 flex gap-4">
-                {s.balance > 0 && (
-                  <button
-                    className="text-sm font-bold text-teal-700"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPayingSupplier(s.id!)
-                    }}
-                  >
-                    پرداخت به صراف
-                  </button>
-                )}
+                <button
+                  className="text-sm font-bold text-teal-700"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPayingSupplier(s.id!)
+                  }}
+                >
+                  {s.balance > 0 ? 'پرداخت به صراف' : 'پیشکی به صراف'}
+                </button>
                 <span className="mr-auto text-xs text-slate-400">جزئیات ←</span>
               </div>
             </Card>
@@ -472,8 +472,8 @@ function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClos
   return (
     <Modal title={supplier.kind === 'sarraf' ? `💱 ${supplier.name}` : supplier.name} onClose={onClose}>
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
-        <p className="text-sm text-slate-500">{bal > 0 ? 'قرض ما' : 'حساب تصفیه است'}</p>
-        <p className={`text-2xl font-bold ${bal > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(bal)}</p>
+        <p className="text-sm text-slate-500">{bal > 0 ? 'قرض ما' : bal < 0 ? 'طلب ما (پیشکی)' : 'حساب تصفیه است'}</p>
+        <p className={`text-2xl font-bold ${bal > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(bal))}</p>
       </div>
       {!showDebt ? (
         <button className="mb-3 w-full rounded-xl bg-amber-100 py-2 text-sm font-bold text-amber-800" onClick={() => setShowDebt(true)}>
@@ -789,10 +789,21 @@ function PaySupplierModal({ supplierId, onClose }: { supplierId: number; onClose
   const isSarraf = supplier.kind === 'sarraf'
   return (
     <Modal title={`پرداخت به ${supplier.name}`} onClose={onClose}>
-      <p className="mb-2 text-slate-600">قرض فعلی: {fmtMoney(supplier.balance)}</p>
+      <p className="mb-2 text-slate-600">
+        {supplier.balance > 0
+          ? `قرض فعلی: ${fmtMoney(supplier.balance)}`
+          : supplier.balance < 0
+            ? `طلب فعلی ما: ${fmtMoney(-supplier.balance)}`
+            : 'حساب تصفیه است'}
+      </p>
       <Field label="مبلغ پرداختی">
         <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </Field>
+      {parseNum(amount) > Math.max(0, supplier.balance) && (
+        <p className="mb-2 text-xs font-bold text-amber-700">
+          💡 {fmtMoney(parseNum(amount) - Math.max(0, supplier.balance))} پیشکی ثبت می‌شود — {supplier.name} به شما قرضدار می‌شود.
+        </p>
+      )}
       {!isSarraf && (sarrafs?.length ?? 0) > 0 && (
         <Field label="طریق پرداخت">
           <select className={inputCls} value={via} onChange={(e) => setVia(e.target.value as 'cash' | 'sarraf')}>

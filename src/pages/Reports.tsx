@@ -257,7 +257,9 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
   const cash = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
   const receivables = allCustomers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
   const payables = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
-  const assets = stockValue + cash + receivables - payables
+  // طلب ما از تأمین‌کننده/صراف (پیشکی) — جزو دارایی است
+  const supplierCredits = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, -x.balance), 0) ?? 0
+  const assets = stockValue + cash + receivables + supplierCredits - payables
 
   const start = yearStart ?? 0
   const wSince = (n: string) =>
@@ -419,6 +421,7 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
           stockValue={stockValue}
           cash={cash}
           receivables={receivables}
+          supplierCredits={supplierCredits}
           payables={payables}
           wSince={wSince}
           yearProfit={yearProfit}
@@ -436,6 +439,7 @@ function SettleModal({
   stockValue,
   cash,
   receivables,
+  supplierCredits,
   payables,
   wSince,
   yearProfit,
@@ -445,6 +449,7 @@ function SettleModal({
   stockValue: number
   cash: number
   receivables: number
+  supplierCredits: number
   payables: number
   wSince: (n: string) => number
   yearProfit: number
@@ -499,6 +504,7 @@ function SettleModal({
         <Row label="ارزش جنس گدام" value={fmtMoney(stockValue)} />
         <Row label="پول صندوق" value={fmtMoney(cash)} />
         <Row label="طلب از مشتریان" value={fmtMoney(receivables)} />
+        {supplierCredits > 0 && <Row label="طلب ما از تأمین‌کنندگان (پیشکی)" value={fmtMoney(supplierCredits)} />}
         <Row label="قرض ما (تأمین‌کننده/صراف)" value={fmtMoney(payables)} red />
         <Row label="برداشت‌های شرکا در سال" value={fmtMoney(partners.reduce((s, p) => s + wSince(p.name), 0))} />
         <Row label="مجموع سرمایه‌ها" value={fmtMoney(partners.reduce((s, p) => s + (p.capital ?? 0), 0))} red />
