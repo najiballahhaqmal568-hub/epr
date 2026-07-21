@@ -68,6 +68,8 @@ export interface Supplier extends Synced {
   kind?: 'supplier' | 'sarraf' | 'partner'
   /** فیصدی سهم شریک از مفاد */
   share?: number
+  /** سرمایهٔ این شریک = ارزش جنس گدام (برای مالک) */
+  stockCapital?: boolean
 }
 
 export interface SaleLine {

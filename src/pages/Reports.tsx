@@ -233,12 +233,15 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
   const [action, setAction] = useState<{ kind: 'capital' | 'withdraw'; id: number; name: string } | null>(null)
   const [name, setName] = useState('')
   const [share, setShare] = useState('')
+  const [stockCap, setStockCap] = useState(false)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
 
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted && Boolean(m.partnerName)).toArray(), [])
+  const allVariants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
+  const stockValue = allVariants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
 
   const invested = (n: string) => movements?.filter((m) => m.partnerName === n && m.type === 'capitalIn').reduce((s, m) => s + m.amount, 0) ?? 0
   const withdrawn = (n: string) => movements?.filter((m) => m.partnerName === n && m.type === 'withdrawal').reduce((s, m) => s - m.amount, 0) ?? 0
@@ -255,7 +258,10 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
             <p className="font-bold text-slate-800">
               {p.name} <span className="text-xs font-normal text-teal-700">({fmtNum(p.share ?? 0)}٪ مفاد)</span>
             </p>
-            <p className="text-sm font-bold text-teal-700">سرمایه: {fmtMoney(invested(p.name))}</p>
+            <p className="text-sm font-bold text-teal-700">
+              سرمایه: {fmtMoney(invested(p.name) + (p.stockCapital ? stockValue : 0))}
+              {p.stockCapital && <span className="block text-left text-xs font-normal text-slate-400">جنس گدام: {fmtMoney(stockValue)}</span>}
+            </p>
           </div>
           <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
             <span>برداشت: {fmtMoney(withdrawn(p.name))}</span>
@@ -303,13 +309,18 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
           <Field label="فیصدی سهم از مفاد *">
             <input className={inputCls} inputMode="numeric" value={share} onChange={(e) => setShare(e.target.value)} placeholder="مثلاً ۴۰" />
           </Field>
+          <label className="mb-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4" checked={stockCap} onChange={(e) => setStockCap(e.target.checked)} />
+            سرمایهٔ این شریک = ارزش جنس گدام (برای خود مالک)
+          </label>
           <p className="mb-3 text-xs text-slate-400">خودتان را هم به عنوان شریک با فیصدی خودتان ثبت کنید تا مجموع ۱۰۰٪ شود.</p>
           <PrimaryBtn
             disabled={!name.trim() || parseNum(share) <= 0}
             onClick={async () => {
-              await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share) })
+              await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share), stockCapital: stockCap || undefined })
               setName('')
               setShare('')
+              setStockCap(false)
               setShowAdd(false)
             }}
           >
