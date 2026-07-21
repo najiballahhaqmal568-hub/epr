@@ -175,16 +175,26 @@ export async function addOpeningDebt(
   })
 }
 
-/** سرمایه‌گذاری شریک: پول وارد صندوق می‌شود ولی در فروش و مفاد حساب نمی‌شود */
-export async function addCapital(partnerName: string, amount: number, note?: string): Promise<void> {
+/** سرمایه‌گذاری شریک: پول وارد صندوق و روی سرمایهٔ ثابتش جمع می‌شود؛ در فروش و مفاد حساب نمی‌شود */
+export async function addCapital(partnerId: number, partnerName: string, amount: number, note?: string): Promise<void> {
   if (amount <= 0) return
-  await movement({ date: Date.now(), type: 'capitalIn', amount, partnerName, note: note?.trim() || undefined })
+  return db.transaction('rw', db.suppliers, db.cashMovements, async () => {
+    const p = await db.suppliers.get(partnerId)
+    if (p) await db.suppliers.update(partnerId, { capital: (p.capital ?? 0) + amount })
+    await movement({ date: Date.now(), type: 'capitalIn', amount, partnerName, note: note?.trim() || undefined })
+  })
 }
 
-/** برداشت شریک از صندوق — در مفاد حساب نمی‌شود */
-export async function addPartnerWithdrawal(partnerName: string, amount: number): Promise<void> {
+/** ورود نقدِ سرمایهٔ ثبت‌شده به صندوق — عدد سرمایه را تغییر نمی‌دهد (هنگام ثبت شریک) */
+export async function recordCapitalCash(partnerName: string, amount: number): Promise<void> {
   if (amount <= 0) return
-  await movement({ date: Date.now(), type: 'withdrawal', amount: -amount, partnerName, note: `برداشت ${partnerName}` })
+  await movement({ date: Date.now(), type: 'capitalIn', amount, partnerName, note: 'سرمایهٔ اول سال' })
+}
+
+/** برداشت/مصرف شخصی شریک از صندوق — با جزئیات؛ در مفاد تجارت حساب نمی‌شود و آخر سال از سهمش کم می‌شود */
+export async function addPartnerWithdrawal(partnerName: string, amount: number, note?: string): Promise<void> {
+  if (amount <= 0) return
+  await movement({ date: Date.now(), type: 'withdrawal', amount: -amount, partnerName, note: note?.trim() || `برداشت ${partnerName}` })
 }
 
 const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'personalExpense' | 'withdrawal'> = {
@@ -429,7 +439,7 @@ export async function resetAllData(): Promise<void> {
   await db.syncState.delete('expenseReminderDismissed')
 }
 
-const KEEP_SETTINGS = ['supaUrl', 'supaKey', 'pinHash', 'cachedProfile', 'expenseReminderOn', 'expenseReminderHour']
+const KEEP_SETTINGS = ['supaUrl', 'supaKey', 'pinHash', 'cachedProfile', 'expenseReminderOn', 'expenseReminderHour', 'partnershipStart']
 
 /** ریست این دستگاه: دیتابیس محلی پاک می‌شود؛ اطلاعات با همگام‌سازی از سرور برمی‌گردد */
 export async function resetLocalDevice(): Promise<void> {

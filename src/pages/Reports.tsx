@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../db'
-import { fmtNum, fmtMoney, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
+import { fmtNum, fmtMoney, fmtDate, fmtDateShort, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../components/ui'
-import { addCapital, addPartnerWithdrawal } from '../lib/ops'
+import { addCapital, addPartnerWithdrawal, recordCapitalCash } from '../lib/ops'
 import { parseNum } from '../lib/format'
 
 type Period = 'today' | 'week' | 'month' | 'year' | 'custom'
@@ -227,56 +227,68 @@ function Row({ label, value, sub, bold, red, teal }: { label: string; value: str
   )
 }
 
-/** شرکا و سرمایه: سرمایه‌گذاری نقدی، برداشت هر شریک و تقسیم مفاد طبق فیصدی دستی */
+/**
+ * شرکا و سرمایه — روش سنتی آخر سال:
+ * سرمایه‌ها اول سال قید می‌شوند؛ برداشت/مصرف هر شریک با جزئیات ثبت می‌شود؛
+ * آخر سال: فایده = (گدام + صندوق + طلب مشتریان − قرض ما + برداشت‌ها) − سرمایه‌ها
+ * و طبق فیصدی تقسیم و سال جدید شروع می‌شود.
+ */
 function PartnersCard({ netProfit }: { netProfit: number }) {
   const [showAdd, setShowAdd] = useState(false)
   const [action, setAction] = useState<{ kind: 'capital' | 'withdraw'; id: number; name: string } | null>(null)
+  const [historyFor, setHistoryFor] = useState<string | null>(null)
+  const [showSettle, setShowSettle] = useState(false)
   const [name, setName] = useState('')
   const [share, setShare] = useState('')
-  const [stockCap, setStockCap] = useState(false)
+  const [capitalStr, setCapitalStr] = useState('')
+  const [cashNow, setCashNow] = useState(false)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
 
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
-  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted && Boolean(m.partnerName)).toArray(), [])
+  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
   const allVariants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
-  const stockValue = allVariants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
+  const allCustomers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
+  const allSuppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
+  const yearStart = useLiveQuery(async () => Number((await db.settings.get('partnershipStart'))?.value ?? 0), [])
 
-  const invested = (n: string) => movements?.filter((m) => m.partnerName === n && m.type === 'capitalIn').reduce((s, m) => s + m.amount, 0) ?? 0
-  const withdrawn = (n: string) => movements?.filter((m) => m.partnerName === n && m.type === 'withdrawal').reduce((s, m) => s - m.amount, 0) ?? 0
+  const stockValue = allVariants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
+  const cash = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
+  const receivables = allCustomers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
+  const payables = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
+  const assets = stockValue + cash + receivables - payables
+
+  const start = yearStart ?? 0
+  const wSince = (n: string) =>
+    movements?.filter((m) => m.partnerName === n && m.type === 'withdrawal' && m.date >= start).reduce((s, m) => s - m.amount, 0) ?? 0
+  const capSum = partners?.reduce((s, p) => s + (p.capital ?? 0), 0) ?? 0
+  const wSum = partners?.reduce((s, p) => s + wSince(p.name), 0) ?? 0
+  const yearProfit = assets + wSum - capSum
   const shareSum = partners?.reduce((s, p) => s + (p.share ?? 0), 0) ?? 0
+
+  const suggested = assets
 
   return (
     <Card>
       <p className="mb-1 font-bold text-slate-700">🤝 شرکا و سرمایه</p>
-      <p className="mb-2 text-xs text-slate-400">سرمایه‌گذاری وارد صندوق می‌شود ولی در فروش و مفاد حساب نمی‌شود.</p>
+      {start > 0 && <p className="mb-2 text-xs text-slate-400">شروع سال شراکت: {fmtDateShort(start)}</p>}
       {partners?.length === 0 && <p className="mb-2 text-sm text-slate-400">شریکی ثبت نشده.</p>}
       {partners?.map((p) => (
         <div key={p.id} className="mb-2 rounded-xl bg-slate-50 p-3">
           <div className="flex items-center justify-between">
             <p className="font-bold text-slate-800">
-              {p.name} <span className="text-xs font-normal text-teal-700">({fmtNum(p.share ?? 0)}٪ مفاد)</span>
+              {p.name} <span className="text-xs font-normal text-teal-700">({fmtNum(p.share ?? 0)}٪)</span>
             </p>
-            <p className="text-sm font-bold text-teal-700">
-              سرمایه: {fmtMoney(invested(p.name) + (p.stockCapital ? stockValue : 0))}
-              {p.stockCapital && <span className="block text-left text-xs font-normal text-slate-400">جنس گدام: {fmtMoney(stockValue)}</span>}
-            </p>
+            <p className="text-sm font-bold text-teal-700">سرمایه: {fmtMoney(p.capital ?? 0)}</p>
           </div>
-          <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
-            <span>برداشت: {fmtMoney(withdrawn(p.name))}</span>
-            <span>
-              سهم مفاد دوره: <b className={netProfit >= 0 ? 'text-teal-700' : 'text-red-600'}>{fmtMoney(Math.round((netProfit * (p.share ?? 0)) / 100))}</b>
-            </span>
-          </div>
+          <p className="mt-1 text-xs text-slate-500">برداشت/مصرف امسال: {fmtMoney(wSince(p.name))}</p>
           <div className="mt-2 flex gap-4">
             <button
               className="text-xs font-bold text-teal-700"
               onClick={() => {
                 setAction({ kind: 'capital', id: p.id!, name: p.name })
-                setAmount('')
-                setNote('')
-                setError('')
+                setAmount(''); setNote(''); setError('')
               }}
             >
               ＋ سرمایه‌گذاری
@@ -285,11 +297,13 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
               className="text-xs font-bold text-amber-700"
               onClick={() => {
                 setAction({ kind: 'withdraw', id: p.id!, name: p.name })
-                setAmount('')
-                setError('')
+                setAmount(''); setNote(''); setError('')
               }}
             >
-              برداشت
+              برداشت/مصرف
+            </button>
+            <button className="mr-auto text-xs text-slate-500" onClick={() => setHistoryFor(p.name)}>
+              جزئیات ←
             </button>
           </div>
         </div>
@@ -297,9 +311,25 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
       {(partners?.length ?? 0) > 0 && shareSum !== 100 && (
         <p className="mb-2 text-xs font-bold text-red-600">⚠️ مجموع فیصدی‌ها {fmtNum(shareSum)}٪ است — باید ۱۰۰٪ شود.</p>
       )}
-      <button onClick={() => setShowAdd(true)} className="w-full rounded-xl border border-dashed border-teal-600 py-2 text-sm font-bold text-teal-700">
-        ＋ شریک جدید
-      </button>
+      <div className="flex gap-2">
+        <button onClick={() => { setShowAdd(true); setName(''); setShare(''); setCapitalStr('') }} className="flex-1 rounded-xl border border-dashed border-teal-600 py-2 text-sm font-bold text-teal-700">
+          ＋ شریک جدید
+        </button>
+        {(partners?.length ?? 0) > 0 && (
+          <button onClick={() => setShowSettle(true)} className="flex-1 rounded-xl bg-teal-700 py-2 text-sm font-bold text-white">
+            📒 حساب سال شراکت
+          </button>
+        )}
+      </div>
+      <label className="mt-2 flex items-center justify-between text-xs text-slate-500">
+        تاریخ شروع سال شراکت
+        <input
+          type="date"
+          className="rounded-lg border border-slate-300 px-2 py-1"
+          value={start ? toDateInput(start) : ''}
+          onChange={(e) => void db.settings.put({ key: 'partnershipStart', value: e.target.value ? fromDateInput(e.target.value) : 0 })}
+        />
+      </label>
 
       {showAdd && (
         <Modal title="شریک جدید" onClose={() => setShowAdd(false)}>
@@ -309,18 +339,24 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
           <Field label="فیصدی سهم از مفاد *">
             <input className={inputCls} inputMode="numeric" value={share} onChange={(e) => setShare(e.target.value)} placeholder="مثلاً ۴۰" />
           </Field>
+          <Field label="سرمایهٔ اول سال *">
+            <input className={inputCls} inputMode="numeric" value={capitalStr} onChange={(e) => setCapitalStr(e.target.value)} />
+          </Field>
+          <button className="mb-2 text-xs font-bold text-teal-700" onClick={() => setCapitalStr(String(suggested))}>
+            پیشنهاد برای مالک: گدام + صندوق + طلب مشتریان − قرض ما = {fmtMoney(suggested)}
+          </button>
           <label className="mb-2 flex items-center gap-2 text-sm">
-            <input type="checkbox" className="h-4 w-4" checked={stockCap} onChange={(e) => setStockCap(e.target.checked)} />
-            سرمایهٔ این شریک = ارزش جنس گدام (برای خود مالک)
+            <input type="checkbox" className="h-4 w-4" checked={cashNow} onChange={(e) => setCashNow(e.target.checked)} />
+            این سرمایه نقد است و حالا وارد صندوق شود (برای شریک نقدی)
           </label>
-          <p className="mb-3 text-xs text-slate-400">خودتان را هم به عنوان شریک با فیصدی خودتان ثبت کنید تا مجموع ۱۰۰٪ شود.</p>
+          <p className="mb-3 text-xs text-slate-400">این عدد قید می‌شود و با خرید و فروش تغییر نمی‌کند. خودتان را هم با فیصدی خودتان ثبت کنید.</p>
           <PrimaryBtn
-            disabled={!name.trim() || parseNum(share) <= 0}
+            disabled={!name.trim() || parseNum(share) <= 0 || parseNum(capitalStr) <= 0}
             onClick={async () => {
-              await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share), stockCapital: stockCap || undefined })
-              setName('')
-              setShare('')
-              setStockCap(false)
+              await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share), capital: parseNum(capitalStr) })
+              if (cashNow) await recordCapitalCash(name.trim(), parseNum(capitalStr))
+              if (!start) await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+              setCashNow(false)
               setShowAdd(false)
             }}
           >
@@ -330,32 +366,175 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
       )}
 
       {action && (
-        <Modal title={action.kind === 'capital' ? `سرمایه‌گذاری — ${action.name}` : `برداشت — ${action.name}`} onClose={() => setAction(null)}>
+        <Modal title={action.kind === 'capital' ? `سرمایه‌گذاری — ${action.name}` : `برداشت/مصرف — ${action.name}`} onClose={() => setAction(null)}>
           <Field label="مبلغ *">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
-          {action.kind === 'capital' && (
-            <Field label="یادداشت (اختیاری)">
-              <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
-            </Field>
+          <Field label={action.kind === 'capital' ? 'یادداشت (اختیاری)' : 'بابت چه؟ (جزئیات)'}>
+            <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder={action.kind === 'withdraw' ? 'مثلاً مصرف خانه، دوا...' : ''} />
+          </Field>
+          {action.kind === 'withdraw' && (
+            <p className="mb-2 text-xs text-slate-400">از صندوق کم می‌شود، در مصارف تجارت نمی‌آید و آخر سال از سهم خودش منفی می‌شود.</p>
           )}
           {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
           <PrimaryBtn
             disabled={parseNum(amount) <= 0}
             onClick={async () => {
               try {
-                if (action.kind === 'capital') await addCapital(action.name, parseNum(amount), note)
-                else await addPartnerWithdrawal(action.name, parseNum(amount))
+                if (action.kind === 'capital') await addCapital(action.id, action.name, parseNum(amount), note)
+                else await addPartnerWithdrawal(action.name, parseNum(amount), note)
                 setAction(null)
               } catch (e) {
                 setError(e instanceof Error ? e.message : String(e))
               }
             }}
           >
-            {action.kind === 'capital' ? 'ثبت سرمایه‌گذاری' : 'ثبت برداشت'}
+            ثبت
           </PrimaryBtn>
         </Modal>
       )}
+
+      {historyFor && (
+        <Modal title={`جزئیات — ${historyFor}`} onClose={() => setHistoryFor(null)}>
+          {(movements ?? [])
+            .filter((m) => m.partnerName === historyFor)
+            .sort((a, b) => b.date - a.date)
+            .map((m) => (
+              <div key={m.id} className="mb-1 flex items-center justify-between rounded-lg bg-slate-50 p-2 text-sm">
+                <span>
+                  <b>{m.type === 'capitalIn' ? 'سرمایه‌گذاری' : 'برداشت/مصرف'}</b>
+                  {m.note && <span className="text-slate-500"> — {m.note}</span>}
+                  <span className="block text-xs text-slate-400">{fmtDate(m.date)}</span>
+                </span>
+                <span className={`font-bold ${m.amount >= 0 ? 'text-teal-700' : 'text-amber-700'}`}>{fmtMoney(Math.abs(m.amount))}</span>
+              </div>
+            ))}
+          {!(movements ?? []).some((m) => m.partnerName === historyFor) && <p className="text-sm text-slate-400">سندی ثبت نشده.</p>}
+        </Modal>
+      )}
+
+      {showSettle && partners && (
+        <SettleModal
+          partners={partners}
+          stockValue={stockValue}
+          cash={cash}
+          receivables={receivables}
+          payables={payables}
+          wSince={wSince}
+          yearProfit={yearProfit}
+          onClose={() => setShowSettle(false)}
+        />
+      )}
+      {false && netProfit}
     </Card>
+  )
+}
+
+/** حساب آخر سال: نمایش فورمول کامل، سهم هر شریک و بستن سال */
+function SettleModal({
+  partners,
+  stockValue,
+  cash,
+  receivables,
+  payables,
+  wSince,
+  yearProfit,
+  onClose
+}: {
+  partners: import('../db').Supplier[]
+  stockValue: number
+  cash: number
+  receivables: number
+  payables: number
+  wSince: (n: string) => number
+  yearProfit: number
+  onClose: () => void
+}) {
+  const [choices, setChoices] = useState<Record<number, 'take' | 'reinvest' | 'exit'>>({})
+  const [payCash, setPayCash] = useState(true)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState('')
+
+  const shareOf = (p: import('../db').Supplier) => Math.round((yearProfit * (p.share ?? 0)) / 100)
+  const payableOf = (p: import('../db').Supplier) => shareOf(p) - wSince(p.name)
+
+  async function closeYear() {
+    try {
+      for (const p of partners) {
+        const choice = choices[p.id!] ?? 'take'
+        const pay = payableOf(p)
+        if (choice === 'exit') {
+          const total = (p.capital ?? 0) + pay
+          if (payCash && total > 0) {
+            await addPartnerWithdrawal(p.name, total, 'تصفیهٔ خروج از شراکت')
+          }
+          await db.suppliers.update(p.id!, { deleted: true })
+        } else if (choice === 'reinvest') {
+          await db.suppliers.update(p.id!, { capital: Math.max(0, (p.capital ?? 0) + pay) })
+        } else {
+          // فقط فایده برداشت — نقص از سرمایه کم می‌شود
+          if (pay > 0 && payCash) await addPartnerWithdrawal(p.name, pay, 'سهم فایدهٔ سال')
+          if (pay < 0) await db.suppliers.update(p.id!, { capital: Math.max(0, (p.capital ?? 0) + pay) })
+        }
+      }
+      await db.settings.put({ key: 'partnershipStart', value: Date.now() + 1000 })
+      setDone(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  if (done)
+    return (
+      <Modal title="📒 حساب سال شراکت" onClose={onClose}>
+        <p className="py-6 text-center text-lg font-bold text-teal-700">✅ سال بسته شد و سال جدید شروع شد.</p>
+        <PrimaryBtn onClick={onClose}>بستن</PrimaryBtn>
+      </Modal>
+    )
+
+  return (
+    <Modal title="📒 حساب سال شراکت" onClose={onClose}>
+      <p className="mb-2 text-xs text-slate-500">اول «شمارش گدام» و «تصفیه صندوق» را انجام دهید تا اعداد با واقعیت برابر باشند.</p>
+      <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+        <Row label="ارزش جنس گدام" value={fmtMoney(stockValue)} />
+        <Row label="پول صندوق" value={fmtMoney(cash)} />
+        <Row label="طلب از مشتریان" value={fmtMoney(receivables)} />
+        <Row label="قرض ما (تأمین‌کننده/صراف)" value={fmtMoney(payables)} red />
+        <Row label="برداشت‌های شرکا در سال" value={fmtMoney(partners.reduce((s, p) => s + wSince(p.name), 0))} />
+        <Row label="مجموع سرمایه‌ها" value={fmtMoney(partners.reduce((s, p) => s + (p.capital ?? 0), 0))} red />
+        <Row label="فایده/نقص خالص سال" value={fmtMoney(yearProfit)} bold teal={yearProfit >= 0} red={yearProfit < 0} />
+      </div>
+      {partners.map((p) => {
+        const pay = payableOf(p)
+        return (
+          <div key={p.id} className="mb-2 rounded-xl bg-slate-50 p-3 text-sm">
+            <div className="flex justify-between font-bold text-slate-800">
+              <span>
+                {p.name} ({fmtNum(p.share ?? 0)}٪)
+              </span>
+              <span className={pay >= 0 ? 'text-teal-700' : 'text-red-600'}>قابل پرداخت: {fmtMoney(pay)}</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              سهم: {fmtMoney(shareOf(p))} − برداشت‌ها: {fmtMoney(wSince(p.name))} · سرمایه: {fmtMoney(p.capital ?? 0)}
+            </p>
+            <select
+              className={inputCls + ' mt-2'}
+              value={choices[p.id!] ?? 'take'}
+              onChange={(e) => setChoices((c) => ({ ...c, [p.id!]: e.target.value as 'take' | 'reinvest' | 'exit' }))}
+            >
+              <option value="take">فایده را برمی‌دارد (سرمایه می‌ماند)</option>
+              <option value="reinvest">فایده دوباره سرمایه‌گذاری شود</option>
+              <option value="exit">خروج کامل (سرمایه + فایده)</option>
+            </select>
+          </div>
+        )
+      })}
+      <label className="mb-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" className="h-4 w-4" checked={payCash} onChange={(e) => setPayCash(e.target.checked)} />
+        پرداخت‌ها از صندوق ثبت شود
+      </label>
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <PrimaryBtn onClick={() => void closeYear()}>✓ بستن سال و شروع سال جدید</PrimaryBtn>
+    </Modal>
   )
 }

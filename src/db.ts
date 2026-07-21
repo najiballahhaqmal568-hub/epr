@@ -70,6 +70,8 @@ export interface Supplier extends Synced {
   share?: number
   /** سرمایهٔ این شریک = ارزش جنس گدام (برای مالک) */
   stockCapital?: boolean
+  /** سرمایهٔ ثبت‌شدهٔ سال جاری شراکت */
+  capital?: number
 }
 
 export interface SaleLine {
