@@ -366,17 +366,46 @@ export async function cashBalance(): Promise<number> {
   return all.reduce((s, m) => s + m.amount, 0)
 }
 
-/** تصفیه صندوق: مقایسهٔ شمارش با موجودی مورد انتظار */
-export async function reconcile(counted: number, note?: string): Promise<number> {
-  return db.transaction('rw', db.cashMovements, db.reconciliations, async () => {
-    const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
-    const expected = all.reduce((s, m) => s + m.amount, 0)
-    const difference = counted - expected
-    if (difference !== 0) {
-      await movement({ date: Date.now(), type: 'openingSet', amount: difference, note: 'تصفیه صندوق' })
+export type ShortageAction =
+  | { mode: 'adjust' }
+  | { mode: 'expense' }
+  | { mode: 'debt'; customerId: number; customerName: string }
+
+/**
+ * تصفیه صندوق: مقایسهٔ شمارش با موجودی مورد انتظار.
+ * برای کمبود سه راه: مصرف «کسر صندوق» (از مفاد کم می‌شود)، قرض شخص مسئول، یا فقط تنظیم.
+ */
+export async function reconcile(counted: number, note?: string, shortage?: ShortageAction): Promise<number> {
+  return db.transaction(
+    'rw',
+    [db.cashMovements, db.reconciliations, db.expenses, db.expenseCategories, db.customers, db.payments],
+    async () => {
+      const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
+      const expected = all.reduce((s, m) => s + m.amount, 0)
+      const difference = counted - expected
+      if (difference < 0 && shortage?.mode === 'expense') {
+        const cat = await db.expenseCategories.filter((c) => !c.deleted && c.name === 'کسر صندوق').first()
+        const catId = cat?.id ?? ((await db.expenseCategories.add({ name: 'کسر صندوق' })) as number)
+        await db.expenses.add({ date: Date.now(), categoryId: catId, categoryName: 'کسر صندوق', amount: -difference, note, type: 'business' })
+        await movement({ date: Date.now(), type: 'expense', amount: difference, note: 'کسر صندوق' })
+      } else if (difference < 0 && shortage?.mode === 'debt') {
+        await movement({ date: Date.now(), type: 'openingSet', amount: difference, note: `کسر صندوق — به حساب ${shortage.customerName}` })
+        const c = await db.customers.get(shortage.customerId)
+        if (c) await db.customers.update(shortage.customerId, { balance: c.balance - difference })
+        await db.payments.add({
+          date: Date.now(),
+          partyType: 'customer',
+          partyId: shortage.customerId,
+          partyName: shortage.customerName,
+          amount: difference,
+          note: 'کسر صندوق'
+        })
+      } else if (difference !== 0) {
+        await movement({ date: Date.now(), type: 'openingSet', amount: difference, note: 'تصفیه صندوق' })
+      }
+      return (await db.reconciliations.add({ date: Date.now(), expected, counted, difference, note })) as number
     }
-    return (await db.reconciliations.add({ date: Date.now(), expected, counted, difference, note })) as number
-  })
+  )
 }
 
 const TABLES = [

@@ -427,8 +427,11 @@ function CashView() {
   const [counted, setCounted] = useState('')
   const [note, setNote] = useState('')
   const [result, setResult] = useState<string>('')
+  const [shortMode, setShortMode] = useState<'expense' | 'debt' | 'adjust'>('expense')
+  const [debtCustomer, setDebtCustomer] = useState<number | ''>('')
   const dayStart = startOfDay()
 
+  const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
   const reconciliations = useLiveQuery(() => db.reconciliations.orderBy('date').reverse().filter((r) => !r.deleted).limit(10).toArray(), [])
 
@@ -508,13 +511,60 @@ function CashView() {
           <Field label="یادداشت">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
+          {counted.trim() !== '' && parseNum(counted) - balance < 0 && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50/50 p-3">
+              <p className="mb-2 text-sm font-bold text-red-600">کمبود: {fmtMoney(balance - parseNum(counted))} — با آن چه شود؟</p>
+              <label className="mb-1 flex items-center gap-2 text-sm">
+                <input type="radio" name="short" checked={shortMode === 'expense'} onChange={() => setShortMode('expense')} />
+                ثبت به عنوان مصرف «کسر صندوق» (از مفاد کم می‌شود — پیشنهادی)
+              </label>
+              <label className="mb-1 flex items-center gap-2 text-sm">
+                <input type="radio" name="short" checked={shortMode === 'debt'} onChange={() => setShortMode('debt')} />
+                به حساب شخص مسئول (قرض او ثبت می‌شود)
+              </label>
+              {shortMode === 'debt' && (
+                <select className={inputCls} value={debtCustomer} onChange={(e) => setDebtCustomer(e.target.value ? Number(e.target.value) : '')}>
+                  <option value="">شخص را انتخاب کنید... (اگر نیست، اول در مشتریان ثبتش کنید)</option>
+                  {customers?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" name="short" checked={shortMode === 'adjust'} onChange={() => setShortMode('adjust')} />
+                فقط تنظیم موجودی (اشتباه ثبت خودم بود)
+              </label>
+            </div>
+          )}
           {result && <p className="mb-2 text-sm font-bold">{result}</p>}
           <PrimaryBtn
+            disabled={counted.trim() !== '' && parseNum(counted) - balance < 0 && shortMode === 'debt' && !debtCustomer}
             onClick={async () => {
               const c = parseNum(counted)
               const diff = c - balance
-              await reconcile(c, note.trim() || undefined)
-              setResult(diff === 0 ? '✅ صندوق برابر است.' : diff > 0 ? `اضافه: ${fmtMoney(diff)} — موجودی اصلاح شد.` : `کمبود: ${fmtMoney(-diff)} — موجودی اصلاح شد.`)
+              const cust = customers?.find((x) => x.id === debtCustomer)
+              const shortage =
+                diff < 0
+                  ? shortMode === 'expense'
+                    ? ({ mode: 'expense' } as const)
+                    : shortMode === 'debt' && cust
+                      ? ({ mode: 'debt', customerId: cust.id!, customerName: cust.name } as const)
+                      : ({ mode: 'adjust' } as const)
+                  : undefined
+              await reconcile(c, note.trim() || undefined, shortage)
+              setResult(
+                diff === 0
+                  ? '✅ صندوق برابر است.'
+                  : diff > 0
+                    ? `اضافه: ${fmtMoney(diff)} — موجودی اصلاح شد.`
+                    : shortMode === 'expense'
+                      ? `کمبود ${fmtMoney(-diff)} به عنوان مصرف «کسر صندوق» ثبت شد.`
+                      : shortMode === 'debt'
+                        ? `کمبود ${fmtMoney(-diff)} به حساب ${cust?.name} ثبت شد.`
+                        : `کمبود: ${fmtMoney(-diff)} — موجودی اصلاح شد.`
+              )
               setCounted('')
               setNote('')
             }}
