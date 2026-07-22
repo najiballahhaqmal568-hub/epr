@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from './db'
+import { db, accessFlags } from './db'
 import { PinPad, hashPin } from './components/PinLock'
 import Reports from './pages/Reports'
 import Dashboard from './pages/Dashboard'
@@ -126,7 +126,10 @@ export default function App() {
     )
   }
 
-  const isStaff = typeof auth === 'object' && auth.role === 'staff'
+  const role = typeof auth === 'object' ? auth.role : null
+  const isStaff = role === 'staff'
+  const readOnly = role === 'viewer'
+  accessFlags.readOnly = readOnly
 
   if (pinHash && !unlocked) {
     return (
@@ -187,13 +190,16 @@ export default function App() {
           )}
         </div>
       )}
+      {readOnly && (
+        <div className="bg-purple-600 px-4 py-1.5 text-center text-xs font-bold text-white">👁️ حالت فقط مشاهده (شریک) — تغییر ارقام ممکن نیست</div>
+      )}
       {tab === 'dashboard' && <Dashboard goTo={(t) => setTab(t as TabId)} isStaff={isStaff} />}
       {tab === 'sales' && <Sales />}
       {tab === 'inventory' && <Inventory />}
       {tab === 'purchases' && <Purchases />}
       {tab === 'expenses' && <Expenses />}
       {tab === 'customers' && <Customers />}
-      {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} isStaff={isStaff} onLogout={() => setAuth('anon')} />}
+      {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} isStaff={isStaff || readOnly} onLogout={() => setAuth('anon')} />}
       {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('dashboard')} />}
 
       <nav className="fixed bottom-0 right-0 left-0 z-40 mx-auto flex max-w-lg border-t border-slate-200 bg-white">

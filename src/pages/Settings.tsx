@@ -247,6 +247,7 @@ function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout?: () =
   const [sEmail, setSEmail] = useState('')
   const [sPass, setSPass] = useState('')
   const [sName, setSName] = useState('')
+  const [sRole, setSRole] = useState<'staff' | 'viewer'>('staff')
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
@@ -262,7 +263,7 @@ function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout?: () =
     <Card>
       <p className="mb-1 font-bold text-slate-800">حساب کاربری</p>
       <p className="mb-3 text-sm text-slate-500">
-        {profile.name} — {profile.role === 'owner' ? 'مالک' : 'کارمند'}
+        {profile.name} — {profile.role === 'owner' ? 'مالک' : profile.role === 'viewer' ? 'شریک (فقط مشاهده)' : 'کارمند'}
       </p>
       <div className="flex flex-wrap gap-2">
         <button
@@ -278,13 +279,34 @@ function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout?: () =
         </button>
         {profile.role === 'owner' && !isStaff && (
           <button onClick={() => setShowStaff(!showStaff)} className="rounded-xl bg-teal-700 px-5 py-2 font-bold text-white">
-            ＋ کارمند جدید
+            ＋ حساب جدید (کارمند / شریک)
           </button>
         )}
       </div>
       {showStaff && (
         <div className="mt-3 rounded-xl border border-slate-200 p-3">
-          <Field label="نام کارمند *">
+          <Field label="نوع حساب">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSRole('staff')}
+                className={`flex-1 rounded-xl py-2 text-sm font-bold ${sRole === 'staff' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                کارمند (فروش/خرید)
+              </button>
+              <button
+                onClick={() => setSRole('viewer')}
+                className={`flex-1 rounded-xl py-2 text-sm font-bold ${sRole === 'viewer' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                شریک (فقط مشاهده)
+              </button>
+            </div>
+          </Field>
+          <p className="-mt-2 mb-3 text-xs text-slate-400">
+            {sRole === 'staff'
+              ? 'کارمند می‌تواند فروش و خرید ثبت کند اما راپور و تنظیمات را نمی‌بیند.'
+              : 'شریک همه‌چیز از جمله راپورها و مفاد را می‌بیند ولی هیچ رقمی را تغییر داده نمی‌تواند.'}
+          </p>
+          <Field label="نام *">
             <input className={inputCls} value={sName} onChange={(e) => setSName(e.target.value)} />
           </Field>
           <Field label="ایمیل *">
@@ -297,8 +319,10 @@ function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout?: () =
             disabled={!sName.trim() || !sEmail.trim() || sPass.length < 6}
             onClick={async () => {
               try {
-                await createStaff(sEmail.trim(), sPass, sName.trim())
-                setMsg(`✅ حساب کارمند ساخته شد. ایمیل و رمز را به ${sName} بدهید تا در موبایل خود وارد شود.`)
+                await createStaff(sEmail.trim(), sPass, sName.trim(), sRole)
+                setMsg(
+                  `✅ حساب ${sRole === 'viewer' ? 'شریک (فقط مشاهده)' : 'کارمند'} ساخته شد. ایمیل و رمز را به ${sName} بدهید تا در موبایل خود وارد شود.`
+                )
                 setSName('')
                 setSEmail('')
                 setSPass('')
@@ -308,7 +332,7 @@ function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout?: () =
               }
             }}
           >
-            ساخت حساب کارمند
+            {sRole === 'viewer' ? 'ساخت حساب شریک' : 'ساخت حساب کارمند'}
           </PrimaryBtn>
         </div>
       )}

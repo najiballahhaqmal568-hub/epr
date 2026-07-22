@@ -475,12 +475,24 @@ export function makeSku(id: number, size: string): string {
 /** هنگام اعمال تغییرات دریافتی از سرور true می‌شود تا دوباره به صف ارسال نروند */
 export const syncFlags = { applyingRemote: false }
 
+/** حالت «فقط مشاهده» (شریک): هیچ تغییری در ارقام ثبت نمی‌شود */
+export const accessFlags = { readOnly: false }
+
+function guardReadOnly() {
+  // تغییرات دریافتی از سرور (همگام‌سازی) باید ثبت شوند؛ فقط تغییرات محلی کاربر بسته می‌شوند
+  if (accessFlags.readOnly && !syncFlags.applyingRemote) {
+    throw new Error('حالت فقط مشاهده: شما اجازهٔ تغییر ندارید.')
+  }
+}
+
 for (const t of SYNC_TABLES) {
   db.table(t).hook('creating', (_pk, obj: Record<string, unknown>) => {
+    guardReadOnly()
     if (!obj.uuid) obj.uuid = newUuid()
     obj.localUpdatedAt = syncFlags.applyingRemote ? 0 : Date.now()
   })
   db.table(t).hook('updating', (mods) => {
+    guardReadOnly()
     if (syncFlags.applyingRemote) return { ...(mods as object), localUpdatedAt: 0 }
     return { ...(mods as object), localUpdatedAt: Date.now() }
   })

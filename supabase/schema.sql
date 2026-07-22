@@ -9,7 +9,7 @@ create table if not exists shops (
 create table if not exists profiles (
   user_id uuid primary key references auth.users on delete cascade,
   shop_id uuid not null references shops on delete cascade,
-  role text not null check (role in ('owner', 'staff')),
+  role text not null check (role in ('owner', 'staff', 'viewer')),
   name text not null,
   created_at timestamptz not null default now()
 );

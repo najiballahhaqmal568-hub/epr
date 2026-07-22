@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type ExpenseType, type Expense, type CashMovementType } from '../db'
+import { db, accessFlags, type ExpenseType, type Expense, type CashMovementType } from '../db'
 import { addExpense, deleteExpense, renameCategory, reconcile, addPartnerWithdrawal } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
@@ -521,9 +521,11 @@ function CashView() {
         </div>
       </Card>
 
-      <button onClick={() => setShowReconcile(true)} className="mb-3 w-full rounded-xl bg-teal-700 py-3 font-bold text-white">
-        تصفیه صندوق (شمارش نقد)
-      </button>
+      {!accessFlags.readOnly && (
+        <button onClick={() => setShowReconcile(true)} className="mb-3 w-full rounded-xl bg-teal-700 py-3 font-bold text-white">
+          تصفیه صندوق (شمارش نقد)
+        </button>
+      )}
 
       <p className="mb-2 font-bold text-slate-700">حرکات امروز</p>
       {today.length === 0 && <p className="mb-3 text-sm text-slate-400">امروز حرکتی نبوده.</p>}

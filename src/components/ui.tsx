@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react'
+import { accessFlags } from '../db'
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
@@ -45,6 +46,8 @@ export function PrimaryBtn({ children, onClick, disabled, type }: { children: Re
 }
 
 export function Fab({ onClick, label }: { onClick: () => void; label?: string }) {
+  // در حالت فقط مشاهده (شریک) دکمه‌های افزودن نمایش داده نمی‌شوند
+  if (accessFlags.readOnly) return null
   return (
     <button
       onClick={onClick}

@@ -36,7 +36,7 @@ export async function getSupa(): Promise<SupabaseClient | null> {
 export interface Profile {
   user_id: string
   shop_id: string
-  role: 'owner' | 'staff'
+  role: 'owner' | 'staff' | 'viewer'
   name: string
 }
 
@@ -77,18 +77,18 @@ export async function logout(): Promise<void> {
   await supa?.auth.signOut()
 }
 
-/** ساخت حساب کارمند توسط مالک (با کلاینت موقت تا سشن مالک خراب نشود) */
-export async function createStaff(email: string, password: string, name: string): Promise<void> {
+/** ساخت حساب کارمند/شریک توسط مالک (با کلاینت موقت تا سشن مالک خراب نشود) */
+export async function createStaff(email: string, password: string, name: string, role: 'staff' | 'viewer' = 'staff'): Promise<void> {
   const cfg = await getServerConfig()
   const supa = await getSupa()
   if (!cfg || !supa) throw new Error('سرور تنظیم نشده')
   const profile = await getProfile()
-  if (!profile || profile.role !== 'owner') throw new Error('فقط مالک می‌تواند کارمند اضافه کند')
+  if (!profile || profile.role !== 'owner') throw new Error('فقط مالک می‌تواند حساب اضافه کند')
   const temp = createClient(cfg.url, cfg.anonKey, { auth: { persistSession: false } })
   const { data, error } = await temp.auth.signUp({ email, password })
   if (error) throw error
   const staffId = data.user?.id
   if (!staffId) throw new Error('ساخت حساب ناکام شد')
-  const { error: profErr } = await supa.from('profiles').insert({ user_id: staffId, shop_id: profile.shop_id, role: 'staff', name })
+  const { error: profErr } = await supa.from('profiles').insert({ user_id: staffId, shop_id: profile.shop_id, role, name })
   if (profErr) throw profErr
 }
