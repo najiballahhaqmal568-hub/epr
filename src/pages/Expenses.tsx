@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type ExpenseType, type Expense, type CashMovementType } from '../db'
-import { addExpense, deleteExpense, renameCategory, reconcile } from '../lib/ops'
+import { addExpense, deleteExpense, renameCategory, reconcile, addPartnerWithdrawal } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
@@ -159,15 +159,32 @@ function ExpenseList() {
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().filter((e) => !e.deleted).limit(300).toArray(), [])
+  // برداشت‌های شریک به شکل حرکت صندوق ثبت می‌شوند — این‌ها را هم در لیست مصارف نشان بده
+  const partnerDraws = useLiveQuery(
+    () => db.cashMovements.filter((m) => !m.deleted && m.type === 'withdrawal' && Boolean(m.partnerName)).reverse().sortBy('date'),
+    []
+  )
 
-  const filtered = expenses?.filter((e) => {
+  // برداشت‌های شریک را به شکل ردیف مصرف نمایشی درمی‌آوریم
+  const drawRows = (partnerDraws ?? []).map((m) => ({
+    id: -m.id!,
+    date: m.date,
+    categoryName: `برداشت ${m.partnerName}`,
+    amount: -m.amount,
+    note: m.note && m.note !== `برداشت ${m.partnerName}` ? m.note : undefined,
+    type: 'withdrawal' as ExpenseType,
+    partner: true
+  }))
+  const merged = [...(expenses ?? []).map((e) => ({ ...e, partner: false })), ...drawRows].sort((a, b) => b.date - a.date)
+
+  const filtered = merged.filter((e) => {
     if (filter === 'all') return true
-    if (typeof filter === 'number') return e.categoryId === filter
+    if (typeof filter === 'number') return 'categoryId' in e && e.categoryId === filter
     return e.type === filter
   })
 
   const monthOf = (t: ExpenseType) =>
-    expenses?.filter((e) => e.date >= monthStart && e.type === t).reduce((s, e) => s + e.amount, 0) ?? 0
+    merged.filter((e) => e.date >= monthStart && e.type === t).reduce((s, e) => s + e.amount, 0)
   const monthBusiness = monthOf('business')
   const monthNonBusiness = monthOf('home') + monthOf('personal') + monthOf('withdrawal')
 
@@ -201,15 +218,15 @@ function ExpenseList() {
         ⚙ مدیریت کتگوری‌ها
       </button>
 
-      {filtered?.length === 0 && <Empty text="مصرفی ثبت نشده." />}
-      {filtered?.map((e) => (
+      {filtered.length === 0 && <Empty text="مصرفی ثبت نشده." />}
+      {filtered.map((e) => (
         <Card key={e.id}>
           <div className="flex items-center justify-between">
             <div>
               <p className="font-bold text-slate-800">
-                {e.type === 'withdrawal' ? 'برداشت مالک' : e.categoryName}
+                {e.partner ? e.categoryName : e.type === 'withdrawal' ? 'برداشت مالک' : e.categoryName}
                 <span className={`mr-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal ${TYPE_COLORS[e.type]}`}>
-                  {TYPE_LABELS[e.type]}
+                  {e.partner ? 'شریک' : TYPE_LABELS[e.type]}
                 </span>
               </p>
               {e.note && <p className="text-sm text-slate-500">{e.note}</p>}
@@ -217,14 +234,16 @@ function ExpenseList() {
             </div>
             <div className="text-left">
               <p className={`font-bold ${TYPE_COLORS[e.type]}`}>{fmtMoney(e.amount)}</p>
-              <button
-                className="text-xs text-red-400"
-                onClick={async () => {
-                  if (confirm('این مصرف حذف شود؟')) await deleteExpense(e.id!)
-                }}
-              >
-                حذف
-              </button>
+              {!e.partner && (
+                <button
+                  className="text-xs text-red-400"
+                  onClick={async () => {
+                    if (confirm('این مصرف حذف شود؟')) await deleteExpense(e.id!)
+                  }}
+                >
+                  حذف
+                </button>
+              )}
             </div>
           </div>
         </Card>
@@ -329,6 +348,7 @@ function CategoryManager({ onClose }: { onClose: () => void }) {
 function NewExpenseModal({ onClose }: { onClose: () => void }) {
   const [type, setType] = useState<ExpenseType>('business')
   const [categoryId, setCategoryId] = useState<number | ''>('')
+  const [partnerId, setPartnerId] = useState<number | ''>('')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [newCat, setNewCat] = useState('')
@@ -336,20 +356,28 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('')
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
+  const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
 
   async function save() {
     const amt = parseNum(amount)
     if (amt <= 0) return setError('مبلغ را وارد کنید')
-    let catId = categoryId as number | undefined
-    let catName = 'برداشت مالک'
-    if (type !== 'withdrawal') {
-      if (!categoryId) return setError('کتگوری را انتخاب کنید')
-      catName = categories?.find((c) => c.id === categoryId)?.name ?? ''
-    } else {
-      catId = undefined
-    }
-    const e: Expense = { date: Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
     try {
+      if (type === 'withdrawal' && partnerId) {
+        // برداشت/مصرف شریک — به حساب همان شریک، آخر سال از سهمش کم می‌شود
+        const p = partners?.find((x) => x.id === partnerId)
+        await addPartnerWithdrawal(p!.name, amt, note.trim() || undefined)
+        onClose()
+        return
+      }
+      let catId = categoryId as number | undefined
+      let catName = 'برداشت مالک'
+      if (type !== 'withdrawal') {
+        if (!categoryId) return setError('کتگوری را انتخاب کنید')
+        catName = categories?.find((c) => c.id === categoryId)?.name ?? ''
+      } else {
+        catId = undefined
+      }
+      const e: Expense = { date: Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
       await addExpense(e)
       onClose()
     } catch (err) {
@@ -373,6 +401,24 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
       <p className="mb-3 text-xs text-slate-400">
         {type === 'business' ? 'از مفاد تجارت کم می‌شود.' : 'از صندوق کم می‌شود اما در مفاد تجارت حساب نمی‌شود.'}
       </p>
+
+      {type === 'withdrawal' && (partners?.length ?? 0) > 0 && (
+        <>
+          <Field label="برداشت به نام کدام شریک؟">
+            <select className={inputCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value ? Number(e.target.value) : '')}>
+              <option value="">برداشت عمومی مالک (بدون شریک)</option>
+              {partners?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {partnerId !== '' && (
+            <p className="-mt-2 mb-3 text-xs text-slate-400">آخر سال از سهم فایدهٔ همین شریک کم می‌شود.</p>
+          )}
+        </>
+      )}
 
       {type !== 'withdrawal' && (
         <>
