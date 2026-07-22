@@ -345,8 +345,10 @@ function CategoryManager({ onClose }: { onClose: () => void }) {
   )
 }
 
+type ExpenseMode = ExpenseType | 'partner'
+
 function NewExpenseModal({ onClose }: { onClose: () => void }) {
-  const [type, setType] = useState<ExpenseType>('business')
+  const [mode, setMode] = useState<ExpenseMode>('business')
   const [categoryId, setCategoryId] = useState<number | ''>('')
   const [partnerId, setPartnerId] = useState<number | ''>('')
   const [amount, setAmount] = useState('')
@@ -358,12 +360,16 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
 
+  const type = mode === 'partner' ? 'withdrawal' : mode
+  const modeLabels: Record<ExpenseMode, string> = { ...TYPE_LABELS, partner: 'شریک' }
+  const modes: ExpenseMode[] = [...(Object.keys(TYPE_LABELS) as ExpenseType[]), ...((partners?.length ?? 0) > 0 ? (['partner'] as const) : [])]
+
   async function save() {
     const amt = parseNum(amount)
     if (amt <= 0) return setError('مبلغ را وارد کنید')
     try {
-      if (type === 'withdrawal' && partnerId) {
-        // برداشت/مصرف شریک — به حساب همان شریک، آخر سال از سهمش کم می‌شود
+      if (mode === 'partner') {
+        if (!partnerId) return setError('شریک را انتخاب کنید')
         const p = partners?.find((x) => x.id === partnerId)
         await addPartnerWithdrawal(p!.name, amt, note.trim() || undefined)
         onClose()
@@ -371,7 +377,7 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
       }
       let catId = categoryId as number | undefined
       let catName = 'برداشت مالک'
-      if (type !== 'withdrawal') {
+      if (mode !== 'withdrawal') {
         if (!categoryId) return setError('کتگوری را انتخاب کنید')
         catName = categories?.find((c) => c.id === categoryId)?.name ?? ''
       } else {
@@ -387,40 +393,39 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="ثبت مصرف" onClose={onClose}>
-      <div className="mb-1 grid grid-cols-4 gap-1">
-        {(Object.keys(TYPE_LABELS) as ExpenseType[]).map((t) => (
+      <div className={`mb-1 grid gap-1 ${modes.length > 4 ? 'grid-cols-3' : 'grid-cols-4'}`}>
+        {modes.map((m) => (
           <button
-            key={t}
-            onClick={() => setType(t)}
-            className={`rounded-xl py-2 text-sm font-bold ${type === t ? (t === 'business' ? 'bg-teal-700 text-white' : 'bg-amber-600 text-white') : 'bg-slate-100 text-slate-600'}`}
+            key={m}
+            onClick={() => setMode(m)}
+            className={`rounded-xl py-2 text-sm font-bold ${mode === m ? (m === 'business' ? 'bg-teal-700 text-white' : m === 'partner' ? 'bg-purple-600 text-white' : 'bg-amber-600 text-white') : 'bg-slate-100 text-slate-600'}`}
           >
-            {TYPE_LABELS[t]}
+            {modeLabels[m]}
           </button>
         ))}
       </div>
       <p className="mb-3 text-xs text-slate-400">
-        {type === 'business' ? 'از مفاد تجارت کم می‌شود.' : 'از صندوق کم می‌شود اما در مفاد تجارت حساب نمی‌شود.'}
+        {mode === 'business'
+          ? 'از مفاد تجارت کم می‌شود.'
+          : mode === 'partner'
+            ? 'برداشت/مصرف شریک — آخر سال از سهم فایدهٔ همان شریک کم می‌شود.'
+            : 'از صندوق کم می‌شود اما در مفاد تجارت حساب نمی‌شود.'}
       </p>
 
-      {type === 'withdrawal' && (partners?.length ?? 0) > 0 && (
-        <>
-          <Field label="برداشت به نام کدام شریک؟">
-            <select className={inputCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value ? Number(e.target.value) : '')}>
-              <option value="">برداشت عمومی مالک (بدون شریک)</option>
-              {partners?.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {partnerId !== '' && (
-            <p className="-mt-2 mb-3 text-xs text-slate-400">آخر سال از سهم فایدهٔ همین شریک کم می‌شود.</p>
-          )}
-        </>
+      {mode === 'partner' && (
+        <Field label="کدام شریک؟ *">
+          <select className={inputCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value ? Number(e.target.value) : '')}>
+            <option value="">انتخاب کنید...</option>
+            {partners?.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
       )}
 
-      {type !== 'withdrawal' && (
+      {mode !== 'withdrawal' && mode !== 'partner' && (
         <>
           <Field label="کتگوری *">
             <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : '')}>
