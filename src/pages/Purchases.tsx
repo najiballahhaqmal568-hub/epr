@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, makeSku, type Purchase, type PurchaseLine, type Product, type Supplier, type ReturnLine, type Variant, type Candidate } from '../db'
-import { addPurchase, addPayment, addSupplierReturn, receivePurchase, addOpeningDebt } from '../lib/ops'
+import { addPurchase, addPayment, addSupplierReturn, receivePurchase, addOpeningDebt, payLanding } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
 
@@ -86,11 +86,22 @@ export default function Purchases() {
                         حواله {p.sarrafName}: {fmtMoney(hawala)}
                       </p>
                     )}
+                    {(p.landingCost ?? 0) > 0 && (
+                      <p className="text-xs text-amber-600">مصارف رسیدن: {fmtMoney(p.landingCost!)}</p>
+                    )}
                   </div>
                 </div>
                 <p className="mt-1 text-sm text-slate-600">
                   {p.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
                 </p>
+                {(p.landingCost ?? 0) > 0 && p.landingPaid === false && (
+                  <button
+                    onClick={() => void payLanding(p.id!)}
+                    className="mt-2 w-full rounded-xl bg-amber-500 py-2 text-sm font-bold text-white"
+                  >
+                    💵 پرداخت مصارف رسیدن ({fmtMoney(p.landingCost!)}) — نقد از صندوق
+                  </button>
+                )}
                 {pending ? (
                   <button
                     onClick={() => void receivePurchase(p.id!)}
@@ -1146,6 +1157,9 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [sarrafStr, setSarrafStr] = useState('')
   const [cartonEditFor, setCartonEditFor] = useState<Product | null>(null)
   const [npWizard, setNpWizard] = useState(false)
+  const [landingStr, setLandingStr] = useState('')
+  const [landingVia, setLandingVia] = useState<'cash' | 'sarraf' | 'later'>('cash')
+  const [landingSarrafId, setLandingSarrafId] = useState<number | ''>('')
 
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
@@ -1191,13 +1205,18 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const hawala = useSarraf ? Math.min(Math.max(0, parseNum(sarrafStr)), total) : 0
   const paid = paidTouched ? parseNum(paidStr) : Math.max(0, total - hawala)
   const remainder = total - paid - hawala
+  const totalPairs = lines.reduce((s, l) => s + l.qty, 0)
+  const landing = Math.max(0, parseNum(landingStr))
+  const landingPer = landing > 0 && totalPairs > 0 ? landing / totalPairs : 0
 
   async function save() {
     if (!supplierId) return setError('تأمین‌کننده را انتخاب کنید')
     if (!lines.length) return setError('حداقل یک جنس اضافه کنید')
     if (useSarraf && hawala > 0 && !sarrafId) return setError('صراف را انتخاب کنید')
+    if (landing > 0 && landingVia === 'sarraf' && !landingSarrafId) return setError('صراف مصارف رسیدن را انتخاب کنید')
     const supplier = vendors?.find((s) => s.id === supplierId)
     const sf = sarrafs?.find((s) => s.id === sarrafId)
+    const lsf = sarrafs?.find((s) => s.id === landingSarrafId)
     try {
       await addPurchase({
         date: Date.now(),
@@ -1207,7 +1226,14 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
         total,
         paid,
         ...(received ? {} : { received: false }),
-        ...(hawala > 0 && sf ? { sarrafId: sf.id!, sarrafName: sf.name, sarrafAmount: hawala } : {})
+        ...(hawala > 0 && sf ? { sarrafId: sf.id!, sarrafName: sf.name, sarrafAmount: hawala } : {}),
+        ...(landing > 0
+          ? {
+              landingCost: landing,
+              landingVia,
+              ...(landingVia === 'sarraf' && lsf ? { landingSarrafId: lsf.id!, landingSarrafName: lsf.name } : {})
+            }
+          : {})
       })
       onClose()
     } catch (e) {
@@ -1372,6 +1398,39 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
         </Field>
         {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض ما به تأمین‌کننده): {fmtMoney(remainder)}</p>}
         {hawala > 0 && <p className="text-sm font-bold text-amber-700">قرض ما به صراف: {fmtMoney(hawala)}</p>}
+      </div>
+
+      <div className="mt-3 rounded-xl bg-amber-50 p-3">
+        <Field label="مصارف رسیدن جنس (کرایه/حمالی/کمیشن) — اختیاری">
+          <input className={inputCls} inputMode="numeric" value={landingStr} onChange={(e) => setLandingStr(e.target.value)} placeholder="۰" />
+        </Field>
+        {landing > 0 && (
+          <>
+            <p className="mb-2 text-xs text-slate-500">
+              روی هر جوړه: <b>{fmtMoney(landingPer)}</b> — قیمت تمام‌شده = قیمت خرید + {fmtMoney(landingPer)} (در مفاد حساب می‌شود)
+            </p>
+            <Field label="پرداخت مصارف رسیدن">
+              <select className={inputCls} value={landingVia} onChange={(e) => setLandingVia(e.target.value as 'cash' | 'sarraf' | 'later')}>
+                <option value="cash">نقد از صندوق (حالا)</option>
+                <option value="sarraf">به قرض صراف (کمیشن)</option>
+                <option value="later">بعداً پرداخت می‌شود</option>
+              </select>
+            </Field>
+            {landingVia === 'sarraf' && (
+              <Field label="کدام صراف؟ *">
+                <select className={inputCls} value={landingSarrafId} onChange={(e) => setLandingSarrafId(e.target.value ? Number(e.target.value) : '')}>
+                  <option value="">انتخاب کنید...</option>
+                  {sarrafs?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {landingVia === 'later' && <p className="text-xs text-amber-700">🕐 حالا از صندوق کم نمی‌شود؛ بعداً از لیست خریدها «پرداخت مصارف رسیدن» را می‌زنید.</p>}
+          </>
+        )}
       </div>
 
       {error && <p className="my-2 text-sm text-red-600">{error}</p>}

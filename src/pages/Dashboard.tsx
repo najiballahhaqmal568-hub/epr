@@ -35,6 +35,15 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
+  const unpaidLanding =
+    useLiveQuery(
+      async () =>
+        (await db.purchases.filter((p) => !p.deleted && Boolean(p.landingCost) && p.landingPaid === false).toArray()).reduce(
+          (s, p) => s + (p.landingCost ?? 0),
+          0
+        ),
+      []
+    ) ?? 0
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))
@@ -141,6 +150,7 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
               <p className="text-sm text-slate-500">قرض ما به تأمین‌کنندگان</p>
               <p className="text-lg font-bold text-amber-600">{fmtMoney(payable)}</p>
               {suppCredit > 0 && <p className="text-xs font-bold text-teal-700">طلب ما (پیشکی): {fmtMoney(suppCredit)}</p>}
+              {unpaidLanding > 0 && <p className="text-xs font-bold text-amber-600">مصارف رسیدن پرداخت‌نشده: {fmtMoney(unpaidLanding)}</p>}
             </div>
           </div>
         </button>

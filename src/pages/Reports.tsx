@@ -251,12 +251,22 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
   const allVariants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const allCustomers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
   const allSuppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
+  const unpaidLanding =
+    useLiveQuery(
+      async () =>
+        (await db.purchases.filter((p) => !p.deleted && Boolean(p.landingCost) && p.landingPaid === false).toArray()).reduce(
+          (s, p) => s + (p.landingCost ?? 0),
+          0
+        ),
+      []
+    ) ?? 0
   const yearStart = useLiveQuery(async () => Number((await db.settings.get('partnershipStart'))?.value ?? 0), [])
 
   const stockValue = allVariants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
   const cash = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
   const receivables = allCustomers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
-  const payables = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
+  const payables =
+    (allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0) + unpaidLanding
   // طلب ما از تأمین‌کننده/صراف (پیشکی) — جزو دارایی است
   const supplierCredits = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, -x.balance), 0) ?? 0
   const assets = stockValue + cash + receivables + supplierCredits - payables

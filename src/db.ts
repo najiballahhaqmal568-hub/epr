@@ -119,6 +119,12 @@ export interface Purchase extends Synced {
   sarrafId?: number
   sarrafName?: string
   sarrafAmount?: number
+  /** مصارف رسیدن جنس (کرایه/حمالی/کمیشن صراف) — در قیمت تمام‌شدهٔ هر جوړه می‌نشیند */
+  landingCost?: number
+  landingVia?: 'cash' | 'sarraf' | 'later'
+  landingSarrafId?: number
+  landingSarrafName?: string
+  landingPaid?: boolean
 }
 
 export interface Payment extends Synced {
@@ -165,6 +171,7 @@ export type CashMovementType =
   | 'refund'
   | 'openingSet'
   | 'capitalIn'
+  | 'landing'
 
 export interface CashMovement extends Synced {
   id?: number

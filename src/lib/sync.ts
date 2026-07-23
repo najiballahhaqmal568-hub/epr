@@ -100,6 +100,7 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
   if (table === 'purchases') {
     await enc('supplierId', 'suppliers', 'supplierUuid')
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
+    await enc('landingSarrafId', 'suppliers', 'landingSarrafUuid')
   }
   if (table === 'expenses') await enc('categoryId', 'expenseCategories', 'categoryUuid')
   if (table === 'adjustments') await enc('variantId', 'variants', 'variantUuid')
@@ -133,6 +134,7 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
   if (table === 'purchases') {
     await dec('supplierUuid', 'suppliers', 'supplierId')
     await dec('sarrafUuid', 'suppliers', 'sarrafId')
+    await dec('landingSarrafUuid', 'suppliers', 'landingSarrafId')
   }
   if (table === 'expenses') await dec('categoryUuid', 'expenseCategories', 'categoryId')
   if (table === 'adjustments') await dec('variantUuid', 'variants', 'variantId')
@@ -176,6 +178,9 @@ async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, r
     const remainder = p.total - p.paid - hawala
     if (remainder > 0) await bump('suppliers', p.supplierId, 'balance', remainder * sign)
     if (hawala > 0) await bump('suppliers', p.sarrafId, 'balance', hawala * sign)
+    // مصارف رسیدنِ پرداخت‌شده از طریق صراف — قرض ما به صراف زیاد می‌شود
+    const landing = p.landingVia === 'sarraf' && p.landingPaid ? (p.landingCost ?? 0) : 0
+    if (landing > 0) await bump('suppliers', p.landingSarrafId, 'balance', landing * sign)
   } else if (table === 'payments') {
     const p = rec as unknown as Payment
     await bump(p.partyType === 'customer' ? 'customers' : 'suppliers', p.partyId, 'balance', -p.amount * sign)
@@ -273,6 +278,9 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
         } else if (table === 'purchases' && existing.received === false && (rec as { received?: boolean }).received !== false) {
           // رسیدِ خرید در دستگاه دیگر ثبت شده — موجودی از سند تعدیل می‌آید، فقط وضعیت را به‌روز کن
           await db.table(table).update(existing.id, { received: true })
+        } else if (table === 'purchases' && existing.landingPaid === false && (rec as { landingPaid?: boolean }).landingPaid === true) {
+          // مصارف رسیدن در دستگاه دیگر پرداخت شد — پول از سند صندوق می‌آید، فقط وضعیت را به‌روز کن
+          await db.table(table).update(existing.id, { landingPaid: true })
         }
       }
     } finally {

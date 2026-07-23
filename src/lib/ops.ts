@@ -69,7 +69,15 @@ export async function deleteSale(saleId: number): Promise<void> {
   })
 }
 
-/** ثبت خرید: افزایش گدام + قرض ما + خروج نقد */
+/** قیمت تمام‌شدهٔ هر جوړه = قیمت خرید + سهم مصارف رسیدن (تقسیم مساوی) */
+export function landedUnitCost(purchase: Purchase, unitCost: number): number {
+  const landing = purchase.landingCost ?? 0
+  const totalPairs = purchase.lines.reduce((s, l) => s + l.qty, 0)
+  if (landing <= 0 || totalPairs <= 0) return unitCost
+  return unitCost + landing / totalPairs
+}
+
+/** ثبت خرید: افزایش گدام (به قیمت تمام‌شده) + قرض ما + خروج نقد + مصارف رسیدن */
 export async function addPurchase(purchase: Purchase): Promise<number> {
   return db.transaction('rw', db.purchases, db.variants, db.suppliers, db.cashMovements, async () => {
     for (const line of purchase.lines) {
@@ -79,7 +87,8 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
       if (purchase.received !== false) {
         await db.variants.update(line.variantId, {
           stockQty: v.stockQty + line.qty,
-          purchasePrice: line.unitCost
+          // قیمت تمام‌شده شامل مصارف رسیدن — تا مفاد دقیق باشد
+          purchasePrice: landedUnitCost(purchase, line.unitCost)
         })
       }
     }
@@ -93,9 +102,35 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
       const sf = await db.suppliers.get(purchase.sarrafId)
       if (sf) await db.suppliers.update(purchase.sarrafId, { balance: sf.balance + hawala })
     }
+    // مصارف رسیدن: نقد از صندوق، به قرض صراف، یا بعداً
+    const landing = purchase.landingCost ?? 0
+    if (landing > 0) {
+      if (purchase.landingVia === 'sarraf' && purchase.landingSarrafId) {
+        const sf = await db.suppliers.get(purchase.landingSarrafId)
+        if (sf) await db.suppliers.update(purchase.landingSarrafId, { balance: sf.balance + landing })
+        purchase.landingPaid = true
+      } else if (purchase.landingVia === 'cash') {
+        purchase.landingPaid = true
+      } else {
+        purchase.landingPaid = false // بعداً پرداخت می‌شود
+      }
+    }
     const id = (await db.purchases.add(purchase)) as number
     await movement({ date: purchase.date, type: 'purchase', refId: id, amount: -purchase.paid, note: purchase.supplierName })
+    if (landing > 0 && purchase.landingVia === 'cash') {
+      await movement({ date: purchase.date, type: 'landing', refId: id, amount: -landing, note: `مصارف رسیدن — ${purchase.supplierName}` })
+    }
     return id
+  })
+}
+
+/** پرداخت مصارف رسیدنِ «بعداً» — نقد از صندوق */
+export async function payLanding(purchaseId: number): Promise<void> {
+  return db.transaction('rw', db.purchases, db.cashMovements, async () => {
+    const p = await db.purchases.get(purchaseId)
+    if (!p || p.deleted || !p.landingCost || p.landingPaid) return
+    await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -p.landingCost, note: `مصارف رسیدن — ${p.supplierName}` })
+    await db.purchases.update(purchaseId, { landingPaid: true, landingVia: 'cash' })
   })
 }
 
