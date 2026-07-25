@@ -32,3 +32,14 @@ after that the app opens and works with no internet.
 ## Tech
 
 React 18 + TypeScript + Vite · Dexie (IndexedDB) · Tailwind CSS 4 · vite-plugin-pwa
+
+## آزمایش خودکار حساب‌ها
+
+```
+npm test
+```
+
+۱۶ سناریوی واقعی دکان را با دیتابیس خالی اجرا می‌کند و اعداد را با ارقام دستی‌حساب‌شده مقایسه می‌کند
+(سال کامل شراکت، میانگین وزنی قیمت خرید، مصارف رسیدن، تبادله، حوالهٔ صراف، کسر صندوق و…).
+
+سناریوها در `tests/checks.ts` هستند. هر تغییری در `src/lib/ops.ts` باید پیش از انتشار با این آزمایش سنجیده شود.

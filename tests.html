@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <title>آزمایش حساب‌های اپ</title>
+    <style>
+      body { font-family: monospace; background: #0f172a; color: #e2e8f0; padding: 16px; line-height: 1.9; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <pre id="out">در حال اجرا…</pre>
+    <script type="module">
+      // محافظ: این صفحه دیتابیس را پاک می‌کند، پس فقط روی کمپیوتر توسعه اجرا شود
+      const local = ['localhost', '127.0.0.1', ''].includes(location.hostname)
+      if (!local) {
+        document.getElementById('out').textContent = 'این صفحهٔ آزمایش فقط روی کمپیوتر توسعه اجرا می‌شود.'
+        window.TESTS_FAIL = -1
+      } else {
+        const { runAll } = await import('/tests/checks.ts')
+        const { fail, report } = await runAll()
+        document.getElementById('out').textContent = report
+        window.TESTS_REPORT = report
+        window.TESTS_FAIL = fail
+      }
+    </script>
+  </body>
+</html>
