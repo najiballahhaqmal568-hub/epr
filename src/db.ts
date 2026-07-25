@@ -42,6 +42,8 @@ export interface Variant extends Synced {
   stockQty: number
   /** حد سفارش مجدد */
   lowStock: number
+  /** آخرین باری که این سایز خریداری/رسید شد — برای سن جنس در گدام */
+  lastPurchaseAt?: number
 }
 
 export interface Customer extends Synced {
@@ -198,7 +200,7 @@ export interface Reconciliation extends Synced {
   note?: string
 }
 
-export type AdjustReason = 'damaged' | 'lost' | 'correction' | 'returnDamaged'
+export type AdjustReason = 'damaged' | 'lost' | 'correction' | 'returnDamaged' | 'purchaseReceived'
 
 export interface Adjustment extends Synced {
   id?: number
@@ -473,6 +475,21 @@ db.version(4).upgrade(async (tx) => {
 // نسخهٔ ۵: جدول کاندیدهای خرید (محلی — همگام نمی‌شود)
 db.version(5).stores({
   candidates: '++id, name, createdAt'
+})
+
+/** نسخهٔ ۶: تاریخ آخرین خرید هر سایز از روی خریدهای گذشته پر می‌شود */
+db.version(6).upgrade(async (tx) => {
+  const purchases = await tx.table('purchases').toArray()
+  const last = new Map<number, number>()
+  for (const p of purchases) {
+    if (p.deleted || p.received === false) continue
+    for (const l of p.lines ?? []) {
+      if (!last.has(l.variantId) || p.date > last.get(l.variantId)!) last.set(l.variantId, p.date)
+    }
+  }
+  for (const [variantId, date] of last) {
+    await tx.table('variants').update(variantId, { lastPurchaseAt: date })
+  }
 })
 
 db.on('populate', async (tx) => {

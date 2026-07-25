@@ -27,6 +27,7 @@ import {
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
+import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -588,6 +589,123 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('هر حرکت صندوق عدد صحیح', moves.every((m) => Number.isInteger(m.amount)), true)
       eq('جمع دفتر صندوق برابر صندوق', (await cashLedgerEnd()) - cash, 0)
       eq('جمع دفتر مشتری برابر قرض', (await customerLedgerEnd(cId)) - cBal, 0)
+    }
+  },
+  {
+    name: 'کنترل حساب‌ها — دکان سالم هیچ اشکالی ندهد',
+    run: async () => {
+      const supId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
+      const cId = await newCustomer()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      await seedCash(300000)
+
+      // خرید نقدی، خرید قرضی، خرید حواله‌ای، خرید «در راه» که بعداً رسید
+      const p1 = await addPurchase(buy(supId, v1, 40, 500))
+      await addPurchase(buy(supId, v2, 20, 700, { paid: 0 }))
+      await addPurchase(buy(supId, v1, 10, 500, { total: 5000, paid: 1000, sarrafId, sarrafName: 'صراف', sarrafAmount: 4000 }))
+      const p4 = await addPurchase(buy(supId, v2, 15, 700, { received: false, paid: 0 }))
+      await receivePurchase(p4)
+      await addLandingCost([p1], 2000, 'cash')
+
+      // فروش نقدی و قرضی، دریافت، مرجوعی مشتری و تأمین‌کننده، تعدیل، قرض قبلی
+      await addSale(sell(v1, 5, 900))
+      await addSale(sell(v1, 10, 900, { customerId: cId, customerName: 'مشتری', paid: 3000 }))
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 2000 })
+      await addOpeningDebt('customer', cId, 'مشتری', 1500)
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: cId,
+        partyName: 'مشتری',
+        lines: [{ variantId: v1, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 900, restock: true }],
+        amount: 1800,
+        settlement: 'reduceDebt',
+        reason: 'خراب'
+      })
+      await addSupplierReturn({
+        date: Date.now(),
+        kind: 'supplier',
+        partyId: supId,
+        partyName: 'تأمین‌کننده',
+        lines: [{ variantId: v2, productName: 'اسپرتکس', size: '43', color: 'سیاه', qty: 3, unitPrice: 700, restock: false }],
+        amount: 2100,
+        settlement: 'reduceDebt',
+        reason: 'خراب'
+      })
+      await db.adjustments.add({
+        date: Date.now(),
+        variantId: v2,
+        productName: 'اسپرتکس',
+        size: '43',
+        color: 'سیاه',
+        qtyChange: -1,
+        reason: 'damaged'
+      })
+      await db.variants.update(v2, { stockQty: (await stockOf(v2)) - 1 })
+      await addPayment({ date: Date.now(), partyType: 'supplier', partyId: supId, partyName: 'تأمین‌کننده', amount: 5000 })
+
+      const rep = await runIntegrityCheck()
+      is('هیچ اشکالی پیدا نشود', rep.mismatches.length, 0)
+      eq('تعداد سایزهای کنترل‌شده', rep.variants, 2)
+    }
+  },
+  {
+    name: 'کنترل حساب‌ها — عدد خراب را پیدا و اصلاح کند',
+    run: async () => {
+      const supId = await newSupplier()
+      const cId = await newCustomer()
+      const vId = await makeVariant()
+      await addPurchase(buy(supId, vId, 20, 500, { paid: 0 }))
+      await addSale(sell(vId, 4, 900, { customerId: cId, customerName: 'مشتری', paid: 0 }))
+
+      is('پیش از خرابی سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // سه عدد را دستی خراب می‌کنیم — مثل باگ یا همگام‌سازی نیم‌کاره
+      await db.variants.update(vId, { stockQty: 99 })
+      await db.customers.update(cId, { balance: 12345 })
+      await db.suppliers.update(supId, { balance: 7 })
+
+      const bad = await runIntegrityCheck()
+      is('هر سه خرابی پیدا شود', bad.mismatches.length, 3)
+      const v = bad.mismatches.find((m) => m.kind === 'variant')!
+      eq('موجودی درست محاسبه شود', v.computed, 16)
+      eq('تفاوت گزارش شود', v.diff, 83)
+      const c = bad.mismatches.find((m) => m.kind === 'customer')!
+      eq('قرض درست محاسبه شود', c.computed, 3600)
+      const sp = bad.mismatches.find((m) => m.kind === 'supplier')!
+      eq('قرض تأمین‌کننده درست محاسبه شود', sp.computed, 10000)
+
+      for (const m of bad.mismatches) await fixMismatch(m)
+      is('بعد از اصلاح هیچ اشکالی نماند', (await runIntegrityCheck()).mismatches.length, 0)
+      eq('موجودی اصلاح شد', await stockOf(vId), 16)
+      eq('قرض مشتری اصلاح شد', (await db.customers.get(cId))!.balance, 3600)
+    }
+  },
+  {
+    name: 'تاریخ آخرین خرید هر سایز ثبت شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      const old = Date.now() - 200 * 86400000
+      await addPurchase(buy(supId, v1, 10, 500, { date: old, paid: 0 }))
+      is('تاریخ خرید ثبت شد', (await db.variants.get(v1))!.lastPurchaseAt, old)
+
+      const recent = Date.now()
+      await addPurchase(buy(supId, v1, 5, 500, { date: recent, paid: 0 }))
+      is('تازه‌ترین تاریخ می‌ماند', (await db.variants.get(v1))!.lastPurchaseAt, recent)
+
+      // خرید کهنه‌تر نباید تاریخ را عقب ببرد
+      await addPurchase(buy(supId, v1, 5, 500, { date: old, paid: 0 }))
+      is('خرید کهنه تاریخ را عقب نبرد', (await db.variants.get(v1))!.lastPurchaseAt, recent)
+
+      // جنس «در راه» تا رسید تاریخ نگیرد
+      const pid = await addPurchase(buy(supId, v2, 8, 700, { received: false, paid: 0 }))
+      is('جنس در راه تاریخ ندارد', (await db.variants.get(v2))!.lastPurchaseAt, undefined)
+      await receivePurchase(pid)
+      is('بعد از رسید تاریخ گرفت', typeof (await db.variants.get(v2))!.lastPurchaseAt, 'number')
     }
   },
   {

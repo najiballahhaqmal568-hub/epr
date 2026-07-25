@@ -13,6 +13,7 @@ import Settings from './pages/Settings'
 import Login from './pages/Login'
 import { useExpenseReminder } from './lib/useExpenseReminder'
 import { useDebtReminder } from './lib/useDebtReminder'
+import { useIntegrityCheck } from './lib/useIntegrityCheck'
 import { fmtNum, fmtMoney } from './lib/format'
 import { getSupa, getProfile, type Profile } from './lib/supa'
 import { startSync, syncNow } from './lib/sync'
@@ -36,6 +37,7 @@ export default function App() {
   const [auth, setAuth] = useState<'loading' | 'none' | 'anon' | Profile>('loading')
   const reminder = useExpenseReminder()
   const debtReminder = useDebtReminder()
+  const integrity = useIntegrityCheck()
 
   const serverCfg = useLiveQuery(async () => {
     const url = (await db.settings.get('supaUrl'))?.value
@@ -150,8 +152,27 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-lg pb-20">
-      {(reminder.show || debtReminder.show) && (
+      {(reminder.show || debtReminder.show || integrity.show) && (
         <div className="pointer-events-none fixed right-0 left-0 bottom-36 z-50 mx-auto flex max-w-lg flex-col gap-2 px-3">
+          {integrity.show && (
+            <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-purple-700 p-3 text-white shadow-lg">
+              <span className="flex-1 text-sm font-bold">
+                ⚠️ کنترل حساب‌ها: {fmtNum(integrity.count)} عدد با اسناد نمی‌خواند
+              </span>
+              <button
+                className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
+                onClick={() => {
+                  setTab('settings')
+                  integrity.dismiss()
+                }}
+              >
+                دیدن
+              </button>
+              <button className="px-1" onClick={() => integrity.dismiss()}>
+                ✕
+              </button>
+            </div>
+          )}
           {debtReminder.show && (
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-red-600 p-3 text-white shadow-lg">
               <span className="flex-1 text-sm font-bold">

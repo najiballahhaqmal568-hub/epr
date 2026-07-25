@@ -72,7 +72,9 @@ export function StockCartonWizard({ onClassic, onClose }: { onClassic: () => voi
             retailPrice: parseNum(retail),
             wholesalePrice: parseNum(wholesale) || parseNum(retail),
             stockQty: stock,
-            lowStock: 2
+            lowStock: 2,
+            // تاریخ ورود به گدام — برای سن جنس
+            ...(stock > 0 ? { lastPurchaseAt: Date.now() } : {})
           })) as number
           await db.variants.update(vid, { sku: makeSku(vid, it.size) })
           if (stock !== 0) {

@@ -120,7 +120,8 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
         await db.variants.update(line.variantId, {
           stockQty: v.stockQty + line.qty,
           // میانگین وزنی با موجودی قبلی — قیمت تمام‌شده شامل مصارف رسیدن
-          purchasePrice: weightedCost(v.stockQty, v.purchasePrice, line.qty, landedUnitCost(purchase, line.unitCost))
+          purchasePrice: weightedCost(v.stockQty, v.purchasePrice, line.qty, landedUnitCost(purchase, line.unitCost)),
+          lastPurchaseAt: Math.max(v.lastPurchaseAt ?? 0, purchase.date)
         })
       }
     }
@@ -223,7 +224,8 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
       if (v) {
         await db.variants.update(line.variantId, {
           stockQty: v.stockQty + line.qty,
-          purchasePrice: weightedCost(v.stockQty, v.purchasePrice, line.qty, landedUnitCost(p, line.unitCost))
+          purchasePrice: weightedCost(v.stockQty, v.purchasePrice, line.qty, landedUnitCost(p, line.unitCost)),
+          lastPurchaseAt: Math.max(v.lastPurchaseAt ?? 0, Date.now())
         })
       }
       await db.adjustments.add({
@@ -233,7 +235,8 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
         size: line.size,
         color: line.color,
         qtyChange: line.qty,
-        reason: 'correction',
+        // دلیل مشخص تا در «کنترل حساب‌ها» با خودِ خرید دوباره شمرده نشود
+        reason: 'purchaseReceived',
         note: `رسید خرید — ${p.supplierName}`
       })
     }

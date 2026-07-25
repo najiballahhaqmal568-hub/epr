@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../db'
-import { fmtNum, fmtMoney, jalaliMonth, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
+import { fmtNum, fmtMoney, jalaliMonth, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { inputCls, Card } from '../components/ui'
 import Row from './reports/Row'
 import PartnersCard from './reports/PartnersCard'
@@ -162,10 +162,11 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const soldRecently = new Set<number>()
   allSales?.filter((s) => s.date >= cutoff).forEach((s) => s.lines.forEach((l) => soldRecently.add(l.variantId)))
   const productMap = new Map(products?.map((p) => [p.id!, p]))
+  // کهنه‌ترین اول: جنسی که مدت بیشتری خوابیده، فوری‌تر است
   const deadStock = (variants ?? [])
     .filter((v) => v.stockQty > 0 && !soldRecently.has(v.id!))
     .map((v) => ({ v, p: productMap.get(v.productId) }))
-    .sort((a, b) => b.v.stockQty * b.v.purchasePrice - a.v.stockQty * a.v.purchasePrice)
+    .sort((a, b) => (a.v.lastPurchaseAt ?? Infinity) - (b.v.lastPurchaseAt ?? Infinity))
     .slice(0, 10)
 
   return (
@@ -319,14 +320,14 @@ export default function Reports({ onBack }: { onBack: () => void }) {
       </Card>
 
       <Card>
-        <p className="mb-2 font-bold text-slate-700">جنس مرده (۶۰ روز بدون فروش)</p>
+        <p className="mb-2 font-bold text-slate-700">جنس مرده (۶۰ روز بدون فروش) — کهنه‌ترین اول</p>
         {deadStock.length === 0 && <p className="text-sm text-slate-400">جنس مرده‌ای نیست ✓</p>}
         {deadStock.map(({ v, p }) => (
           <Row
             key={v.id}
             label={`${p?.name ?? ''} ${v.size} ${v.color}`}
             value={`${fmtNum(v.stockQty)} جوړه`}
-            sub={`ارزش: ${fmtMoney(v.stockQty * v.purchasePrice)}`}
+            sub={`در گدام: ${ageLabel(v.lastPurchaseAt)} · ارزش: ${fmtMoney(v.stockQty * v.purchasePrice)}`}
           />
         ))}
       </Card>

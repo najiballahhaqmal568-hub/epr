@@ -79,3 +79,12 @@ export function fromDateInput(s: string): number {
   const [y, m, d] = s.split('-').map(Number)
   return new Date(y, m - 1, d, 12).getTime()
 }
+
+/** سن جنس در گدام — «۳ ماه» یا «۱۲ روز» */
+export function ageLabel(since?: number, now = Date.now()): string {
+  if (!since) return 'نامعلوم'
+  const days = Math.floor((now - since) / 86400000)
+  if (days < 1) return 'امروز'
+  if (days < 45) return `${fmtNum(days)} روز`
+  return `${fmtNum(Math.round(days / 30))} ماه`
+}

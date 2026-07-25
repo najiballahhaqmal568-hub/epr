@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Product, type Variant } from '../db'
-import { fmtNum } from '../lib/format'
+import { fmtNum, ageLabel } from '../lib/format'
 import { inputCls, Fab, Empty, Card } from '../components/ui'
 import StockCartonWizard from './inventory/StockCartonWizard'
 import StocktakeModal from './inventory/StocktakeModal'
@@ -92,6 +92,17 @@ export default function Inventory() {
                     return pairs > 0 ? <p className="text-xs text-slate-400">≈ {fmtNum(Math.floor(totalStock / pairs))} کارتن ({fmtNum(pairs)}تایی)</p> : null
                   })()}
                   {low && <p className="text-xs text-red-600">موجودی کم!</p>}
+                  {(() => {
+                    // کهنه‌ترین خرید در بین سایزهای موجود — سن جنس در گدام
+                    const dates = vs.filter((v) => v.stockQty > 0).map((v) => v.lastPurchaseAt ?? 0)
+                    const oldest = dates.length && Math.min(...dates) > 0 ? Math.min(...dates) : 0
+                    const days = oldest ? (Date.now() - oldest) / 86400000 : 0
+                    return oldest ? (
+                      <p className={`text-xs ${days > 120 ? 'font-bold text-amber-600' : 'text-slate-400'}`}>
+                        در گدام: {ageLabel(oldest)}
+                      </p>
+                    ) : null
+                  })()}
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap gap-1">

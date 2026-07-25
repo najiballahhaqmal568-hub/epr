@@ -7,6 +7,7 @@ import AccountCard from './settings/AccountCard'
 import PinCard from './settings/PinCard'
 import FontSizeCard from './settings/FontSizeCard'
 import ReminderCard from './settings/ReminderCard'
+import IntegrityCard from './settings/IntegrityCard'
 
 export default function Settings({
   onBack,
@@ -57,6 +58,7 @@ export default function Settings({
       <FontSizeCard />
       {!isStaff && <ServerCard />}
       <ReminderCard />
+      {!isStaff && <IntegrityCard />}
       {!isStaff && <PinCard />}
 
       {!isStaff && (

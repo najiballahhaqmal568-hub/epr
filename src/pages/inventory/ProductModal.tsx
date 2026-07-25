@@ -127,10 +127,15 @@ export function ProductModal({
             await db.variants.update(f.id, data)
             const delta = data.stockQty - (prev?.stockQty ?? 0)
             if (delta !== 0) await baselineDoc(f.id, delta, 'تصحیح از فورم بوت')
+            // جنس نو وارد گدام شد — تاریخ ورود تازه می‌شود
+            if (delta > 0) await db.variants.update(f.id, { lastPurchaseAt: Date.now() })
           } else {
             const vid = (await db.variants.add(data)) as number
             await db.variants.update(vid, { sku: makeSku(vid, data.size) })
-            if (data.stockQty !== 0) await baselineDoc(vid, data.stockQty, 'موجودی اولیه')
+            if (data.stockQty !== 0) {
+              await baselineDoc(vid, data.stockQty, 'موجودی اولیه')
+              await db.variants.update(vid, { lastPurchaseAt: Date.now() })
+            }
           }
         }
       })
