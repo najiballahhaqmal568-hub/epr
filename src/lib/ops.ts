@@ -10,7 +10,32 @@ import {
   type CashMovement
 } from '../db'
 
+/**
+ * پول همیشه به افغانی صحیح — تا در تقسیم و جمع، کسر و «پول گم‌شده» پیدا نشود.
+ * قیمت تمام‌شدهٔ فی‌جوړه از این قاعده مستثنی است، چون میانگین است نه پول واقعی.
+ */
+export const afn = (n: number): number => Math.round(n)
+
+/**
+ * تقسیم یک مبلغ صحیح به سهم‌های صحیح، به نسبت وزن‌ها.
+ * باقی‌ماندهٔ افغانی به بزرگ‌ترین کسرها داده می‌شود تا جمع سهم‌ها دقیقاً برابر مبلغ شود.
+ */
+export function allocate(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((a, b) => a + b, 0)
+  if (sum <= 0) return weights.map(() => 0)
+  const whole = afn(total)
+  const raw = weights.map((w) => (whole * w) / sum)
+  const out = raw.map((r) => Math.floor(r))
+  let rest = whole - out.reduce((a, b) => a + b, 0)
+  const order = raw
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (let k = 0; rest > 0 && k < order.length; k++, rest--) out[order[k].i]++
+  return out
+}
+
 async function movement(m: Omit<CashMovement, 'id'>, opts?: { allowNegative?: boolean }) {
+  m = { ...m, amount: afn(m.amount) }
   if (m.amount === 0) return 0
   // صندوق نقدی نباید منفی شود — پیسه‌ای که نیست خرج نمی‌شود
   if (m.amount < 0 && !opts?.allowNegative) {
@@ -26,6 +51,10 @@ async function movement(m: Omit<CashMovement, 'id'>, opts?: { allowNegative?: bo
 
 /** ثبت فروش: کاهش گدام + قرض مشتری + ورود نقد به صندوق در یک تراکنش */
 export async function addSale(sale: Sale): Promise<number> {
+  sale.total = afn(sale.total)
+  sale.paid = afn(sale.paid)
+  if (sale.discount !== undefined) sale.discount = afn(sale.discount)
+  sale.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
     for (const line of sale.lines) {
       const v = await db.variants.get(line.variantId)
@@ -89,6 +118,9 @@ export function landedUnitCost(purchase: Purchase, unitCost: number): number {
 
 /** ثبت خرید: افزایش گدام (به قیمت تمام‌شده) + قرض ما + خروج نقد + مصارف رسیدن */
 export async function addPurchase(purchase: Purchase): Promise<number> {
+  purchase.total = afn(purchase.total)
+  purchase.paid = afn(purchase.paid)
+  if (purchase.sarrafAmount !== undefined) purchase.sarrafAmount = afn(purchase.sarrafAmount)
   return db.transaction('rw', db.purchases, db.variants, db.suppliers, db.cashMovements, async () => {
     for (const line of purchase.lines) {
       const v = await db.variants.get(line.variantId)
@@ -129,16 +161,21 @@ export async function addLandingCost(
   via: 'cash' | 'sarraf' | 'later',
   sarraf?: { id: number; name: string }
 ): Promise<void> {
+  amount = afn(amount)
   if (amount <= 0 || !purchaseIds.length) return
   return db.transaction('rw', db.purchases, db.variants, db.suppliers, db.cashMovements, async () => {
     const list = (await db.purchases.bulkGet(purchaseIds)).filter((p): p is Purchase => Boolean(p) && !p!.deleted)
     if (!list.length) throw new Error('خریدی یافت نشد')
-    const totalPairs = list.reduce((s, p) => s + p.lines.reduce((a, l) => a + l.qty, 0), 0)
+    const pairsOf = (p: Purchase) => p.lines.reduce((a, l) => a + l.qty, 0)
+    const totalPairs = list.reduce((s, p) => s + pairsOf(p), 0)
     if (totalPairs <= 0) throw new Error('تعداد جوړه صفر است')
-    const perPair = amount / totalPairs
+    // سهم هر خرید به افغانی صحیح — جمع سهم‌ها دقیقاً برابر مبلغ کل می‌شود
+    const shares = allocate(amount, list.map(pairsOf))
 
     // مصارف رسیدن فقط روی جوړه‌های همین حمل می‌نشیند (میانگین وزنی با بقیهٔ موجودی)
-    for (const p of list) {
+    for (const [idx, p] of list.entries()) {
+      const share = shares[idx]
+      const perPair = share / pairsOf(p)
       for (const line of p.lines) {
         const v = await db.variants.get(line.variantId)
         if (v) {
@@ -147,7 +184,6 @@ export async function addLandingCost(
           await db.variants.update(line.variantId, { purchasePrice: newCost })
         }
       }
-      const share = p.lines.reduce((a, l) => a + l.qty, 0) * perPair
       const unpaidBefore = p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
       const unpaidAfter = via === 'later' ? unpaidBefore + share : unpaidBefore
       await db.purchases.update(p.id!, {
@@ -160,11 +196,12 @@ export async function addLandingCost(
     }
 
     const names = list.map((p) => p.supplierName).join('، ')
+    const whole = shares.reduce((a, b) => a + b, 0)
     if (via === 'cash') {
-      await movement({ date: Date.now(), type: 'landing', refId: list[0].id, amount: -amount, note: `مصارف رسیدن — ${names}` })
+      await movement({ date: Date.now(), type: 'landing', refId: list[0].id, amount: -whole, note: `مصارف رسیدن — ${names}` })
     } else if (via === 'sarraf' && sarraf) {
       const sf = await db.suppliers.get(sarraf.id)
-      if (sf) await db.suppliers.update(sarraf.id, { balance: sf.balance + amount })
+      if (sf) await db.suppliers.update(sarraf.id, { balance: sf.balance + whole })
     }
   })
 }
@@ -216,6 +253,7 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
 
 /** ثبت پرداخت/دریافت: کاهش قرض طرف حساب + حرکت صندوق */
 export async function addPayment(payment: Payment): Promise<number> {
+  payment.amount = afn(payment.amount)
   return db.transaction('rw', db.payments, db.customers, db.suppliers, db.cashMovements, async () => {
     if (payment.partyType === 'customer') {
       const c = await db.customers.get(payment.partyId)
@@ -248,6 +286,7 @@ export async function addOpeningDebt(
   amount: number,
   note?: string
 ): Promise<void> {
+  amount = afn(amount)
   if (amount <= 0) return
   return db.transaction('rw', db.payments, db.customers, db.suppliers, async () => {
     const table = partyType === 'customer' ? db.customers : db.suppliers
@@ -267,6 +306,7 @@ export async function addOpeningDebt(
 
 /** سرمایه‌گذاری شریک: پول وارد صندوق و روی سرمایهٔ ثابتش جمع می‌شود؛ در فروش و مفاد حساب نمی‌شود */
 export async function addCapital(partnerId: number, partnerName: string, amount: number, note?: string): Promise<void> {
+  amount = afn(amount)
   if (amount <= 0) return
   return db.transaction('rw', db.suppliers, db.cashMovements, async () => {
     const p = await db.suppliers.get(partnerId)
@@ -296,6 +336,7 @@ const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'persona
 
 /** ثبت مصرف (تجارت/خانه/شخصی) یا برداشت مالک: خروج نقد از صندوق */
 export async function addExpense(expense: Expense): Promise<number> {
+  expense.amount = afn(expense.amount)
   return db.transaction('rw', db.expenses, db.cashMovements, async () => {
     const id = (await db.expenses.add(expense)) as number
     await movement({
@@ -346,6 +387,8 @@ export async function addAdjustment(adj: Adjustment): Promise<number> {
 
 /** مرجوعی مشتری: برگشت به گدام یا داغمه + تصفیه (نقد/کاهش قرض) */
 export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
+  ret.amount = afn(ret.amount)
+  ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', db.returns, db.variants, db.customers, db.adjustments, db.cashMovements, async () => {
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
@@ -391,6 +434,8 @@ export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
 
 /** مرجوعی به تأمین‌کننده: خروج از گدام + کاهش قرض ما */
 export async function addSupplierReturn(ret: ReturnDoc): Promise<number> {
+  ret.amount = afn(ret.amount)
+  ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', db.returns, db.variants, db.suppliers, db.cashMovements, async () => {
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
@@ -467,6 +512,7 @@ export type ShortageAction =
  * برای کمبود سه راه: مصرف «کسر صندوق» (از مفاد کم می‌شود)، قرض شخص مسئول، یا فقط تنظیم.
  */
 export async function reconcile(counted: number, note?: string, shortage?: ShortageAction): Promise<number> {
+  counted = afn(counted)
   return db.transaction(
     'rw',
     [db.cashMovements, db.reconciliations, db.expenses, db.expenseCategories, db.customers, db.payments],

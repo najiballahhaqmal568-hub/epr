@@ -25,6 +25,7 @@ import {
   reconcile,
   cashBalance
 } from '../src/lib/ops'
+import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
@@ -507,6 +508,86 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('موجودی صندوق', await cashBalance(), 80000)
       eq('جمع دفتر صندوق', await cashLedgerEnd(), 80000)
       eq('دفتر و صندوق دقیقاً برابر', (await cashLedgerEnd()) - (await cashBalance()), 0)
+    }
+  },
+  {
+    name: 'هیچ افغانی در تقسیم مصارف رسیدن گم نشود',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      const v3 = await makeVariant({ size: '44' })
+      await seedCash(200000)
+      // ۳ خرید با تعداد نابرابر، مصرف رسیدن ۱٬۰۰۰ که به ۳ تقسیم نمی‌شود
+      const p1 = await addPurchase(buy(supId, v1, 1, 500))
+      const p2 = await addPurchase(buy(supId, v2, 1, 500))
+      const p3 = await addPurchase(buy(supId, v3, 1, 500))
+      await addLandingCost([p1, p2, p3], 1000, 'later')
+
+      const ps = await db.purchases.bulkGet([p1, p2, p3])
+      const shares = ps.map((p) => p!.landingCost ?? 0)
+      eq('جمع سهم‌ها دقیقاً برابر مبلغ کل', shares.reduce((a, b) => a + b, 0), 1000)
+      is('هر سهم عدد صحیح است', shares.every((x) => Number.isInteger(x)), true)
+
+      // ارزش گدام باید دقیقاً ۱٬۵۰۰ + ۱٬۰۰۰ شود
+      const vs = await db.variants.filter((v) => !v.deleted).toArray()
+      eq('ارزش گدام بعد از مصارف رسیدن', vs.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0), 2500)
+
+      // پرداخت بعدی نباید صندوق را اعشاری کند
+      for (const id of [p1, p2, p3]) await payLanding(id)
+      const cash = await cashBalance()
+      is('صندوق عدد صحیح ماند', Number.isInteger(cash), true)
+      eq('صندوق', cash, 200000 - 1500 - 1000)
+    }
+  },
+  {
+    name: 'تقسیم مبلغ به سهم‌های صحیح — بدون گم شدن و بدون اضافه شدن',
+    run: async () => {
+      const cases: [number, number[]][] = [
+        [1000, [1, 1, 1]],
+        [100, [3, 3, 3, 3]],
+        [7, [1, 1, 1, 1, 1]],
+        [12345, [7, 11, 13]],
+        [5000, [100]],
+        [1, [1, 1, 1]]
+      ]
+      let allOk = true
+      let allInt = true
+      for (const [total, weights] of cases) {
+        const parts = allocate(total, weights)
+        if (parts.reduce((a, b) => a + b, 0) !== total) allOk = false
+        if (!parts.every((x) => Number.isInteger(x) && x >= 0)) allInt = false
+      }
+      is('جمع سهم‌ها همیشه دقیقاً برابر مبلغ', allOk, true)
+      is('همهٔ سهم‌ها عدد صحیح و نامنفی', allInt, true)
+      eq('مبلغ اعشاری هم گرد می‌شود', afn(1666.7), 1667)
+      eq('تقسیم نابرابر', allocate(100, [7, 11, 13]).reduce((a, b) => a + b, 0), 100)
+    }
+  },
+  {
+    name: 'صندوق و قرض‌ها همیشه عدد صحیح بمانند',
+    run: async () => {
+      const supId = await newSupplier()
+      const cId = await newCustomer()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      await seedCash(50000)
+      const p1 = await addPurchase(buy(supId, v1, 7, 333))
+      const p2 = await addPurchase(buy(supId, v2, 11, 777, { paid: 0 }))
+      await addLandingCost([p1, p2], 999, 'cash')
+      await addSale(sell(v1, 3, 1234, { customerId: cId, customerName: 'مشتری', paid: 1000 }))
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 333 })
+
+      const cash = await cashBalance()
+      const cBal = (await db.customers.get(cId))!.balance
+      const sBal = (await db.suppliers.get(supId))!.balance
+      const moves = await db.cashMovements.toArray()
+      is('صندوق عدد صحیح', Number.isInteger(cash), true)
+      is('قرض مشتری عدد صحیح', Number.isInteger(cBal), true)
+      is('قرض تأمین‌کننده عدد صحیح', Number.isInteger(sBal), true)
+      is('هر حرکت صندوق عدد صحیح', moves.every((m) => Number.isInteger(m.amount)), true)
+      eq('جمع دفتر صندوق برابر صندوق', (await cashLedgerEnd()) - cash, 0)
+      eq('جمع دفتر مشتری برابر قرض', (await customerLedgerEnd(cId)) - cBal, 0)
     }
   },
   {

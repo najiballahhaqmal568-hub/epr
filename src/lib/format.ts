@@ -1,4 +1,5 @@
-const nf = new Intl.NumberFormat('fa-AF')
+// پول و تعداد همیشه بدون کسر نشان داده می‌شود — افغانی واحد خوردتر ندارد
+const nf = new Intl.NumberFormat('fa-AF', { maximumFractionDigits: 0 })
 
 export function fmtNum(n: number): string {
   return nf.format(n)
