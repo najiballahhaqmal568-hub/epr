@@ -38,8 +38,8 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const unpaidLanding =
     useLiveQuery(
       async () =>
-        (await db.purchases.filter((p) => !p.deleted && Boolean(p.landingCost) && p.landingPaid === false).toArray()).reduce(
-          (s, p) => s + (p.landingCost ?? 0),
+        (await db.purchases.filter((p) => !p.deleted && Boolean(p.landingCost)).toArray()).reduce(
+          (s, p) => s + (p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)),
           0
         ),
       []

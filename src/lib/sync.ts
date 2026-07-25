@@ -178,8 +178,8 @@ async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, r
     const remainder = p.total - p.paid - hawala
     if (remainder > 0) await bump('suppliers', p.supplierId, 'balance', remainder * sign)
     if (hawala > 0) await bump('suppliers', p.sarrafId, 'balance', hawala * sign)
-    // مصارف رسیدنِ پرداخت‌شده از طریق صراف — قرض ما به صراف زیاد می‌شود
-    const landing = p.landingVia === 'sarraf' && p.landingPaid ? (p.landingCost ?? 0) : 0
+    // مصارف رسیدن از طریق صراف — قرض ما به صراف زیاد می‌شود
+    const landing = p.landingVia === 'sarraf' ? (p.landingCost ?? 0) : 0
     if (landing > 0) await bump('suppliers', p.landingSarrafId, 'balance', landing * sign)
   } else if (table === 'payments') {
     const p = rec as unknown as Payment
@@ -275,12 +275,34 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
         } else if (row.deleted && !existing.deleted) {
           await db.table(table).update(existing.id, { deleted: true })
           await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-        } else if (table === 'purchases' && existing.received === false && (rec as { received?: boolean }).received !== false) {
-          // رسیدِ خرید در دستگاه دیگر ثبت شده — موجودی از سند تعدیل می‌آید، فقط وضعیت را به‌روز کن
-          await db.table(table).update(existing.id, { received: true })
-        } else if (table === 'purchases' && existing.landingPaid === false && (rec as { landingPaid?: boolean }).landingPaid === true) {
-          // مصارف رسیدن در دستگاه دیگر پرداخت شد — پول از سند صندوق می‌آید، فقط وضعیت را به‌روز کن
-          await db.table(table).update(existing.id, { landingPaid: true })
+        } else if (table === 'purchases') {
+          // رسیدِ جنس (موجودی از سند تعدیل می‌آید) و
+          // مصارف رسیدن بعد از تحویل ثبت/پرداخت می‌شود — سهم آن در قیمت تمام‌شده اینجا اعمال می‌گردد
+          const inc = rec as unknown as Purchase
+          const oldLanding = (existing as Purchase).landingCost ?? 0
+          const newLanding = inc.landingCost ?? 0
+          const pairs = inc.lines.reduce((s, l) => s + l.qty, 0)
+          if (newLanding > oldLanding && pairs > 0) {
+            const perPair = (newLanding - oldLanding) / pairs
+            for (const l of inc.lines) {
+              const v = await db.variants.where('id').equals(l.variantId).first()
+              if (v) await db.variants.update(l.variantId, { purchasePrice: v.purchasePrice + perPair })
+            }
+            const deltaSarraf = inc.landingVia === 'sarraf' ? newLanding - oldLanding : 0
+            if (deltaSarraf > 0 && typeof inc.landingSarrafId === 'number') {
+              const sf = await db.suppliers.get(inc.landingSarrafId)
+              if (sf) await db.suppliers.update(inc.landingSarrafId, { balance: sf.balance + deltaSarraf })
+            }
+          }
+          await db.table(table).update(existing.id, {
+            ...(inc.received !== false ? { received: true } : {}),
+            landingCost: newLanding || undefined,
+            landingUnpaid: inc.landingUnpaid,
+            landingVia: inc.landingVia,
+            landingPaid: inc.landingPaid,
+            landingSarrafId: inc.landingSarrafId,
+            landingSarrafName: inc.landingSarrafName
+          })
         }
       }
     } finally {

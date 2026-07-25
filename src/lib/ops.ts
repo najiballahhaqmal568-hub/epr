@@ -102,35 +102,73 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
       const sf = await db.suppliers.get(purchase.sarrafId)
       if (sf) await db.suppliers.update(purchase.sarrafId, { balance: sf.balance + hawala })
     }
-    // مصارف رسیدن: نقد از صندوق، به قرض صراف، یا بعداً
-    const landing = purchase.landingCost ?? 0
-    if (landing > 0) {
-      if (purchase.landingVia === 'sarraf' && purchase.landingSarrafId) {
-        const sf = await db.suppliers.get(purchase.landingSarrafId)
-        if (sf) await db.suppliers.update(purchase.landingSarrafId, { balance: sf.balance + landing })
-        purchase.landingPaid = true
-      } else if (purchase.landingVia === 'cash') {
-        purchase.landingPaid = true
-      } else {
-        purchase.landingPaid = false // بعداً پرداخت می‌شود
-      }
-    }
     const id = (await db.purchases.add(purchase)) as number
     await movement({ date: purchase.date, type: 'purchase', refId: id, amount: -purchase.paid, note: purchase.supplierName })
-    if (landing > 0 && purchase.landingVia === 'cash') {
-      await movement({ date: purchase.date, type: 'landing', refId: id, amount: -landing, note: `مصارف رسیدن — ${purchase.supplierName}` })
-    }
     return id
   })
 }
 
-/** پرداخت مصارف رسیدنِ «بعداً» — نقد از صندوق */
+/**
+ * ثبت مصارف رسیدن بعد از تحویل جنس — برای یک یا چند خرید (یک حمل).
+ * مبلغ کل مساوی فی جوړه بین همهٔ جوړه‌های آن خریدها پخش و در قیمت تمام‌شده می‌نشیند.
+ * اگر قبلاً مصرفی ثبت شده باشد، مبلغ نو روی آن جمع می‌شود.
+ */
+export async function addLandingCost(
+  purchaseIds: number[],
+  amount: number,
+  via: 'cash' | 'sarraf' | 'later',
+  sarraf?: { id: number; name: string }
+): Promise<void> {
+  if (amount <= 0 || !purchaseIds.length) return
+  return db.transaction('rw', db.purchases, db.variants, db.suppliers, db.cashMovements, async () => {
+    const list = (await db.purchases.bulkGet(purchaseIds)).filter((p): p is Purchase => Boolean(p) && !p!.deleted)
+    if (!list.length) throw new Error('خریدی یافت نشد')
+    const totalPairs = list.reduce((s, p) => s + p.lines.reduce((a, l) => a + l.qty, 0), 0)
+    if (totalPairs <= 0) throw new Error('تعداد جوړه صفر است')
+    const perPair = amount / totalPairs
+
+    // قیمت تمام‌شدهٔ هر جنسِ این حمل بالا می‌رود
+    for (const p of list) {
+      for (const line of p.lines) {
+        const v = await db.variants.get(line.variantId)
+        if (v) await db.variants.update(line.variantId, { purchasePrice: v.purchasePrice + perPair })
+      }
+      const share = p.lines.reduce((a, l) => a + l.qty, 0) * perPair
+      const unpaidBefore = p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
+      const unpaidAfter = via === 'later' ? unpaidBefore + share : unpaidBefore
+      await db.purchases.update(p.id!, {
+        landingCost: (p.landingCost ?? 0) + share,
+        landingUnpaid: unpaidAfter,
+        landingVia: via,
+        landingPaid: unpaidAfter <= 0,
+        ...(via === 'sarraf' && sarraf ? { landingSarrafId: sarraf.id, landingSarrafName: sarraf.name } : {})
+      })
+    }
+
+    const names = list.map((p) => p.supplierName).join('، ')
+    if (via === 'cash') {
+      await movement({ date: Date.now(), type: 'landing', refId: list[0].id, amount: -amount, note: `مصارف رسیدن — ${names}` })
+    } else if (via === 'sarraf' && sarraf) {
+      const sf = await db.suppliers.get(sarraf.id)
+      if (sf) await db.suppliers.update(sarraf.id, { balance: sf.balance + amount })
+    }
+  })
+}
+
+/** مبلغ پرداخت‌نشدهٔ مصارف رسیدن یک خرید */
+export function landingUnpaidOf(p: Purchase): number {
+  return p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
+}
+
+/** پرداخت بخشِ «بعداً»ی مصارف رسیدن — نقد از صندوق */
 export async function payLanding(purchaseId: number): Promise<void> {
   return db.transaction('rw', db.purchases, db.cashMovements, async () => {
     const p = await db.purchases.get(purchaseId)
-    if (!p || p.deleted || !p.landingCost || p.landingPaid) return
-    await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -p.landingCost, note: `مصارف رسیدن — ${p.supplierName}` })
-    await db.purchases.update(purchaseId, { landingPaid: true, landingVia: 'cash' })
+    if (!p || p.deleted) return
+    const due = landingUnpaidOf(p)
+    if (due <= 0) return
+    await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -due, note: `مصارف رسیدن — ${p.supplierName}` })
+    await db.purchases.update(purchaseId, { landingUnpaid: 0, landingPaid: true })
   })
 }
 

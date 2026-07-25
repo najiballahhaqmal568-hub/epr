@@ -125,6 +125,8 @@ export interface Purchase extends Synced {
   landingSarrafId?: number
   landingSarrafName?: string
   landingPaid?: boolean
+  /** بخشی از مصارف رسیدن که هنوز پرداخت نشده (حالت «بعداً») */
+  landingUnpaid?: number
 }
 
 export interface Payment extends Synced {
