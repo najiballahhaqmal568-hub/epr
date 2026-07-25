@@ -1,14 +1,4 @@
-import {
-  db,
-  makeSku,
-  type Sale,
-  type Purchase,
-  type Payment,
-  type Expense,
-  type Adjustment,
-  type ReturnDoc,
-  type CashMovement
-} from '../db'
+import { db, makeSku, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
 
 /**
  * پول همیشه به افغانی صحیح — تا در تقسیم و جمع، کسر و «پول گم‌شده» پیدا نشود.

@@ -1,16 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  db,
-  syncFlags,
-  newUuid,
-  SYNC_TABLES,
-  type SyncTable,
-  type Sale,
-  type Purchase,
-  type Payment,
-  type Adjustment,
-  type ReturnDoc
-} from '../db'
+import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Sale, type Purchase, type Payment, type Adjustment, type ReturnDoc } from '../db'
 import { getSupa, getProfile } from './supa'
 
 /** نام جدول‌ها در سرور (snake_case) */
