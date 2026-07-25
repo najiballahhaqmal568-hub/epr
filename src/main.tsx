@@ -4,8 +4,12 @@ import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App'
 import { db } from './db'
+import { applyFontScale } from './lib/fontScale'
 
 registerSW({ immediate: true })
+
+// اندازهٔ فونت انتخاب‌شده پیش از رسم اپ اعمال شود تا صفحه نپرد
+applyFontScale()
 
 // بعد از «ریست این موبایل»، تنظیمات نگه‌داشته‌شده را برگردان
 const restore = localStorage.getItem('restoreSettings')
