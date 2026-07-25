@@ -4,6 +4,7 @@ import { db, type Customer } from '../db'
 import { addPayment, addOpeningDebt } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput, startOfDay } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
+import { buildCustomerLedger } from '../lib/ledger'
 
 export default function Customers() {
   const [view, setView] = useState<'retail' | 'wholesale'>('retail')
@@ -313,8 +314,16 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
     () => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).filter((p) => !p.deleted).reverse().sortBy('date'),
     [customer.id]
   )
+  const returns = useLiveQuery(
+    () => db.returns.filter((r) => !r.deleted && r.kind === 'customer' && r.partyId === customer.id).toArray(),
+    [customer.id]
+  )
 
   const c = live ?? customer
+  // دفتر حساب: هر سند با قرض بعد از آن — تا معلوم شود این عدد از کجا آمد
+  const ledger = buildCustomerLedger(sales ?? [], payments ?? [], returns ?? [])
+  const ledgerEnd = ledger.length ? ledger[ledger.length - 1].balance : 0
+  const mismatch = Math.abs(ledgerEnd - c.balance) > 0.5
 
   return (
     <Modal title={c.name} onClose={onClose}>
@@ -382,33 +391,34 @@ function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: ()
         </div>
       )}
 
-      <p className="mb-2 font-bold text-slate-700">تاریخچه</p>
-      {payments?.map((p) =>
-        p.amount < 0 ? (
-          // قرض قبلی / بیلانس اولیه: قرض را بالا برده است
-          <div key={`p${p.id}`} className="mb-2 flex justify-between rounded-lg bg-amber-50 p-2 text-sm">
-            <span>
-              {p.note === 'بیلانس اولیه' ? 'بیلانس اولیه' : (p.note ?? 'قرض قبلی')} — {fmtDate(p.date)}
-            </span>
-            <span className="font-bold text-red-600">+{fmtMoney(-p.amount)}</span>
-          </div>
-        ) : (
-          <div key={`p${p.id}`} className="mb-2 flex justify-between rounded-lg bg-teal-50 p-2 text-sm">
-            <span>دریافت پول — {fmtDate(p.date)}</span>
-            <span className="font-bold text-teal-700">{fmtMoney(p.amount)}</span>
-          </div>
-        )
+      <div className="mb-2 flex items-baseline justify-between">
+        <p className="font-bold text-slate-700">دفتر حساب — این عدد از کجا آمد</p>
+        <span className="text-xs text-slate-400">قرض بعد از هر سند</span>
+      </div>
+      {mismatch && (
+        <p className="mb-2 rounded-xl bg-amber-50 p-2 text-xs font-bold text-amber-800">
+          ⚠️ جمع دفتر ({fmtMoney(ledgerEnd)}) با عدد بالا برابر نیست — با «تصفیه» یا پشتیبان‌گیری بررسی کنید.
+        </p>
       )}
-      {sales?.map((s) => (
-        <div key={`s${s.id}`} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
-          <div className="flex justify-between">
-            <span>خرید — {fmtDate(s.date)}</span>
-            <span className="font-bold">{fmtMoney(s.total)}</span>
+      {[...ledger].reverse().map((r) => (
+        <div key={r.key} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-bold text-slate-800">{r.label}</p>
+              <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
+              {r.note && <p className="truncate text-xs text-slate-500">{r.note}</p>}
+            </div>
+            <div className="shrink-0 text-left">
+              <p className={`font-bold ${r.delta > 0 ? 'text-red-600' : 'text-teal-700'}`}>
+                {r.delta > 0 ? '+' : '−'}
+                {fmtMoney(Math.abs(r.delta))}
+              </p>
+              <p className="text-xs text-slate-500">قرض شد: {fmtMoney(r.balance)}</p>
+            </div>
           </div>
-          {s.total - s.paid > 0 && <p className="text-xs text-red-600">قرضی: {fmtMoney(s.total - s.paid)}</p>}
         </div>
       ))}
-      {!sales?.length && !payments?.length && <p className="text-sm text-slate-400">تاریخچه‌ای موجود نیست.</p>}
+      {ledger.length === 0 && <p className="text-sm text-slate-400">هنوز سندی نیست.</p>}
 
       {showEdit && <CustomerModal customer={c} onClose={() => setShowEdit(false)} />}
     </Modal>

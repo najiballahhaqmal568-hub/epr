@@ -4,6 +4,7 @@ import { db, accessFlags, type ExpenseType, type Expense, type CashMovementType 
 import { addExpense, deleteExpense, renameCategory, reconcile, addPartnerWithdrawal } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../components/ui'
+import { buildCashLedger } from '../lib/ledger'
 
 const MOVE_LABELS: Record<CashMovementType, string> = {
   sale: 'فروش',
@@ -474,8 +475,114 @@ function NewExpenseModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** دفتر صندوق: هر حرکت با موجودی بعد از آن، گروه‌شده به روز */
+function CashLedgerModal({ onClose }: { onClose: () => void }) {
+  const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('week')
+  const [q, setQ] = useState('')
+
+  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
+  const all = buildCashLedger(movements ?? [], (t) => MOVE_LABELS[t])
+
+  const from =
+    period === 'today' ? startOfDay() : period === 'week' ? startOfDay() - 6 * 86400000 : period === 'month' ? startOfMonth() : 0
+  const inPeriod = all.filter((r) => r.date >= from)
+  const rows = q.trim()
+    ? inPeriod.filter((r) => `${r.label} ${r.note ?? ''}`.includes(q.trim()))
+    : inPeriod
+
+  const balance = all.length ? all[all.length - 1].balance : 0
+  // موجودی پیش از شروع دوره = موجودی بعد از آخرین حرکت قبل از آن
+  const before = all.filter((r) => r.date < from)
+  const opening = before.length ? before[before.length - 1].balance : 0
+  const periodIn = inPeriod.filter((r) => r.delta > 0).reduce((s, r) => s + r.delta, 0)
+  const periodOut = inPeriod.filter((r) => r.delta < 0).reduce((s, r) => s - r.delta, 0)
+
+  // گروه‌بندی به روز، تازه‌ترین اول
+  const days = new Map<number, typeof rows>()
+  for (const r of [...rows].reverse()) {
+    const d = startOfDay(r.date)
+    days.set(d, [...(days.get(d) ?? []), r])
+  }
+
+  const chip = (id: typeof period, label: string) => (
+    <button
+      key={id}
+      onClick={() => setPeriod(id)}
+      className={`rounded-full px-3 py-1.5 text-sm font-bold ${period === id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <Modal title="📒 دفتر صندوق" onClose={onClose}>
+      <div className="mb-3 rounded-xl bg-teal-50 p-3">
+        <div className="flex justify-between text-sm text-slate-600">
+          <span>موجودی اول دوره</span>
+          <span className="font-bold">{fmtMoney(opening)}</span>
+        </div>
+        <div className="flex justify-between text-sm text-teal-700">
+          <span>مجموع ورود</span>
+          <span className="font-bold">＋{fmtMoney(periodIn)}</span>
+        </div>
+        <div className="flex justify-between text-sm text-red-600">
+          <span>مجموع خروج</span>
+          <span className="font-bold">−{fmtMoney(periodOut)}</span>
+        </div>
+        <div className="mt-1 flex justify-between border-t border-teal-200 pt-1 font-bold text-slate-800">
+          <span>موجودی فعلی</span>
+          <span className="text-xl">{fmtMoney(balance)}</span>
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        {chip('today', 'امروز')}
+        {chip('week', '۷ روز')}
+        {chip('month', 'این ماه')}
+        {chip('all', 'از اول')}
+      </div>
+      <input className={inputCls} placeholder="جستجو در شرح…" value={q} onChange={(e) => setQ(e.target.value)} />
+
+      <div className="mt-3">
+        {rows.length === 0 && <p className="text-sm text-slate-400">در این دوره حرکتی نیست.</p>}
+        {[...days.entries()].map(([day, list]) => {
+          const dayIn = list.filter((r) => r.delta > 0).reduce((s, r) => s + r.delta, 0)
+          const dayOut = list.filter((r) => r.delta < 0).reduce((s, r) => s - r.delta, 0)
+          return (
+            <div key={day} className="mb-3">
+              <div className="mb-1 flex items-baseline justify-between rounded-lg bg-slate-100 px-2 py-1">
+                <span className="text-sm font-bold text-slate-700">{fmtDateShort(day)}</span>
+                <span className="text-xs text-slate-500">
+                  ＋{fmtMoney(dayIn)} · −{fmtMoney(dayOut)}
+                </span>
+              </div>
+              {list.map((r) => (
+                <div key={r.key} className="mb-1 flex items-start justify-between gap-2 rounded-lg bg-white p-2 text-sm shadow-sm">
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-800">{r.label}</p>
+                    {r.note && <p className="truncate text-xs text-slate-500">{r.note}</p>}
+                    <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
+                  </div>
+                  <div className="shrink-0 text-left">
+                    <p className={`font-bold ${r.delta >= 0 ? 'text-teal-700' : 'text-red-600'}`}>
+                      {r.delta >= 0 ? '＋' : '−'}
+                      {fmtMoney(Math.abs(r.delta))}
+                    </p>
+                    <p className="text-xs text-slate-500">صندوق شد: {fmtMoney(r.balance)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    </Modal>
+  )
+}
+
 function CashView() {
   const [showReconcile, setShowReconcile] = useState(false)
+  const [showLedger, setShowLedger] = useState(false)
   const [counted, setCounted] = useState('')
   const [note, setNote] = useState('')
   const [result, setResult] = useState<string>('')
@@ -495,10 +602,11 @@ function CashView() {
 
   return (
     <>
-      <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white">
+      <button onClick={() => setShowLedger(true)} className="mb-3 w-full rounded-2xl bg-teal-700 p-4 text-right text-white">
         <p className="text-sm opacity-80">موجودی صندوق</p>
         <p className="text-3xl font-bold">{fmtMoney(balance)}</p>
-      </div>
+        <p className="mt-1 text-xs opacity-80">👆 برای دیدن «این عدد از کجا آمد» ضربه بزنید</p>
+      </button>
 
       <Card>
         <p className="mb-2 font-bold text-slate-700">راپور امروز</p>
@@ -553,6 +661,8 @@ function CashView() {
           ))}
         </>
       )}
+
+      {showLedger && <CashLedgerModal onClose={() => setShowLedger(false)} />}
 
       {showReconcile && (
         <Modal title="تصفیه صندوق" onClose={() => setShowReconcile(false)}>

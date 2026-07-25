@@ -25,6 +25,7 @@ import {
   reconcile,
   cashBalance
 } from '../src/lib/ops'
+import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -92,6 +93,22 @@ const stockOf = async (id: number) => (await db.variants.get(id))!.stockQty
 const costOf = async (id: number) => (await db.variants.get(id))!.purchasePrice
 const newSupplier = (name = 'تأمین‌کننده') => db.suppliers.add({ name, balance: 0 }) as Promise<number>
 const newCustomer = (name = 'مشتری') => db.customers.add({ name, type: 'retail', balance: 0 }) as Promise<number>
+
+/** جمع دفتر صندوق — باید دقیقاً با موجودی ذخیره‌شده برابر باشد */
+async function cashLedgerEnd(): Promise<number> {
+  const movements = await db.cashMovements.filter((m) => !m.deleted).toArray()
+  const rows = buildCashLedger(movements, (t) => t)
+  return rows.length ? rows[rows.length - 1].balance : 0
+}
+
+/** جمع دفتر یک مشتری — باید دقیقاً با قرض ذخیره‌شدهٔ او برابر باشد */
+async function customerLedgerEnd(customerId: number): Promise<number> {
+  const sales = await db.sales.filter((x) => !x.deleted && x.customerId === customerId).toArray()
+  const payments = await db.payments.filter((x) => !x.deleted && x.partyType === 'customer' && x.partyId === customerId).toArray()
+  const returns = await db.returns.filter((r) => !r.deleted && r.kind === 'customer' && r.partyId === customerId).toArray()
+  const rows = buildCustomerLedger(sales, payments, returns)
+  return rows.length ? rows[rows.length - 1].balance : 0
+}
 
 /** مفاد از راه سود و زیان — همان فورمول داشبورد و راپور */
 async function profitAndLoss(): Promise<number> {
@@ -435,6 +452,61 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await reconcile(9400, undefined, { mode: 'adjust' })
       eq('صندوق', await cashBalance(), 9400)
       eq('مفاد تغییر نکرد', await profitAndLoss(), -300)
+    }
+  },
+  {
+    name: 'دفتر مشتری با قرض ذخیره‌شده برابر باشد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const cId = await newCustomer()
+      await addPurchase(buy(supId, vId, 20, 500, { paid: 0 }))
+
+      await addOpeningDebt('customer', cId, 'مشتری', 3000, 'دفتر کهنه') // قرض ۳٬۰۰۰
+      await addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'مشتری', paid: 0 })) // +۱٬۸۰۰ → ۴٬۸۰۰
+      await addSale(sell(vId, 1, 900, { customerId: cId, customerName: 'مشتری' })) // نقدی → بی‌اثر
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 1000 }) // → ۳٬۸۰۰
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: cId,
+        partyName: 'مشتری',
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+        amount: 900,
+        settlement: 'reduceDebt',
+        reason: 'خراب'
+      }) // → ۲٬۹۰۰
+
+      eq('قرض ذخیره‌شده', (await db.customers.get(cId))!.balance, 2900)
+      eq('جمع دفتر مشتری', await customerLedgerEnd(cId), 2900)
+      eq('دفتر و عدد دقیقاً برابر', (await customerLedgerEnd(cId)) - (await db.customers.get(cId))!.balance, 0)
+
+      // فروش نقدی نباید سطر قرض بسازد
+      const sales = await db.sales.filter((x) => x.customerId === cId).toArray()
+      const payments = await db.payments.filter((x) => x.partyType === 'customer' && x.partyId === cId).toArray()
+      const returns = await db.returns.filter((r) => r.kind === 'customer' && r.partyId === cId).toArray()
+      eq('تعداد سطرهای دفتر', buildCustomerLedger(sales, payments, returns).length, 4)
+    }
+  },
+  {
+    name: 'دفتر صندوق با موجودی ذخیره‌شده برابر باشد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const cId = await newCustomer()
+      await seedCash(100000)
+      const pid = await addPurchase(buy(supId, vId, 40, 500))
+      await addLandingCost([pid], 2000, 'cash')
+      await addSale(sell(vId, 10, 900, { customerId: cId, customerName: 'مشتری', paid: 5000 }))
+      const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
+      await addExpense({ date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه', amount: 1500 } as Expense)
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 4000 })
+      await addPartnerWithdrawal('مالک', 3000)
+      await reconcile(80000, 'شمارش شام', { mode: 'adjust' })
+
+      eq('موجودی صندوق', await cashBalance(), 80000)
+      eq('جمع دفتر صندوق', await cashLedgerEnd(), 80000)
+      eq('دفتر و صندوق دقیقاً برابر', (await cashLedgerEnd()) - (await cashBalance()), 0)
     }
   },
   {
