@@ -32,6 +32,12 @@ export function fmtDate(ts: number): string {
   return `${fmtDateShort(ts)}، ${fmtTime12(ts)}`
 }
 
+/** کلید و نام ماه هجری شمسی — برای راپور ماه‌به‌ماه */
+export function jalaliMonth(ts: number): { key: string; label: string } {
+  const { y, m } = jalali(ts)
+  return { key: `${y}-${String(m).padStart(2, '0')}`, label: `${AF_MONTHS[m - 1] ?? ''} ${faDigits(y)}` }
+}
+
 export function fmtDateShort(ts: number): string {
   const { y, m, d } = jalali(ts)
   return `${faDigits(d)} ${AF_MONTHS[m - 1] ?? ''} ${faDigits(y)}`

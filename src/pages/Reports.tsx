@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../db'
-import { fmtNum, fmtMoney, fmtDate, fmtDateShort, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
+import { fmtNum, fmtMoney, fmtDate, fmtDateShort, jalaliMonth, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../components/ui'
 import { addCapital, addPartnerWithdrawal, recordCapitalCash } from '../lib/ops'
 import { parseNum } from '../lib/format'
@@ -109,6 +109,58 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   })
   const topCustomers = [...custBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
 
+  // آمار به تفکیک مدل: جوړه فروخته‌شده، فروش و مفاد (تخفیف فاکتور به نسبت خط پخش می‌شود)
+  const byModel = new Map<string, { qty: number; revenue: number; profit: number }>()
+  sales?.forEach((s) => {
+    const disc = s.discount ?? 0
+    const sub = s.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0)
+    s.lines.forEach((l) => {
+      const cost = variantMap.get(l.variantId)?.purchasePrice ?? 0
+      const lineTotal = l.qty * l.unitPrice
+      const lineDisc = sub > 0 ? (lineTotal / sub) * disc : 0
+      const cur = byModel.get(l.productName) ?? { qty: 0, revenue: 0, profit: 0 }
+      byModel.set(l.productName, {
+        qty: cur.qty + l.qty,
+        revenue: cur.revenue + lineTotal - lineDisc,
+        profit: cur.profit + (l.unitPrice - cost) * l.qty - lineDisc
+      })
+    })
+  })
+  const modelRows = [...byModel.entries()].sort((a, b) => b[1].qty - a[1].qty)
+
+  // خرید از هر تأمین‌کننده در دوره
+  const bySupplier = new Map<string, { total: number; pairs: number; count: number }>()
+  purchases?.forEach((p) => {
+    const cur = bySupplier.get(p.supplierName) ?? { total: 0, pairs: 0, count: 0 }
+    bySupplier.set(p.supplierName, {
+      total: cur.total + p.total,
+      pairs: cur.pairs + p.lines.reduce((a, l) => a + l.qty, 0),
+      count: cur.count + 1
+    })
+  })
+  const supplierRows = [...bySupplier.entries()].sort((a, b) => b[1].total - a[1].total)
+
+  // فروش ماه‌به‌ماه در دوره
+  const byMonth = new Map<string, { label: string; total: number; qty: number; profit: number }>()
+  sales?.forEach((s) => {
+    const { key, label } = jalaliMonth(s.date)
+    const cur = byMonth.get(key) ?? { label, total: 0, qty: 0, profit: 0 }
+    const prof =
+      s.lines.reduce((a, l) => a + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0) - (s.discount ?? 0)
+    byMonth.set(key, {
+      label,
+      total: cur.total + s.total,
+      qty: cur.qty + s.lines.reduce((a, l) => a + l.qty, 0),
+      profit: cur.profit + prof
+    })
+  })
+  const monthRows = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v)
+
+  // پرفروش‌ترین سایزها
+  const bySize = new Map<string, number>()
+  sales?.forEach((s) => s.lines.forEach((l) => bySize.set(l.size, (bySize.get(l.size) ?? 0) + l.qty)))
+  const sizeRows = [...bySize.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
+
   // جنس مرده: موجودی دارد ولی در ۶۰ روز اخیر فروش نداشته
   const cutoff = now - 60 * 86400000
   const soldRecently = new Set<number>()
@@ -179,7 +231,78 @@ export default function Reports({ onBack }: { onBack: () => void }) {
       )}
 
       <Card>
-        <p className="mb-2 font-bold text-slate-700">پرفروش‌ترین اجناس دوره</p>
+        <p className="mb-2 font-bold text-slate-700">👞 آمار هر جنس (مدل) — جوړه، فروش، مفاد</p>
+        {modelRows.length === 0 && <p className="text-sm text-slate-400">فروشی در این دوره نیست.</p>}
+        {modelRows.map(([name, d]) => (
+          <div key={name} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+            <span className="text-slate-700">
+              {name}
+              <span className="block text-xs text-slate-400">{fmtNum(d.qty)} جوړه فروخته شد</span>
+            </span>
+            <span className="text-left">
+              <span className="block font-bold text-slate-800">{fmtMoney(d.revenue)}</span>
+              <span className={`text-xs font-bold ${d.profit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>مفاد: {fmtMoney(d.profit)}</span>
+            </span>
+          </div>
+        ))}
+        {modelRows.length > 0 && (
+          <p className="mt-2 text-xs text-slate-400">
+            جمله: {fmtNum(modelRows.reduce((s, [, d]) => s + d.qty, 0))} جوړه · مفاد {fmtMoney(modelRows.reduce((s, [, d]) => s + d.profit, 0))}
+          </p>
+        )}
+      </Card>
+
+      <Card>
+        <p className="mb-2 font-bold text-slate-700">📦 خرید از تأمین‌کنندگان در دوره</p>
+        {supplierRows.length === 0 && <p className="text-sm text-slate-400">خریدی در این دوره نیست.</p>}
+        {supplierRows.map(([name, d]) => (
+          <div key={name} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+            <span className="text-slate-700">
+              {name}
+              <span className="block text-xs text-slate-400">
+                {fmtNum(d.count)} خرید · {fmtNum(d.pairs)} جوړه
+              </span>
+            </span>
+            <span className="font-bold text-slate-800">{fmtMoney(d.total)}</span>
+          </div>
+        ))}
+        {supplierRows.length > 0 && (
+          <p className="mt-2 text-xs text-slate-400">جمله خرید: {fmtMoney(supplierRows.reduce((s, [, d]) => s + d.total, 0))}</p>
+        )}
+      </Card>
+
+      {monthRows.length > 1 && (
+        <Card>
+          <p className="mb-2 font-bold text-slate-700">📅 فروش ماه‌به‌ماه</p>
+          {monthRows.map((r2) => (
+            <div key={r2.label} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+              <span className="text-slate-600">
+                {r2.label}
+                <span className="block text-xs text-slate-400">{fmtNum(r2.qty)} جوړه</span>
+              </span>
+              <span className="text-left">
+                <span className="block font-bold text-slate-800">{fmtMoney(r2.total)}</span>
+                <span className={`text-xs ${r2.profit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>مفاد: {fmtMoney(r2.profit)}</span>
+              </span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {sizeRows.length > 0 && (
+        <Card>
+          <p className="mb-2 font-bold text-slate-700">📏 پرفروش‌ترین سایزها</p>
+          {sizeRows.map(([size, qty]) => (
+            <div key={size} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+              <span className="text-slate-600">سایز {size}</span>
+              <span className="font-bold text-slate-800">{fmtNum(qty)} جوړه</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <Card>
+        <p className="mb-2 font-bold text-slate-700">پرفروش‌ترین اجناس دوره (سایز به سایز)</p>
         {topProducts.length === 0 && <p className="text-sm text-slate-400">فروشی در این دوره نیست.</p>}
         {topProducts.map(([name, d]) => (
           <Row key={name} label={name} value={`${fmtNum(d.qty)} جوړه`} sub={fmtMoney(d.revenue)} />
