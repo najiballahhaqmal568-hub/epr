@@ -35,6 +35,7 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
+  const returns = useLiveQuery(() => db.returns.where('date').aboveOrEqual(yearStart).filter((r) => !r.deleted).toArray(), [yearStart])
   const unpaidLanding =
     useLiveQuery(
       async () =>
@@ -48,26 +49,31 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))
 
+  // قیمت خرید ثبت‌شده در خود فاکتور — تا مفاد گذشته با تغییر قیمت عوض نشود
+  const costOf = (l: { variantId: number; unitCost?: number }) => l.unitCost ?? variantMap.get(l.variantId)?.purchasePrice ?? 0
   const grossProfit = (list: Sale[]) =>
     list.reduce(
-      (sum, sale) =>
-        sum +
-        sale.lines.reduce((s, l) => s + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0) -
-        (sale.discount ?? 0),
+      (sum, sale) => sum + sale.lines.reduce((s, l) => s + (l.unitPrice - costOf(l)) * l.qty, 0) - (sale.discount ?? 0),
       0
     )
 
   const todaySales = sales?.filter((s) => s.date >= dayStart) ?? []
   const monthSales = sales?.filter((s) => s.date >= monthStart) ?? []
 
+  // مرجوعی مشتری، مفاد همان فروش را پس می‌گیرد
+  const returnProfit = (from: number) =>
+    (returns ?? [])
+      .filter((r) => r.kind === 'customer' && r.date >= from)
+      .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0)
+
   const todayTotal = todaySales.reduce((s, x) => s + x.total, 0)
   const todayCash = todaySales.reduce((s, x) => s + x.paid, 0)
-  const todayProfit = grossProfit(todaySales)
+  const todayProfit = grossProfit(todaySales) - returnProfit(dayStart)
 
   const monthExpenses = expenses?.filter((e) => e.date >= monthStart && e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
   const yearExpenses = expenses?.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
-  const monthNet = grossProfit(monthSales) - monthExpenses
-  const yearNet = grossProfit(sales ?? []) - yearExpenses
+  const monthNet = grossProfit(monthSales) - returnProfit(monthStart) - monthExpenses
+  const yearNet = grossProfit(sales ?? []) - returnProfit(yearStart) - yearExpenses
 
   const cashBalance = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
   const stockCount = variants?.reduce((s, v) => s + v.stockQty, 0) ?? 0

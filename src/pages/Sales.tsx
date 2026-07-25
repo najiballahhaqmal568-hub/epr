@@ -88,7 +88,16 @@ export default function Sales() {
           }}
         />
       )}
-      {receiptFor && <ReceiptModal sale={receiptFor} onClose={() => setReceiptFor(null)} />}
+      {receiptFor && (
+        <ReceiptModal
+          sale={receiptFor}
+          onClose={() => setReceiptFor(null)}
+          onNext={() => {
+            setReceiptFor(null)
+            setShowNew(true)
+          }}
+        />
+      )}
       {returning && <ReturnModal sale={returning} onClose={() => setReturning(null)} />}
       {exchanging && <ExchangeModal sale={exchanging} onClose={() => setExchanging(null)} />}
     </div>
@@ -530,6 +539,7 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
   const [saleType, setSaleType] = useState<'retail' | 'wholesale'>('retail')
   const [customerId, setCustomerId] = useState<number | ''>('')
   const [custSearch, setCustSearch] = useState('')
+  const [showCust, setShowCust] = useState(false)
   const [lines, setLines] = useState<SaleLine[]>([])
   const [paidStr, setPaidStr] = useState('')
   const [paidTouched, setPaidTouched] = useState(false)
@@ -654,20 +664,23 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
   const paid = paidTouched ? parseNum(paidStr) : total
   const remainder = total - paid
 
-  function addLine(v: Variant) {
+  function addLine(v: Variant, n = 1) {
     const p = productMap.get(v.productId)!
     const price = saleType === 'retail' ? v.retailPrice : v.wholesalePrice
     setLines((ls) => {
       const i = ls.findIndex((l) => l.variantId === v.id)
-      if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, qty: l.qty + 1 } : l))
-      return [...ls, { variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: 1, unitPrice: price }]
+      if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, qty: l.qty + n } : l))
+      return [...ls, { variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: n, unitPrice: price }]
     })
     setSearch('')
   }
 
   async function save() {
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
-    if (remainder > 0 && !customerId) return setError('برای فروش قرضی باید مشتری انتخاب شود')
+    if (remainder > 0 && !customerId) {
+      setShowCust(true)
+      return setError('برای فروش قرضی باید مشتری انتخاب شود')
+    }
     const customer = customers?.find((c) => c.id === customerId)
     const sale: Sale = {
       date: Date.now(),
@@ -691,6 +704,7 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
 
   return (
     <Modal title="فروش جدید" onClose={onClose}>
+      {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
       <div className="mb-3 flex gap-2">
         {(['retail', 'wholesale'] as const).map((t) => (
           <button
@@ -723,21 +737,33 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
           </div>
           <button
             className="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-500"
-            onClick={() => setCustomerId('')}
+            onClick={() => {
+              setCustomerId('')
+              setShowCust(false)
+            }}
             aria-label="حذف مشتری"
           >
             ✕
           </button>
         </div>
-      ) : (
+      ) : showCust ? (
         <Field label="مشتری (خالی = نقدی؛ برای قرضی لازمی)">
           <input
             className={inputCls}
+            autoFocus
             value={custSearch}
             onChange={(e) => setCustSearch(e.target.value)}
             placeholder="جستجوی نام یا تلفن مشتری..."
           />
         </Field>
+      ) : (
+        // فروش نقدی پیش‌فرض است — خانهٔ مشتری فقط وقتی لازم شود باز می‌شود
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+          <span className="text-sm font-bold text-slate-600">💵 فروش نقدی</span>
+          <button onClick={() => setShowCust(true)} className="rounded-full bg-amber-100 px-4 py-1.5 text-sm font-bold text-amber-800">
+            قرضی؟ انتخاب مشتری
+          </button>
+        </div>
       )}
       {!selectedCustomer && custSearch.trim() && (
         <div className="-mt-2 mb-3 overflow-hidden rounded-xl border border-slate-200">
@@ -787,7 +813,9 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
                     <span className="mb-1 block text-2xl">👞</span>
                   )}
                   <p className="truncate text-xs font-bold text-slate-800">{e.p.name}</p>
-                  <p className="truncate text-xs text-slate-500">{fmtNum(inStock.length)} سایز/رنگ</p>
+                  <p className="truncate text-xs text-slate-500">
+                    {fmtNum(inStock.length)} سایز · {fmtNum(e.stock)} جوړه
+                  </p>
                   <p className="text-xs font-bold text-teal-700">{fmtMoney(minPrice)}</p>
                 </button>
               )
@@ -797,7 +825,13 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
       )}
 
       <Field label="جستجوی جنس">
-        <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز، رنگ یا کود..." />
+        <input
+          className={inputCls}
+          autoFocus
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="نام، سایز، رنگ یا کود..."
+        />
       </Field>
       {cartonProducts.map((p) => {
         const pairs = p.carton!.items.reduce((s, it) => s + it.qty, 0)
@@ -822,19 +856,31 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
           {matches.map((v) => {
             const p = productMap.get(v.productId)!
             return (
-              <button
-                key={v.id}
-                onClick={() => addLine(v)}
-                disabled={v.stockQty <= 0}
-                className="flex w-full items-center justify-between border-b border-slate-100 bg-white px-3 py-2 text-right last:border-0 active:bg-teal-50 disabled:opacity-40"
-              >
-                <span>
-                  {p.name} — {v.size} {v.color}
-                </span>
-                <span className="text-sm text-slate-500">
-                  {v.stockQty <= 0 ? 'ناموجود' : `${fmtNum(v.stockQty)} عدد · ${fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}`}
-                </span>
-              </button>
+              <div key={v.id} className="flex items-stretch border-b border-slate-100 bg-white last:border-0">
+                <button
+                  onClick={() => addLine(v)}
+                  disabled={v.stockQty <= 0}
+                  className="flex flex-1 items-center justify-between px-3 py-2 text-right active:bg-teal-50 disabled:opacity-40"
+                >
+                  <span>
+                    {p.name} — {v.size} {v.color}
+                  </span>
+                  <span className="text-sm text-slate-500">
+                    {v.stockQty <= 0 ? 'ناموجود' : `${fmtNum(v.stockQty)} عدد · ${fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}`}
+                  </span>
+                </button>
+                {/* تعداد مستقیم از نتیجهٔ جستجو — بدون باز کردن سطر */}
+                {[2, 3].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => addLine(v, n)}
+                    disabled={v.stockQty < n}
+                    className="w-10 shrink-0 border-r border-slate-100 text-sm font-bold text-teal-700 active:bg-teal-50 disabled:opacity-30"
+                  >
+                    ×{fmtNum(n)}
+                  </button>
+                ))}
+              </div>
             )
           })}
         </div>
@@ -882,9 +928,9 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
         <Field label="تخفیف (اختیاری)">
           <input className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
         </Field>
-        <div className="flex justify-between font-bold text-slate-800">
+        <div className="flex items-center justify-between font-bold text-slate-800">
           <span>قابل پرداخت{discount > 0 ? ` (با ${fmtMoney(discount)} تخفیف)` : ''}</span>
-          <span>{fmtMoney(total)}</span>
+          <span className="text-xl">{fmtMoney(total)}</span>
         </div>
         <Field label="مبلغ دریافتی (نقد)">
           <input
@@ -909,12 +955,12 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
         {remainder < 0 && <p className="text-sm font-bold text-amber-600">بازگشت به مشتری: {fmtMoney(-remainder)}</p>}
       </div>
 
-      {error && <p className="my-2 text-sm text-red-600">{error}</p>}
       {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
       <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-3 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">قابل پرداخت</p>
-          <p className="text-xl font-bold text-teal-700">{fmtMoney(total)}</p>
+          <p className="text-2xl font-bold text-teal-700">{fmtMoney(total)}</p>
+          {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
         </div>
         <button
           onClick={save}
@@ -1066,7 +1112,7 @@ function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sa
 }
 
 /** رسید تصویری فروش — برای ارسال در واتساپ/تلگرام */
-function ReceiptModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+function ReceiptModal({ sale, onClose, onNext }: { sale: Sale; onClose: () => void; onNext?: () => void }) {
   const [img, setImg] = useState<string>('')
   const [msg, setMsg] = useState('')
 
@@ -1113,6 +1159,12 @@ function ReceiptModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
           بستن
         </button>
       </div>
+      {/* در وقت شلوغ: مستقیم به فروش بعدی */}
+      {onNext && (
+        <button onClick={onNext} className="mt-2 w-full rounded-xl bg-amber-100 py-3 text-lg font-bold text-amber-800 active:bg-amber-200">
+          ➕ فروش بعدی
+        </button>
+      )}
     </Modal>
   )
 }

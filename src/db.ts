@@ -81,6 +81,8 @@ export interface SaleLine {
   color: string
   qty: number
   unitPrice: number
+  /** قیمت خرید در لحظهٔ فروش — مفاد از همین حساب می‌شود و با تغییر قیمت بعدی عوض نمی‌شود */
+  unitCost?: number
 }
 
 export interface Sale extends Synced {
@@ -218,6 +220,8 @@ export interface ReturnLine {
   qty: number
   unitPrice: number
   restock: boolean
+  /** قیمت خرید همان وقت — برای کم‌کردن مفاد مرجوعی */
+  unitCost?: number
 }
 
 export interface ReturnDoc extends Synced {

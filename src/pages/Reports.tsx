@@ -60,23 +60,20 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const salesTotal = sales?.reduce((s, x) => s + x.total, 0) ?? 0
   const salesCash = sales?.reduce((s, x) => s + x.paid, 0) ?? 0
   const pairsSold = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
-  const grossProfit =
-    sales?.reduce(
-      (sum, sale) =>
-        sum +
-        sale.lines.reduce((s, l) => s + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0) -
-        (sale.discount ?? 0),
-      0
-    ) ?? 0
+  // قیمت خرید ثبت‌شده در خود فاکتور — مفاد گذشته با تغییر قیمت عوض نمی‌شود
+  const costOf = (l: { variantId: number; unitCost?: number }) => l.unitCost ?? variantMap.get(l.variantId)?.purchasePrice ?? 0
+  const salesProfit =
+    sales?.reduce((sum, sale) => sum + sale.lines.reduce((s, l) => s + (l.unitPrice - costOf(l)) * l.qty, 0) - (sale.discount ?? 0), 0) ?? 0
+  // مرجوعی مشتری مفاد همان فروش را پس می‌گیرد
+  const returnedProfit =
+    returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0) ?? 0
+  const grossProfit = salesProfit - returnedProfit
   // زیان فروش زیر قیمت: خطوطی که قیمت فروش‌شان از قیمت خرید کمتر بوده
   const belowCostLoss =
     sales?.reduce(
       (sum, sale) =>
         sum +
-        sale.lines.reduce((s, l) => {
-          const cost = variantMap.get(l.variantId)?.purchasePrice ?? 0
-          return s + Math.max(0, (cost - l.unitPrice) * l.qty)
-        }, 0),
+        sale.lines.reduce((s, l) => s + Math.max(0, (costOf(l) - l.unitPrice) * l.qty), 0),
       0
     ) ?? 0
   const purchasesTotal = purchases?.reduce((s, x) => s + x.total, 0) ?? 0
@@ -115,7 +112,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
     const disc = s.discount ?? 0
     const sub = s.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0)
     s.lines.forEach((l) => {
-      const cost = variantMap.get(l.variantId)?.purchasePrice ?? 0
+      const cost = costOf(l)
       const lineTotal = l.qty * l.unitPrice
       const lineDisc = sub > 0 ? (lineTotal / sub) * disc : 0
       const cur = byModel.get(l.productName) ?? { qty: 0, revenue: 0, profit: 0 }
@@ -145,8 +142,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   sales?.forEach((s) => {
     const { key, label } = jalaliMonth(s.date)
     const cur = byMonth.get(key) ?? { label, total: 0, qty: 0, profit: 0 }
-    const prof =
-      s.lines.reduce((a, l) => a + (l.unitPrice - (variantMap.get(l.variantId)?.purchasePrice ?? 0)) * l.qty, 0) - (s.discount ?? 0)
+    const prof = s.lines.reduce((a, l) => a + (l.unitPrice - costOf(l)) * l.qty, 0) - (s.discount ?? 0)
     byMonth.set(key, {
       label,
       total: cur.total + s.total,
@@ -388,17 +384,23 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
   const stockValue = allVariants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
   const cash = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
   const receivables = allCustomers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
+  // پیش‌پرداخت مشتری (بستانکاری) — ما به او مقروض هستیم، از دارایی کم می‌شود
+  const customerCredits = allCustomers?.reduce((s, c) => s + Math.max(0, -c.balance), 0) ?? 0
   const payables =
     (allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0) + unpaidLanding
   // طلب ما از تأمین‌کننده/صراف (پیشکی) — جزو دارایی است
   const supplierCredits = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, -x.balance), 0) ?? 0
-  const assets = stockValue + cash + receivables + supplierCredits - payables
+  const assets = stockValue + cash + receivables + supplierCredits - payables - customerCredits
 
   const start = yearStart ?? 0
-  const wSince = (n: string) =>
-    movements?.filter((m) => m.partnerName === n && m.type === 'withdrawal' && m.date >= start).reduce((s, m) => s - m.amount, 0) ?? 0
+  // هر پول که از تجارت بیرون رفته: برداشت، مصرف خانه، مصرف شخصی
+  const DRAW_TYPES = ['withdrawal', 'homeExpense', 'personalExpense']
+  const draws = movements?.filter((m) => DRAW_TYPES.includes(m.type) && m.date >= start) ?? []
+  const wSince = (n: string) => draws.filter((m) => m.partnerName === n).reduce((s, m) => s - m.amount, 0)
   const capSum = partners?.reduce((s, p) => s + (p.capital ?? 0), 0) ?? 0
-  const wSum = partners?.reduce((s, p) => s + wSince(p.name), 0) ?? 0
+  // برداشت‌های بی‌نام (مصرف خانه/شخصی مالک) هم باید در مفاد سال حساب شود
+  const untaggedDraw = draws.filter((m) => !m.partnerName).reduce((s, m) => s - m.amount, 0)
+  const wSum = (partners?.reduce((s, p) => s + wSince(p.name), 0) ?? 0) + untaggedDraw
   const yearProfit = assets + wSum - capSum
   const shareSum = partners?.reduce((s, p) => s + (p.share ?? 0), 0) ?? 0
 
@@ -556,7 +558,9 @@ function PartnersCard({ netProfit }: { netProfit: number }) {
           receivables={receivables}
           supplierCredits={supplierCredits}
           payables={payables}
+          customerCredits={customerCredits}
           wSince={wSince}
+          wSum={wSum}
           yearProfit={yearProfit}
           onClose={() => setShowSettle(false)}
         />
@@ -574,7 +578,9 @@ function SettleModal({
   receivables,
   supplierCredits,
   payables,
+  customerCredits,
   wSince,
+  wSum,
   yearProfit,
   onClose
 }: {
@@ -584,7 +590,9 @@ function SettleModal({
   receivables: number
   supplierCredits: number
   payables: number
+  customerCredits: number
   wSince: (n: string) => number
+  wSum: number
   yearProfit: number
   onClose: () => void
 }) {
@@ -639,7 +647,8 @@ function SettleModal({
         <Row label="طلب از مشتریان" value={fmtMoney(receivables)} />
         {supplierCredits > 0 && <Row label="طلب ما از تأمین‌کنندگان (پیشکی)" value={fmtMoney(supplierCredits)} />}
         <Row label="قرض ما (تأمین‌کننده/صراف)" value={fmtMoney(payables)} red />
-        <Row label="برداشت‌های شرکا در سال" value={fmtMoney(partners.reduce((s, p) => s + wSince(p.name), 0))} />
+        {customerCredits > 0 && <Row label="پیش‌پرداخت مشتریان (قرض ما)" value={fmtMoney(customerCredits)} red />}
+        <Row label="برداشت‌ها و مصارف خانه/شخصی در سال" value={fmtMoney(wSum)} />
         <Row label="مجموع سرمایه‌ها" value={fmtMoney(partners.reduce((s, p) => s + (p.capital ?? 0), 0))} red />
         <Row label="فایده/نقص خالص سال" value={fmtMoney(yearProfit)} bold teal={yearProfit >= 0} red={yearProfit < 0} />
       </div>

@@ -31,6 +31,8 @@ export async function addSale(sale: Sale): Promise<number> {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
       if (v.stockQty < line.qty) throw new Error(`موجودی کافی نیست: ${line.productName} ${line.size}`)
+      // قیمت خرید همین لحظه در فاکتور ثبت می‌شود تا مفاد بعداً تغییر نکند
+      line.unitCost = v.purchasePrice
       await db.variants.update(line.variantId, { stockQty: v.stockQty - line.qty })
     }
     const remainder = sale.total - sale.paid
@@ -69,6 +71,14 @@ export async function deleteSale(saleId: number): Promise<void> {
   })
 }
 
+/** میانگین وزنی قیمت خرید — تا موجودی قدیم با قیمت نو تبدیل نشود */
+function weightedCost(oldQty: number, oldCost: number, addQty: number, addCost: number): number {
+  const total = oldQty + addQty
+  if (total <= 0) return addCost
+  if (oldQty <= 0) return addCost
+  return (oldQty * oldCost + addQty * addCost) / total
+}
+
 /** قیمت تمام‌شدهٔ هر جوړه = قیمت خرید + سهم مصارف رسیدن (تقسیم مساوی) */
 export function landedUnitCost(purchase: Purchase, unitCost: number): number {
   const landing = purchase.landingCost ?? 0
@@ -87,8 +97,8 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
       if (purchase.received !== false) {
         await db.variants.update(line.variantId, {
           stockQty: v.stockQty + line.qty,
-          // قیمت تمام‌شده شامل مصارف رسیدن — تا مفاد دقیق باشد
-          purchasePrice: landedUnitCost(purchase, line.unitCost)
+          // میانگین وزنی با موجودی قبلی — قیمت تمام‌شده شامل مصارف رسیدن
+          purchasePrice: weightedCost(v.stockQty, v.purchasePrice, line.qty, landedUnitCost(purchase, line.unitCost))
         })
       }
     }
@@ -127,11 +137,15 @@ export async function addLandingCost(
     if (totalPairs <= 0) throw new Error('تعداد جوړه صفر است')
     const perPair = amount / totalPairs
 
-    // قیمت تمام‌شدهٔ هر جنسِ این حمل بالا می‌رود
+    // مصارف رسیدن فقط روی جوړه‌های همین حمل می‌نشیند (میانگین وزنی با بقیهٔ موجودی)
     for (const p of list) {
       for (const line of p.lines) {
         const v = await db.variants.get(line.variantId)
-        if (v) await db.variants.update(line.variantId, { purchasePrice: v.purchasePrice + perPair })
+        if (v) {
+          const rest = Math.max(0, v.stockQty - line.qty)
+          const newCost = v.stockQty > 0 ? (rest * v.purchasePrice + line.qty * (v.purchasePrice + perPair)) / v.stockQty : v.purchasePrice + perPair
+          await db.variants.update(line.variantId, { purchasePrice: newCost })
+        }
       }
       const share = p.lines.reduce((a, l) => a + l.qty, 0) * perPair
       const unpaidBefore = p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
@@ -180,7 +194,10 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
     for (const line of p.lines) {
       const v = await db.variants.get(line.variantId)
       if (v) {
-        await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty, purchasePrice: line.unitCost })
+        await db.variants.update(line.variantId, {
+          stockQty: v.stockQty + line.qty,
+          purchasePrice: weightedCost(v.stockQty, v.purchasePrice, line.qty, landedUnitCost(p, line.unitCost))
+        })
       }
       await db.adjustments.add({
         date: Date.now(),
@@ -333,6 +350,7 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
+      if (line.unitCost === undefined) line.unitCost = v.purchasePrice
       if (line.restock) {
         await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty })
       } else {

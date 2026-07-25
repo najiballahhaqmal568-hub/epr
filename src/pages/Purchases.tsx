@@ -1341,6 +1341,7 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="خرید جدید" onClose={onClose}>
+      {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
       <Field label="تأمین‌کننده *">
         <select className={inputCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : '')}>
           <option value="">انتخاب کنید...</option>
@@ -1498,11 +1499,20 @@ function NewPurchaseModal({ onClose }: { onClose: () => void }) {
         {hawala > 0 && <p className="text-sm font-bold text-amber-700">قرض ما به صراف: {fmtMoney(hawala)}</p>}
       </div>
 
-      {error && <p className="my-2 text-sm text-red-600">{error}</p>}
-      <div className="mt-3">
-        <PrimaryBtn onClick={save} disabled={!lines.length || !supplierId}>
+      {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
+      <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-3 border-t border-slate-200 bg-white p-3 pb-4">
+        <div className="flex-1">
+          <p className="text-xs text-slate-500">مجموع خرید</p>
+          <p className="text-2xl font-bold text-amber-700">{fmtMoney(total)}</p>
+          {remainder > 0 && <p className="text-xs font-bold text-red-600">باقی: {fmtMoney(remainder)}</p>}
+        </div>
+        <button
+          onClick={save}
+          disabled={!lines.length || !supplierId}
+          className="rounded-xl bg-amber-700 px-8 py-3 text-lg font-bold text-white active:bg-amber-800 disabled:opacity-40"
+        >
           ثبت خرید
-        </PrimaryBtn>
+        </button>
       </div>
       {npWizard && (
         <CartonWizardModal
