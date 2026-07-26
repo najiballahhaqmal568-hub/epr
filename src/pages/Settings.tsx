@@ -8,6 +8,7 @@ import PinCard from './settings/PinCard'
 import FontSizeCard from './settings/FontSizeCard'
 import ReminderCard from './settings/ReminderCard'
 import IntegrityCard from './settings/IntegrityCard'
+import YearStartCard from './settings/YearStartCard'
 
 export default function Settings({
   onBack,
@@ -58,6 +59,7 @@ export default function Settings({
       <FontSizeCard />
       {!isStaff && <ServerCard />}
       <ReminderCard />
+      {!isStaff && <YearStartCard />}
       {!isStaff && <IntegrityCard />}
       {!isStaff && <PinCard />}
 

@@ -23,7 +23,10 @@ import {
   addCapital,
   addPartnerWithdrawal,
   reconcile,
-  cashBalance
+  cashBalance,
+  addLoan,
+  repayLoan,
+  convertLoanToCapital
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
@@ -706,6 +709,144 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('جنس در راه تاریخ ندارد', (await db.variants.get(v2))!.lastPurchaseAt, undefined)
       await receivePurchase(pid)
       is('بعد از رسید تاریخ گرفت', typeof (await db.variants.get(v2))!.lastPurchaseAt, 'number')
+    }
+  },
+  {
+    name: 'قرض از یک شخص — مفاد خیالی نسازد',
+    run: async () => {
+      // دکان: گدام ۴۰۰٬۰۰۰ + نقد ۱۰۰٬۰۰۰ − قرض تأمین‌کننده ۴۰۰٬۰۰۰ = دارایی خالص ۱۰۰٬۰۰۰
+      const meId = (await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', share: 100, capital: 100000 })) as number
+      await seedCash(100000)
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await addPurchase(buy(supId, vId, 800, 500, { paid: 0 }))
+
+      const before = await settlement()
+      eq('دارایی خالص', before.assets, 100000)
+      eq('مفاد پیش از قرض صفر است', before.yearProfit, 0)
+
+      // ۲۰۰٬۰۰۰ قرض از یک شخص، قسط‌وار
+      const lenderId = (await db.suppliers.add({ name: 'حاجی صاحب', balance: 0, kind: 'lender' })) as number
+      await addLoan(lenderId, 'حاجی صاحب', 120000)
+      await addLoan(lenderId, 'حاجی صاحب', 80000)
+      eq('قرض ما به او', (await db.suppliers.get(lenderId))!.balance, 200000)
+      eq('پول وارد صندوق شد', await cashBalance(), before.cash + 200000)
+
+      const after = await settlement()
+      eq('دارایی تغییر نکرد — قرض دارایی نیست', after.assets, before.assets)
+      eq('مفاد هنوز صفر است — مفاد خیالی ساخته نشد', after.yearProfit, 0)
+
+      // با آن پول جنس خریدیم
+      const v2 = await makeVariant({ size: '43' })
+      await addPurchase(buy(supId, v2, 400, 500))
+      const spent = await settlement()
+      eq('بعد از خرید هم مفاد صفر است', spent.yearProfit, 0)
+
+      // یک قسط پس دادیم
+      await repayLoan(lenderId, 'حاجی صاحب', 50000)
+      eq('قرض کم شد', (await db.suppliers.get(lenderId))!.balance, 150000)
+      eq('بعد از پرداخت هم مفاد صفر است', (await settlement()).yearProfit, 0)
+      is('مالک همچنان تنها شریک است', (await db.suppliers.get(meId))!.kind, 'partner')
+    }
+  },
+  {
+    name: 'تبدیل قرض به سرمایهٔ شریک',
+    run: async () => {
+      await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', share: 100, capital: 500000 })
+      await seedCash(500000)
+      const lenderId = (await db.suppliers.add({ name: 'حاجی صاحب', balance: 0, kind: 'lender' })) as number
+      await addLoan(lenderId, 'حاجی صاحب', 150000)
+      await addLoan(lenderId, 'حاجی صاحب', 50000)
+
+      const before = await settlement()
+      eq('دارایی خالص پیش از تبدیل', before.assets, 500000)
+      eq('مفاد صفر', before.yearProfit, 0)
+      eq('صندوق', before.cash, 700000)
+
+      // سهم عادلانه: ۲۰۰٬۰۰۰ از مجموع ۷۰۰٬۰۰۰ = ۲۸.۵٪
+      const owed = await convertLoanToCapital(lenderId, 29)
+      eq('مبلغ تبدیل‌شده', owed, 200000)
+
+      const l = (await db.suppliers.get(lenderId))!
+      is('حالا شریک است', l.kind, 'partner')
+      eq('قرضش صفر شد', l.balance, 0)
+      eq('سرمایه‌اش شد', l.capital ?? 0, 200000)
+      eq('سهمش', l.share ?? 0, 29)
+
+      const after = await settlement()
+      eq('صندوق تغییر نکرد — پول قبلاً آمده بود', after.cash, 700000)
+      eq('دارایی حالا شامل پول اوست', after.assets, 700000)
+      eq('مجموع سرمایه‌ها', after.capSum, 700000)
+      eq('مفاد باز هم صفر — تبدیل مفاد نمی‌سازد', after.yearProfit, 0)
+
+      // کنترل حساب‌ها هم نباید اشکالی ببیند
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'شروع سال مالی — مفاد روز اول دقیقاً صفر',
+    run: async () => {
+      // وضعیت روز اول یک دکان واقعی: گدام، صندوق، طلب، قرض تأمین‌کننده، قرض از شخص
+      const supId = await newSupplier()
+      const cId = await newCustomer()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      // موجودی اولیه — عیناً مثل فورم گدام: عدد + سند «موجودی اولیه»
+      const openStock = async (id: number, qty: number, cost: number, size: string) => {
+        await db.variants.update(id, { stockQty: qty, purchasePrice: cost, lastPurchaseAt: Date.now() })
+        await db.adjustments.add({
+          date: Date.now(),
+          variantId: id,
+          productName: 'اسپرتکس',
+          size,
+          color: 'سیاه',
+          qtyChange: qty,
+          reason: 'correction',
+          note: 'موجودی اولیه'
+        })
+      }
+      await openStock(v1, 300, 550, '42') // ۱۶۵٬۰۰۰
+      await openStock(v2, 120, 700, '43') // ۸۴٬۰۰۰
+      await db.cashMovements.add({ date: Date.now(), type: 'openingSet', amount: 73000, note: 'پول اول سال' })
+      await addOpeningDebt('customer', cId, 'مشتری', 41000)
+      await addOpeningDebt('supplier', supId, 'تأمین‌کننده', 95000)
+      const lenderId = (await db.suppliers.add({ name: 'حاجی صاحب', balance: 0, kind: 'lender' })) as number
+      await addLoan(lenderId, 'حاجی صاحب', 60000)
+
+      // همان فورمول ویزارد
+      const variants = await db.variants.filter((v) => !v.deleted).toArray()
+      const movements = await db.cashMovements.filter((m) => !m.deleted).toArray()
+      const customers = await db.customers.filter((c) => !c.deleted).toArray()
+      const suppliers = await db.suppliers.filter((x) => !x.deleted).toArray()
+      const others = suppliers.filter((x) => x.kind !== 'partner')
+      const stock = variants.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
+      const cash = movements.reduce((s, m) => s + m.amount, 0)
+      const recv = customers.reduce((s, c) => s + Math.max(0, c.balance), 0)
+      const credits = customers.reduce((s, c) => s + Math.max(0, -c.balance), 0)
+      const payables = others.filter((x) => x.kind !== 'lender').reduce((s, x) => s + Math.max(0, x.balance), 0)
+      const loans = others.filter((x) => x.kind === 'lender').reduce((s, x) => s + Math.max(0, x.balance), 0)
+      const supCredit = others.reduce((s, x) => s + Math.max(0, -x.balance), 0)
+      const assets = stock + cash + recv + supCredit - payables - loans - credits
+
+      eq('ارزش گدام', stock, 249000)
+      eq('صندوق (شامل قرض دریافتی)', cash, 133000)
+      eq('قرض ما از شخص', loans, 60000)
+      // ۲۴۹٬۰۰۰ + ۱۳۳٬۰۰۰ + ۴۱٬۰۰۰ − ۹۵٬۰۰۰ − ۶۰٬۰۰۰
+      eq('دارایی خالص', assets, 268000)
+
+      // ویزارد سرمایهٔ مالک را برابر دارایی خالص می‌گذارد
+      await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', capital: afn(assets), share: 100 })
+      await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+
+      const s0 = await settlement()
+      eq('سرمایهٔ ثبت‌شده', s0.capSum, 268000)
+      eq('مفاد روز اول دقیقاً صفر است', s0.yearProfit, 0)
+      is('کنترل حساب‌ها هم سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // یک فروش با مفاد ۲۰۰ — از فردا مفاد درست شمرده شود
+      await addSale(sell(v1, 1, 750))
+      eq('مفاد بعد از یک فروش', (await settlement()).yearProfit, 200)
+      eq('همان عدد از راه سود و زیان', await profitAndLoss(), 200)
     }
   },
   {

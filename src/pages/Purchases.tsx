@@ -10,9 +10,10 @@ import SupplierDetailModal from './purchases/SupplierDetailModal'
 import { PurchaseReturnModal, SupplierReturnModal } from './purchases/ReturnModals'
 import { NewSupplierModal, PaySupplierModal } from './purchases/SupplierModals'
 import NewPurchaseModal from './purchases/NewPurchaseModal'
+import LendersView from './purchases/LendersView'
 
 export default function Purchases() {
-  const [view, setView] = useState<'history' | 'suppliers' | 'sarrafs' | 'candidates'>('history')
+  const [view, setView] = useState<'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'>('history')
   const [showNew, setShowNew] = useState(false)
   const [showNewSupplier, setShowNewSupplier] = useState<'supplier' | 'sarraf' | null>(null)
   const [payingSupplier, setPayingSupplier] = useState<number | null>(null)
@@ -23,7 +24,7 @@ export default function Purchases() {
 
   const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
-  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner')
+  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner' && s.kind !== 'lender')
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
 
   const tabCls = (v: string) =>
@@ -42,12 +43,16 @@ export default function Purchases() {
         <button onClick={() => setView('sarrafs')} className={tabCls('sarrafs')}>
           صراف‌ها
         </button>
+        <button onClick={() => setView('lenders')} className={tabCls('lenders')}>
+          قرض‌دهنده‌ها
+        </button>
         <button onClick={() => setView('candidates')} className={tabCls('candidates')}>
           کاندیدها
         </button>
       </div>
 
       {view === 'candidates' && <CandidatesView />}
+      {view === 'lenders' && <LendersView />}
 
       {view === 'history' && (
         <>

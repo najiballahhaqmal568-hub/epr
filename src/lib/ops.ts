@@ -314,6 +314,81 @@ export async function recordCapitalCash(partnerName: string, amount: number): Pr
   await movement({ date: Date.now(), type: 'capitalIn', amount, partnerName, note: 'سرمایهٔ اول سال' })
 }
 
+/**
+ * دریافت قرض از یک شخص (قرض‌دهنده) — قسط به قسط.
+ * پول وارد صندوق می‌شود و قرض ما به او بالا می‌رود.
+ * سند پرداخت با مبلغ منفی ثبت می‌شود تا بین دستگاه‌ها همگام شود — عین قرض قبلی.
+ */
+export async function addLoan(lenderId: number, lenderName: string, amount: number, date = Date.now(), note?: string): Promise<void> {
+  amount = afn(amount)
+  if (amount <= 0) return
+  return db.transaction('rw', db.payments, db.suppliers, db.cashMovements, async () => {
+    const l = await db.suppliers.get(lenderId)
+    if (!l) throw new Error('قرض‌دهنده یافت نشد')
+    await db.suppliers.update(lenderId, { balance: l.balance + amount })
+    await db.payments.add({
+      date,
+      partyType: 'supplier',
+      partyId: lenderId,
+      partyName: lenderName,
+      amount: -amount,
+      note: note?.trim() ? `قرض گرفته‌شده — ${note.trim()}` : 'قرض گرفته‌شده'
+    })
+    await movement({ date, type: 'loanIn', amount, note: `قرض از ${lenderName}` })
+  })
+}
+
+/** پرداخت قرض به قرض‌دهنده — نقد از صندوق */
+export async function repayLoan(lenderId: number, lenderName: string, amount: number, note?: string): Promise<void> {
+  amount = afn(amount)
+  if (amount <= 0) return
+  return db.transaction('rw', db.payments, db.suppliers, db.cashMovements, async () => {
+    const l = await db.suppliers.get(lenderId)
+    if (!l) throw new Error('قرض‌دهنده یافت نشد')
+    await db.suppliers.update(lenderId, { balance: l.balance - amount })
+    await db.payments.add({
+      date: Date.now(),
+      partyType: 'supplier',
+      partyId: lenderId,
+      partyName: lenderName,
+      amount,
+      note: note?.trim() || 'پرداخت قرض'
+    })
+    await movement({ date: Date.now(), type: 'loanRepay', amount: -amount, note: `پرداخت قرض به ${lenderName}` })
+  })
+}
+
+/**
+ * تبدیل قرض به سرمایهٔ شریک — روزی که قرض‌دهنده شریک می‌شود.
+ * قرضش صفر و به همان اندازه سرمایه می‌شود؛ صندوق تغییر نمی‌کند چون پول قبلاً آمده بود.
+ * تاریخ شروع سال شراکت همان روز گذاشته می‌شود تا مفادِ پیش از آن مالِ مالک بماند.
+ */
+export async function convertLoanToCapital(lenderId: number, share: number): Promise<number> {
+  return db.transaction('rw', db.payments, db.suppliers, db.settings, async () => {
+    const l = await db.suppliers.get(lenderId)
+    if (!l) throw new Error('قرض‌دهنده یافت نشد')
+    const owed = afn(l.balance)
+    if (owed <= 0) throw new Error('قرضی برای تبدیل وجود ندارد')
+    // سند صفر شدن قرض — بدون حرکت صندوق
+    await db.payments.add({
+      date: Date.now(),
+      partyType: 'supplier',
+      partyId: lenderId,
+      partyName: l.name,
+      amount: owed,
+      note: 'تبدیل قرض به سرمایهٔ شریک'
+    })
+    await db.suppliers.update(lenderId, {
+      kind: 'partner',
+      balance: 0,
+      capital: (l.capital ?? 0) + owed,
+      share
+    })
+    await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+    return owed
+  })
+}
+
 /** برداشت/مصرف شخصی شریک از صندوق — با جزئیات؛ در مفاد تجارت حساب نمی‌شود و آخر سال از سهمش کم می‌شود */
 export async function addPartnerWithdrawal(partnerName: string, amount: number, note?: string): Promise<void> {
   if (amount <= 0) return

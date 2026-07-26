@@ -67,7 +67,9 @@ export interface Supplier extends Synced {
   /** مثبت = ما به تأمین‌کننده قرضدار هستیم */
   balance: number
   /** 'sarraf' = صراف (حواله‌دار)، 'partner' = شریک فروشگاه */
-  kind?: 'supplier' | 'sarraf' | 'partner'
+  kind?: 'supplier' | 'sarraf' | 'partner' | 'lender'
+  /** یادداشت — مثلاً شرایط پرداخت قرض‌دهنده */
+  note?: string
   /** فیصدی سهم شریک از مفاد */
   share?: number
   /** سرمایهٔ این شریک = ارزش جنس گدام (برای مالک) */
@@ -178,6 +180,8 @@ export type CashMovementType =
   | 'openingSet'
   | 'capitalIn'
   | 'landing'
+  | 'loanIn'
+  | 'loanRepay'
 
 export interface CashMovement extends Synced {
   id?: number
