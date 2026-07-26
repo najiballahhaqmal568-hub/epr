@@ -31,6 +31,7 @@ import {
 import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
+import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -906,6 +907,101 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await addSale(sell(v1, 2, 650))
       eq('مفاد بعد از فروش', (await settlement()).yearProfit, 300)
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'نمودارها — مفاد عمده و پرچون جدا و درست',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      await addPurchase(buy(supId, v1, 100, 500, { paid: 0 }))
+      await addPurchase(buy(supId, v2, 100, 400, { paid: 0 }))
+      const cW = await newCustomer('عمده‌فروش')
+      const cR = await newCustomer('مشتری پرچون')
+
+      // عمده: ۲۰ جوړه × ۶۰۰ = ۱۲٬۰۰۰ ، قیمت خرید ۵۰۰ → مفاد ۲٬۰۰۰ (فیصدی ۱۶.۶۷)
+      await addSale(sell(v1, 20, 600, { saleType: 'wholesale', customerId: cW, customerName: 'عمده‌فروش' }))
+      // پرچون: ۱۰ جوړه × ۹۰۰ = ۹٬۰۰۰ ، قیمت خرید ۵۰۰ → مفاد ۴٬۰۰۰ (فیصدی ۴۴.۴۴)
+      await addSale(sell(v1, 10, 900, { saleType: 'retail', customerId: cR, customerName: 'مشتری پرچون' }))
+      // پرچون از جنس دوم: ۵ × ۷۰۰ = ۳٬۵۰۰ ، خرید ۴۰۰ → مفاد ۱٬۵۰۰
+      await addSale(sell(v2, 5, 700, { saleType: 'retail' }))
+
+      const sales = await db.sales.filter((x) => !x.deleted).toArray()
+      const rets = await db.returns.filter((r) => !r.deleted).toArray()
+      const rw = retailVsWholesale(sales, rets)
+
+      eq('فروش عمده', rw.wholesale.sales, 12000)
+      eq('مفاد عمده', rw.wholesale.profit, 2000)
+      eq('جوړهٔ عمده', rw.wholesale.pairs, 20)
+      eq('فیصدی مفاد عمده', Math.round(rw.wholesale.margin), 17)
+
+      eq('فروش پرچون', rw.retail.sales, 12500)
+      eq('مفاد پرچون', rw.retail.profit, 5500)
+      eq('جوړهٔ پرچون', rw.retail.pairs, 15)
+      eq('فیصدی مفاد پرچون', Math.round(rw.retail.margin), 44)
+
+      // مجموع دو نمودار باید دقیقاً برابر مفاد کل باشد
+      eq('مجموع مفاد دو نمودار = مفاد کل', rw.retail.profit + rw.wholesale.profit, await profitAndLoss())
+
+      // مرجوعی از فروش عمده باید از مفاد عمده کم شود
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: cW,
+        partyName: 'عمده‌فروش',
+        saleType: 'wholesale',
+        lines: [{ variantId: v1, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 5, unitPrice: 600, restock: true }],
+        amount: 3000,
+        settlement: 'reduceDebt',
+        reason: 'خراب'
+      })
+      const rw2 = retailVsWholesale(
+        await db.sales.filter((x) => !x.deleted).toArray(),
+        await db.returns.filter((r) => !r.deleted).toArray()
+      )
+      eq('مفاد عمده بعد از مرجوعی', rw2.wholesale.profit, 1500)
+      eq('مفاد پرچون دست‌نخورده', rw2.retail.profit, 5500)
+      eq('باز هم برابر مفاد کل', rw2.retail.profit + rw2.wholesale.profit, await profitAndLoss())
+    }
+  },
+  {
+    name: 'نمودارها — مدل‌ها، مشتریان، ماه‌ها',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      await addPurchase(buy(supId, v1, 200, 500, { paid: 0 }))
+      const cId = await newCustomer('احمد')
+
+      // ۱۰ × ۹۰۰ با تخفیف ۹۰۰ → فروش ۸٬۱۰۰، مفاد ۴٬۰۰۰ − ۹۰۰ = ۳٬۱۰۰
+      await addSale(
+        sell(v1, 10, 900, { customerId: cId, customerName: 'احمد', discount: 900, total: 8100, paid: 8100 })
+      )
+      await addSale(sell(v1, 4, 800, { customerId: cId, customerName: 'احمد' })) // مفاد ۱٬۲۰۰
+
+      const sales = await db.sales.filter((x) => !x.deleted).toArray()
+
+      const models = byModel(sales)
+      eq('یک مدل', models.length, 1)
+      eq('جوړهٔ مدل', models[0].pairs, 14)
+      eq('مفاد مدل با تخفیف', models[0].profit, 4300)
+      eq('فروش مدل با تخفیف', models[0].sales, 11300)
+      eq('مفاد مدل = مفاد کل', models[0].profit, await profitAndLoss())
+
+      const custs = byCustomer(sales)
+      eq('یک مشتری', custs.length, 1)
+      is('نام مشتری', custs[0].name, 'احمد')
+      eq('خرید مشتری', custs[0].sales, 11300)
+      eq('مفادی که مشتری داد', custs[0].profit, 4300)
+
+      const months = byMonth(sales, () => ({ key: '1405-05', label: 'اسد ۱۴۰۵' }))
+      eq('یک ماه', months.length, 1)
+      eq('فروش ماه', months[0].sales, 11300)
+      eq('مفاد ماه', months[0].profit, 4300)
+
+      eq('تغییر ۱۰۰ به ۱۵۰ = ۵۰٪', changePct(150, 100) ?? -1, 50)
+      eq('تغییر ۱۰۰ به ۵۰ = ‎−۵۰٪', changePct(50, 100) ?? -1, -50)
+      is('تقسیم بر صفر خطا ندهد', changePct(50, 0), null)
     }
   },
   {

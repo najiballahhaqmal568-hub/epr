@@ -215,7 +215,7 @@ export default function App() {
         <div className="bg-purple-600 px-4 py-1.5 text-center text-xs font-bold text-white">👁️ حالت فقط مشاهده (شریک) — تغییر ارقام ممکن نیست</div>
       )}
       {tab === 'dashboard' && <Dashboard goTo={(t) => setTab(t as TabId)} isStaff={isStaff} />}
-      {tab === 'sales' && <Sales />}
+      {tab === 'sales' && <Sales isStaff={isStaff} />}
       {tab === 'inventory' && <Inventory />}
       {tab === 'purchases' && <Purchases />}
       {tab === 'expenses' && <Expenses />}

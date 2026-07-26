@@ -66,6 +66,7 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
           partyId: sale.customerId,
           partyName: sale.customerName ?? 'مشتری نقدی',
           refId: sale.id,
+        saleType: sale.saleType,
           lines: retLines,
           reason: 'تبادله',
           settlement: 'cashRefund',

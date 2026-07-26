@@ -32,6 +32,7 @@ export function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void
         partyId: sale.customerId,
         partyName: sale.customerName ?? 'مشتری نقدی',
         refId: sale.id,
+        saleType: sale.saleType,
         lines,
         reason,
         settlement,

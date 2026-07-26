@@ -4,14 +4,33 @@ import { db } from '../../db'
 import { fmtNum, fmtMoney } from '../../lib/format'
 import { Card } from '../../components/ui'
 import { STATS_PERIODS, periodBounds, periodLabel, type StatsPeriod } from '../../lib/period'
+import {
+  RetailWholesaleCard,
+  ModelsCard,
+  CustomersCard,
+  MonthsCard,
+  PeriodCompareCard
+} from '../../components/AnalyticsCards'
 
 /** آمار فروش: مجموع دوره + پرفروش‌ترین اجناس + بهترین مشتریان */
-export function SalesStats() {
+export function SalesStats({ isStaff }: { isStaff?: boolean }) {
   const [period, setPeriod] = useState<StatsPeriod>('today')
 
   const { from, to } = periodBounds(period)
 
   const sales = useLiveQuery(() => db.sales.where('date').between(from, to, true, true).filter((s) => !s.deleted).toArray(), [from, to])
+  const returns = useLiveQuery(
+    () => db.returns.where('date').between(from, to, true, true).filter((r) => !r.deleted).toArray(),
+    [from, to]
+  )
+  // دورهٔ گذشته با همان طول، برای مقایسه
+  const prev = useLiveQuery(
+    () => {
+      const span = Math.min(to, Date.now()) - from
+      return db.sales.where('date').between(from - span, from, true, false).filter((s) => !s.deleted).toArray()
+    },
+    [from, to]
+  )
 
   const total = sales?.reduce((s, x) => s + x.total, 0) ?? 0
   const cash = sales?.reduce((s, x) => s + x.paid, 0) ?? 0
@@ -73,6 +92,7 @@ export function SalesStats() {
         ))}
       </Card>
 
+      {isStaff && (
       <Card>
         <p className="mb-2 font-bold text-slate-700">⭐ بهترین مشتریان</p>
         {topCustomers.length === 0 && <p className="text-sm text-slate-400">فروش با نام مشتری در این دوره ثبت نشده.</p>}
@@ -83,6 +103,18 @@ export function SalesStats() {
           </div>
         ))}
       </Card>
+      )}
+
+      {/* نمودارها — ارقام مفاد فقط برای مالک */}
+      {!isStaff && (
+        <>
+          <PeriodCompareCard label="دورهٔ گذشته" now={sales ?? []} before={prev ?? []} returnsNow={returns ?? []} />
+          <RetailWholesaleCard sales={sales ?? []} returns={returns ?? []} />
+          <ModelsCard sales={sales ?? []} />
+          <CustomersCard sales={sales ?? []} />
+          <MonthsCard sales={sales ?? []} />
+        </>
+      )}
     </>
   )
 }

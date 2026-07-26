@@ -10,7 +10,7 @@ import ExchangeModal from './sales/ExchangeModal'
 import NewSaleModal from './sales/NewSaleModal'
 import ReceiptModal from './sales/Receipt'
 
-export default function Sales() {
+export default function Sales({ isStaff }: { isStaff?: boolean }) {
   const [view, setView] = useState<'list' | 'stats'>('list')
   const [showNew, setShowNew] = useState(false)
   const [returning, setReturning] = useState<Sale | null>(null)
@@ -32,7 +32,7 @@ export default function Sales() {
           آمار
         </button>
       </div>
-      {view === 'stats' && <SalesStats />}
+      {view === 'stats' && <SalesStats isStaff={isStaff} />}
       {view === 'list' && (
         <>
       {sales?.length === 0 && <Empty text="هنوز فروشی ثبت نشده." />}

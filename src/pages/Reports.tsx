@@ -1,10 +1,17 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../db'
-import { fmtNum, fmtMoney, jalaliMonth, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
+import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { inputCls, Card } from '../components/ui'
 import Row from './reports/Row'
 import PartnersCard from './reports/PartnersCard'
+import {
+  RetailWholesaleCard,
+  ModelsCard,
+  CustomersCard,
+  MonthsCard,
+  PeriodCompareCard
+} from '../components/AnalyticsCards'
 
 type Period = 'today' | 'week' | 'month' | 'year' | 'custom'
 
@@ -51,8 +58,12 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const returns = useLiveQuery(() => db.returns.where('date').between(from, to, true, true).filter((r) => !r.deleted).toArray(), [from, to])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
-  const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
   const allSales = useLiveQuery(() => db.sales.filter((s) => !s.deleted).toArray(), [])
+  // دورهٔ قبلی با همان طول — برای کارت مقایسه
+  const prevSales = useLiveQuery(() => {
+    const span = Math.min(to, Date.now()) - from
+    return db.sales.where('date').between(from - span, from, true, false).filter((s) => !s.deleted).toArray()
+  }, [from, to])
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))
@@ -99,32 +110,6 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   )
   const topProducts = [...soldBy.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 8)
 
-  // بهترین مشتریان در دوره
-  const custBy = new Map<string, number>()
-  sales?.forEach((s) => {
-    if (s.customerName) custBy.set(s.customerName, (custBy.get(s.customerName) ?? 0) + s.total)
-  })
-  const topCustomers = [...custBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
-
-  // آمار به تفکیک مدل: جوړه فروخته‌شده، فروش و مفاد (تخفیف فاکتور به نسبت خط پخش می‌شود)
-  const byModel = new Map<string, { qty: number; revenue: number; profit: number }>()
-  sales?.forEach((s) => {
-    const disc = s.discount ?? 0
-    const sub = s.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0)
-    s.lines.forEach((l) => {
-      const cost = costOf(l)
-      const lineTotal = l.qty * l.unitPrice
-      const lineDisc = sub > 0 ? (lineTotal / sub) * disc : 0
-      const cur = byModel.get(l.productName) ?? { qty: 0, revenue: 0, profit: 0 }
-      byModel.set(l.productName, {
-        qty: cur.qty + l.qty,
-        revenue: cur.revenue + lineTotal - lineDisc,
-        profit: cur.profit + (l.unitPrice - cost) * l.qty - lineDisc
-      })
-    })
-  })
-  const modelRows = [...byModel.entries()].sort((a, b) => b[1].qty - a[1].qty)
-
   // خرید از هر تأمین‌کننده در دوره
   const bySupplier = new Map<string, { total: number; pairs: number; count: number }>()
   purchases?.forEach((p) => {
@@ -136,21 +121,6 @@ export default function Reports({ onBack }: { onBack: () => void }) {
     })
   })
   const supplierRows = [...bySupplier.entries()].sort((a, b) => b[1].total - a[1].total)
-
-  // فروش ماه‌به‌ماه در دوره
-  const byMonth = new Map<string, { label: string; total: number; qty: number; profit: number }>()
-  sales?.forEach((s) => {
-    const { key, label } = jalaliMonth(s.date)
-    const cur = byMonth.get(key) ?? { label, total: 0, qty: 0, profit: 0 }
-    const prof = s.lines.reduce((a, l) => a + (l.unitPrice - costOf(l)) * l.qty, 0) - (s.discount ?? 0)
-    byMonth.set(key, {
-      label,
-      total: cur.total + s.total,
-      qty: cur.qty + s.lines.reduce((a, l) => a + l.qty, 0),
-      profit: cur.profit + prof
-    })
-  })
-  const monthRows = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v)
 
   // پرفروش‌ترین سایزها
   const bySize = new Map<string, number>()
@@ -227,27 +197,11 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         </Card>
       )}
 
-      <Card>
-        <p className="mb-2 font-bold text-slate-700">👞 آمار هر جنس (مدل) — جوړه، فروش، مفاد</p>
-        {modelRows.length === 0 && <p className="text-sm text-slate-400">فروشی در این دوره نیست.</p>}
-        {modelRows.map(([name, d]) => (
-          <div key={name} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
-            <span className="text-slate-700">
-              {name}
-              <span className="block text-xs text-slate-400">{fmtNum(d.qty)} جوړه فروخته شد</span>
-            </span>
-            <span className="text-left">
-              <span className="block font-bold text-slate-800">{fmtMoney(d.revenue)}</span>
-              <span className={`text-xs font-bold ${d.profit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>مفاد: {fmtMoney(d.profit)}</span>
-            </span>
-          </div>
-        ))}
-        {modelRows.length > 0 && (
-          <p className="mt-2 text-xs text-slate-400">
-            جمله: {fmtNum(modelRows.reduce((s, [, d]) => s + d.qty, 0))} جوړه · مفاد {fmtMoney(modelRows.reduce((s, [, d]) => s + d.profit, 0))}
-          </p>
-        )}
-      </Card>
+      <PeriodCompareCard label="دورهٔ قبلی" now={sales ?? []} before={prevSales ?? []} returnsNow={returns ?? []} />
+      <RetailWholesaleCard sales={sales ?? []} returns={returns ?? []} />
+      <ModelsCard sales={sales ?? []} />
+      <CustomersCard sales={sales ?? []} />
+      <MonthsCard sales={sales ?? []} />
 
       <Card>
         <p className="mb-2 font-bold text-slate-700">📦 خرید از تأمین‌کنندگان در دوره</p>
@@ -268,24 +222,6 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         )}
       </Card>
 
-      {monthRows.length > 1 && (
-        <Card>
-          <p className="mb-2 font-bold text-slate-700">📅 فروش ماه‌به‌ماه</p>
-          {monthRows.map((r2) => (
-            <div key={r2.label} className="flex items-center justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
-              <span className="text-slate-600">
-                {r2.label}
-                <span className="block text-xs text-slate-400">{fmtNum(r2.qty)} جوړه</span>
-              </span>
-              <span className="text-left">
-                <span className="block font-bold text-slate-800">{fmtMoney(r2.total)}</span>
-                <span className={`text-xs ${r2.profit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>مفاد: {fmtMoney(r2.profit)}</span>
-              </span>
-            </div>
-          ))}
-        </Card>
-      )}
-
       {sizeRows.length > 0 && (
         <Card>
           <p className="mb-2 font-bold text-slate-700">📏 پرفروش‌ترین سایزها</p>
@@ -304,19 +240,6 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         {topProducts.map(([name, d]) => (
           <Row key={name} label={name} value={`${fmtNum(d.qty)} جوړه`} sub={fmtMoney(d.revenue)} />
         ))}
-      </Card>
-
-      <Card>
-        <p className="mb-2 font-bold text-slate-700">بهترین مشتریان دوره</p>
-        {topCustomers.length === 0 && <p className="text-sm text-slate-400">فروش با نام مشتری ثبت نشده.</p>}
-        {topCustomers.map(([name, total]) => (
-          <Row key={name} label={name} value={fmtMoney(total)} />
-        ))}
-        {customers && customers.filter((c) => c.flag === 'bad').length > 0 && (
-          <p className="mt-2 text-xs text-red-600">
-            ⚠️ قرض بد: {customers.filter((c) => c.flag === 'bad').map((c) => c.name).join('، ')}
-          </p>
-        )}
       </Card>
 
       <Card>

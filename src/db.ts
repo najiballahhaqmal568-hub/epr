@@ -241,6 +241,8 @@ export interface ReturnDoc extends Synced {
   reason: string
   settlement: 'cashRefund' | 'reduceDebt' | 'none'
   amount: number
+  /** نوع فروشِ اصلی — تا مرجوعی از مفاد عمده یا پرچون کم شود */
+  saleType?: 'retail' | 'wholesale'
 }
 
 /** جنس کاندید برای خرید آینده — با منبع (تلگرام/واتساپ) و مشخصات فروشگاه */
