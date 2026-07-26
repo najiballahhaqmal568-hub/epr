@@ -40,6 +40,10 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
   const [ownerShare, setOwnerShare] = useState('')
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const [addingPartner, setAddingPartner] = useState(false)
+  const [pName, setPName] = useState('')
+  const [pCapital, setPCapital] = useState('')
+  const [pShare, setPShare] = useState('')
 
   const nums = useLiveQuery(async () => {
     const [variants, movements, customers, suppliers] = await Promise.all([
@@ -68,13 +72,14 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
     nums.stock + nums.cash + nums.receivables + nums.supplierCredits - nums.payables - nums.loans - nums.customerCredits
   const othersCapital = nums.partners.filter((p) => p.name !== ownerName.trim()).reduce((s, p) => s + (p.capital ?? 0), 0)
   const ownerCapital = afn(assets - othersCapital)
+  const othersShare = nums.partners.filter((p) => p.name !== ownerName.trim()).reduce((s, p) => s + (p.share ?? 0), 0)
 
   async function finish() {
     try {
       const name = ownerName.trim()
       if (!name) return setError('نام خود را بنویسید')
       if (ownerCapital < 0) return setError('سرمایهٔ شما منفی می‌شود — اعداد گدام و قرض‌ها را دوباره ببینید')
-      const share = parseNum(ownerShare) || (nums!.partners.length === 0 ? 100 : 0)
+      const share = parseNum(ownerShare) || 100 - othersShare
       const existing = nums!.partners.find((p) => p.name === name)
       if (existing) {
         await db.suppliers.update(existing.id!, { capital: ownerCapital, share, kind: 'partner' })
@@ -147,35 +152,129 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
 
       {step === 1 && (
         <>
-          <p className="mb-3 font-bold text-slate-800">۲) سرمایهٔ شما</p>
+          <p className="mb-3 font-bold text-slate-800">۲) شرکا و سرمایه‌ها</p>
           <p className="mb-3 text-sm text-slate-500">
-            سرمایه را تایپ نمی‌کنید — اپ آن را از دارایی خالص حساب می‌کند تا مفاد روز اول دقیقاً صفر باشد.
+            سرمایهٔ هر شریک = پولی که واقعاً گذاشته. فرقی نمی‌کند آن پول حالا نقد است یا جنس شده یا قرض تأمین‌کننده را خلاص
+            کرده — همه‌اش در «دارایی خالص» بالا حساب شده. <b>سرمایهٔ خودتان را تایپ نمی‌کنید</b>؛ اپ باقی‌مانده را به شما
+            می‌دهد تا مفاد روز اول صفر شود.
           </p>
-          <Field label="نام شما (مالک) *">
-            <input className={inputCls} value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="مثلاً نجیب‌الله" />
-          </Field>
+
           {nums.partners.length > 0 && (
-            <div className="mb-3 rounded-xl bg-slate-50 p-2.5 text-sm">
-              <p className="mb-1 font-bold text-slate-700">شرکای ثبت‌شده</p>
+            <div className="mb-3">
+              <p className="mb-1 text-sm font-bold text-slate-700">شرکای ثبت‌شده</p>
               {nums.partners.map((p) => (
-                <div key={p.id} className="flex justify-between">
-                  <span className="text-slate-600">
-                    {p.name} ({fmtNum(p.share ?? 0)}٪)
+                <div key={p.id} className="mb-1 flex items-center justify-between rounded-xl bg-slate-50 p-2.5 text-sm">
+                  <span className="text-slate-700">
+                    {p.name} <span className="text-xs text-slate-400">({fmtNum(p.share ?? 0)}٪)</span>
                   </span>
-                  <span className="font-bold">{fmtMoney(p.capital ?? 0)}</span>
+                  <span className="flex items-center gap-3">
+                    <span className="font-bold">{fmtMoney(p.capital ?? 0)}</span>
+                    <button
+                      className="text-red-500"
+                      onClick={async () => {
+                        if (confirm(`${p.name} از شرکا حذف شود؟`)) await db.suppliers.update(p.id!, { deleted: true })
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
                 </div>
               ))}
             </div>
           )}
-          <Field label={`فیصدی سهم شما از مفاد${nums.partners.length === 0 ? ' (خالی = ۱۰۰٪)' : ''}`}>
-            <input className={inputCls} inputMode="numeric" value={ownerShare} onChange={(e) => setOwnerShare(e.target.value)} />
-          </Field>
+
+          {addingPartner ? (
+            <div className="mb-3 rounded-xl border border-purple-300 bg-purple-50 p-3">
+              <p className="mb-2 text-sm font-bold text-purple-900">شریک نو</p>
+              <Field label="نام شریک *">
+                <input className={inputCls} value={pName} onChange={(e) => setPName(e.target.value)} />
+              </Field>
+              <Field label="سرمایه‌ای که گذاشته (مبلغی که داده) *">
+                <input className={inputCls} inputMode="numeric" value={pCapital} onChange={(e) => setPCapital(e.target.value)} />
+              </Field>
+              {parseNum(pCapital) > 0 && assets > 0 && (
+                <p className="mb-2 rounded-lg bg-white p-2 text-sm">
+                  سهم عادلانه بر اساس پول:{' '}
+                  <span className="font-bold text-purple-800">{fmtNum(Math.round((parseNum(pCapital) / assets) * 100))}٪</span>
+                  <span className="block text-xs text-slate-500">
+                    ({fmtMoney(parseNum(pCapital))} از {fmtMoney(assets)}) — زحمت روزانهٔ خود را هم در نظر بگیرید
+                  </span>
+                </p>
+              )}
+              <Field label="فیصدی سهم او از مفاد *">
+                <input className={inputCls} inputMode="numeric" value={pShare} onChange={(e) => setPShare(e.target.value)} />
+              </Field>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAddingPartner(false)}
+                  className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600"
+                >
+                  لغو
+                </button>
+                <div className="flex-1">
+                  <PrimaryBtn
+                    disabled={!pName.trim() || parseNum(pCapital) <= 0}
+                    onClick={async () => {
+                      try {
+                        await db.suppliers.add({
+                          name: pName.trim(),
+                          balance: 0,
+                          kind: 'partner',
+                          capital: afn(parseNum(pCapital)),
+                          share: parseNum(pShare)
+                        })
+                        setPName('')
+                        setPCapital('')
+                        setPShare('')
+                        setAddingPartner(false)
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : String(e))
+                      }
+                    }}
+                  >
+                    افزودن شریک
+                  </PrimaryBtn>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setAddingPartner(true)
+                setError('')
+              }}
+              className="mb-3 w-full rounded-xl border-2 border-dashed border-purple-400 py-2.5 text-sm font-bold text-purple-700"
+            >
+              ＋ افزودن شریک (کسی که پول گذاشته)
+            </button>
+          )}
+
+          <div className="mb-2 rounded-xl bg-slate-100 p-3">
+            <p className="mb-2 text-sm font-bold text-slate-700">و شما (مالک)</p>
+            <Field label="نام شما *">
+              <input className={inputCls} value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="مثلاً نجیب‌الله" />
+            </Field>
+            <Field label="فیصدی سهم شما از مفاد">
+              <input className={inputCls} inputMode="numeric" value={ownerShare} onChange={(e) => setOwnerShare(e.target.value)} placeholder={String(100 - othersShare)} />
+            </Field>
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">سرمایهٔ شما (خودکار)</span>
+              <span className="font-bold text-purple-800">{fmtMoney(ownerCapital)}</span>
+            </div>
+          </div>
+
+          {othersShare + (parseNum(ownerShare) || 100 - othersShare) !== 100 && (
+            <p className="mb-2 rounded-xl bg-amber-50 p-2 text-xs font-bold text-amber-800">
+              ⚠️ مجموع فیصدی‌ها {fmtNum(othersShare + (parseNum(ownerShare) || 100 - othersShare))}٪ است، نه ۱۰۰٪
+            </p>
+          )}
+
           <div className="flex gap-2">
             <button onClick={() => setStep(0)} className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600">
               →
             </button>
             <div className="flex-1">
-              <PrimaryBtn disabled={!ownerName.trim()} onClick={() => setStep(2)}>
+              <PrimaryBtn disabled={!ownerName.trim() || addingPartner} onClick={() => setStep(2)}>
                 بعدی
               </PrimaryBtn>
             </div>
@@ -200,15 +299,27 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
             <span className="text-xl font-bold text-teal-800">{fmtMoney(assets)}</span>
           </div>
           <div className="mt-2 rounded-xl bg-purple-50 p-3">
-            {othersCapital > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-600">سرمایهٔ شرکای دیگر</span>
-                <span className="font-bold">{fmtMoney(othersCapital)}</span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="font-bold text-slate-700">سرمایهٔ شما ({ownerName.trim()})</span>
+            <p className="mb-1 text-sm font-bold text-purple-900">سرمایهٔ هر شریک</p>
+            {nums.partners
+              .filter((p) => p.name !== ownerName.trim())
+              .map((p) => (
+                <div key={p.id} className="flex justify-between text-sm">
+                  <span className="text-slate-600">
+                    {p.name} <span className="text-xs text-slate-400">({fmtNum(p.share ?? 0)}٪)</span>
+                  </span>
+                  <span className="font-bold">{fmtMoney(p.capital ?? 0)}</span>
+                </div>
+              ))}
+            <div className="mt-1 flex justify-between border-t border-purple-200 pt-1">
+              <span className="font-bold text-slate-700">
+                {ownerName.trim()}{' '}
+                <span className="text-xs font-normal text-slate-400">({fmtNum(parseNum(ownerShare) || 100 - othersShare)}٪)</span>
+              </span>
               <span className="text-lg font-bold text-purple-800">{fmtMoney(ownerCapital)}</span>
+            </div>
+            <div className="mt-1 flex justify-between border-t border-purple-200 pt-1 text-sm">
+              <span className="text-slate-600">مجموع سرمایه‌ها</span>
+              <span className="font-bold">{fmtMoney(othersCapital + ownerCapital)}</span>
             </div>
           </div>
           <p className="mt-2 rounded-xl bg-teal-700 p-3 text-center font-bold text-white">مفاد امروز: ۰ ؋ ✅</p>

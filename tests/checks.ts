@@ -850,6 +850,65 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'شروع سال با شریک — پولش جنس شده، باز هم مفاد صفر',
+    run: async () => {
+      // حالت واقعی: با پول شریک جنس خریدیم و قرض تأمین‌کننده را خلاص کردیم.
+      // پس پول او دیگر نقد نیست — ولی در گدام و در نبودِ قرض زنده است.
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const openStock = async (id: number, qty: number, cost: number) => {
+        await db.variants.update(id, { stockQty: qty, purchasePrice: cost, lastPurchaseAt: Date.now() })
+        await db.adjustments.add({
+          date: Date.now(),
+          variantId: id,
+          productName: 'اسپرتکس',
+          size: '42',
+          color: 'سیاه',
+          qtyChange: qty,
+          reason: 'correction',
+          note: 'موجودی اولیه'
+        })
+      }
+      await openStock(v1, 1200, 500) // گدام ۶۰۰٬۰۰۰ (شامل جنسی که با پول او خریده شد)
+      await db.cashMovements.add({ date: Date.now(), type: 'openingSet', amount: 50000, note: 'پول اول سال' })
+      const cId = await newCustomer()
+      await addOpeningDebt('customer', cId, 'مشتری', 80000)
+      await addOpeningDebt('supplier', supId, 'تأمین‌کننده', 30000)
+
+      // دارایی خالص: ۶۰۰٬۰۰۰ + ۵۰٬۰۰۰ + ۸۰٬۰۰۰ − ۳۰٬۰۰۰
+      const beforeAssets = (await settlement()).assets
+      eq('دارایی خالص', beforeAssets, 700000)
+
+      // شریک: سرمایه = همان مبلغی که داده (۲۰۰٬۰۰۰)، سهم ۲۹٪
+      await db.suppliers.add({ name: 'شریک', balance: 0, kind: 'partner', capital: 200000, share: 29 })
+      // مالک: باقی‌مانده — عیناً همان چیزی که ویزارد حساب می‌کند
+      const partners = await db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray()
+      const othersCapital = partners.reduce((s, p) => s + (p.capital ?? 0), 0)
+      const ownerCapital = afn(beforeAssets - othersCapital)
+      eq('سرمایهٔ مالک (خودکار)', ownerCapital, 500000)
+      await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', capital: ownerCapital, share: 71 })
+      await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+
+      const s0 = await settlement()
+      eq('مجموع سرمایه‌ها برابر دارایی', s0.capSum, 700000)
+      eq('مفاد روز اول دقیقاً صفر', s0.yearProfit, 0)
+
+      // قسط بعدی شریک: ۵۰٬۰۰۰ نقد → سرمایه‌اش بالا، مفاد باز هم صفر
+      const p = (await db.suppliers.filter((x) => !x.deleted && x.name === 'شریک').first())!
+      await addCapital(p.id!, 'شریک', 50000)
+      eq('سرمایهٔ شریک بعد از قسط', (await db.suppliers.get(p.id!))!.capital ?? 0, 250000)
+      const s1 = await settlement()
+      eq('صندوق بالا رفت', s1.cash, 100000)
+      eq('دارایی بالا رفت', s1.assets, 750000)
+      eq('مفاد باز هم صفر — قسط مفاد نیست', s1.yearProfit, 0)
+
+      // حالا یک فروش با مفاد ۳۰۰
+      await addSale(sell(v1, 2, 650))
+      eq('مفاد بعد از فروش', (await settlement()).yearProfit, 300)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
     name: 'تخفیف از مفاد کم شود و قرض نسازد',
     run: async () => {
       const supId = await newSupplier()
