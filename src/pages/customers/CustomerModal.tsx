@@ -57,11 +57,6 @@ export function CustomerModal({
           <option value="bad">⚠️ قرض بد / احتیاط</option>
         </select>
       </Field>
-      {customer && customer.balance > 0 && (
-        <Field label="وعدهٔ پرداخت قرض">
-          <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
-        </Field>
-      )}
       {!customer && (
         <>
           <Field label="قرض قبلی (اختیاری)">
@@ -70,6 +65,16 @@ export function CustomerModal({
           {parseNum(openingDebt) > 0 && (
             <p className="-mt-2 mb-3 text-xs text-slate-400">قرض فروش‌های گذشته — در فروش، مفاد و صندوق حساب نمی‌شود.</p>
           )}
+        </>
+      )}
+      {((customer && customer.balance > 0) || parseNum(openingDebt) > 0) && (
+        <>
+          <Field label="وعدهٔ پرداخت قرض">
+            <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
+          </Field>
+          <p className="-mt-2 mb-3 text-xs text-slate-400">
+            با وعده، این طلب در «پول آینده» و در یادآوری قرضداران حساب می‌شود.
+          </p>
         </>
       )}
       <PrimaryBtn

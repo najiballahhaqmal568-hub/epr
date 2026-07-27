@@ -3,6 +3,7 @@ import { db, type Sale, type Variant } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear } from '../lib/format'
 import { useSyncStatus, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
+import CashForecastCard from '../components/CashForecastCard'
 
 function SyncChip() {
   const s = useSyncStatus()
@@ -179,6 +180,8 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
           </div>
         </button>
       </div>
+
+      {!isStaff && <CashForecastCard />}
 
       {overdue.length > 0 && (
         <Card onClick={() => goTo('customers')}>

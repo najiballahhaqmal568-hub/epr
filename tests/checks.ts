@@ -35,6 +35,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
+import { buildForecast } from '../src/lib/cashflow'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -1085,6 +1086,68 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // دفتر صندوق باید با مجموع همهٔ جاها برابر باشد
       eq('دفتر = پول کل', await cashLedgerEnd(), await cashBalance())
       eq('جمع جاها = پول کل', (await boxBalances()).total, await cashBalance())
+    }
+  },
+  {
+    name: 'پول آینده — آنچه می‌آید و آنچه باید داده شود',
+    run: async () => {
+      const DAY = 86400000
+      const now = Date.now()
+      await seedCash(80000)
+
+      // سه مشتری: وعدهٔ نزدیک، وعدهٔ گذشته، بدون وعده
+      const c1 = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, promiseDate: now + 3 * DAY })) as number
+      const c2 = (await db.customers.add({ name: 'کریم', type: 'retail', balance: 0, promiseDate: now - 5 * DAY })) as number
+      const c3 = await newCustomer('نامعلوم')
+      await addOpeningDebt('customer', c1, 'احمد', 50000)
+      await addOpeningDebt('customer', c2, 'کریم', 30000)
+      await addOpeningDebt('customer', c3, 'نامعلوم', 25000)
+      // مشتری با وعدهٔ دور — نباید در هفتهٔ آینده بیاید
+      const c4 = (await db.customers.add({ name: 'دور', type: 'retail', balance: 0, promiseDate: now + 40 * DAY })) as number
+      await addOpeningDebt('customer', c4, 'دور', 90000)
+
+      // قرض ما: تأمین‌کننده + قرض‌دهنده + مصارف رسیدن پرداخت‌نشده
+      const supId = await newSupplier()
+      await addOpeningDebt('supplier', supId, 'تأمین‌کننده', 60000)
+      const lenderId = (await db.suppliers.add({ name: 'حاجی', balance: 0, kind: 'lender' })) as number
+      await addLoan(lenderId, 'حاجی', 40000)
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      await addLandingCost([pid], 3000, 'later')
+
+      const customers = await db.customers.filter((c) => !c.deleted).toArray()
+      const suppliers = await db.suppliers.filter((x) => !x.deleted).toArray()
+      const purchases = await db.purchases.filter((p) => !p.deleted).toArray()
+      const f = buildForecast(await cashBalance(), customers, suppliers, purchases, now + 7 * DAY, now)
+
+      eq('پول امروز (شامل قرض دریافتی)', f.cashNow, 120000)
+      eq('طلب هفتهٔ آینده = احمد ۵۰٬۰۰۰ + کریم ۳۰٬۰۰۰', f.incomingTotal, 80000)
+      is('وعدهٔ دور نیامده', f.incoming.some((i) => i.name === 'دور'), false)
+      is('بدون وعده در تخمین نیست', f.incoming.some((i) => i.name === 'نامعلوم'), false)
+      eq('طلب بدون وعده جدا شمرده شد', f.noPromise, 25000)
+      eq('طلب گذشته از وعده', f.overdueTotal, 30000)
+      is('وعدهٔ گذشته نشانه‌گذاری شد', f.incoming.find((i) => i.name === 'کریم')!.overdue, true)
+
+      // قرض ما: تأمین‌کننده ۶۰٬۰۰۰ + خرید قرضی ۵٬۰۰۰ + حاجی ۴۰٬۰۰۰ + مصارف رسیدن ۳٬۰۰۰
+      eq('باید داده شود', f.outgoingTotal, 108000)
+      is('مصارف رسیدن آمده', f.outgoing.some((o) => o.kind === 'landing'), true)
+      is('قرض‌دهنده آمده', f.outgoing.some((o) => o.kind === 'lender'), true)
+
+      // ۱۲۰٬۰۰۰ + ۸۰٬۰۰۰ − ۱۰۸٬۰۰۰
+      eq('تخمین پول هفتهٔ آینده', f.projected, 92000)
+      eq('تخمین = نقد + آمد − رفت', f.projected, f.cashNow + f.incomingTotal - f.outgoingTotal)
+    }
+  },
+  {
+    name: 'پول آینده — دکان بدون قرض تخمین درست بدهد',
+    run: async () => {
+      await seedCash(45000)
+      const f = buildForecast(await cashBalance(), [], [], [], Date.now() + 7 * 86400000)
+      eq('پول امروز', f.cashNow, 45000)
+      eq('آمدنی صفر', f.incomingTotal, 0)
+      eq('رفتنی صفر', f.outgoingTotal, 0)
+      eq('تخمین برابر پول امروز', f.projected, 45000)
+      eq('شرکا در قرض حساب نشوند', f.outgoing.length, 0)
     }
   },
   {
