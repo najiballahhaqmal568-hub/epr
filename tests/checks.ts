@@ -26,7 +26,10 @@ import {
   cashBalance,
   addLoan,
   repayLoan,
-  convertLoanToCapital
+  convertLoanToCapital,
+  transferCash,
+  boxBalances,
+  SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
@@ -1002,6 +1005,86 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('تغییر ۱۰۰ به ۱۵۰ = ۵۰٪', changePct(150, 100) ?? -1, 50)
       eq('تغییر ۱۰۰ به ۵۰ = ‎−۵۰٪', changePct(50, 100) ?? -1, -50)
       is('تقسیم بر صفر خطا ندهد', changePct(50, 0), null)
+    }
+  },
+  {
+    name: 'جای پول — بردن پول به خانه برداشت حساب نشود',
+    run: async () => {
+      await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', share: 100, capital: 100000 })
+      await seedCash(100000) // در دکان
+      const before = await settlement()
+      eq('مفاد پیش از انتقال صفر', before.yearProfit, 0)
+      eq('برداشت‌ها صفر', before.wSum, 0)
+
+      // ۳۰٬۰۰۰ به خانه و ۲۰٬۰۰۰ نزد صراف
+      await transferCash(SHOP_BOX, 'خانه', 30000)
+      await transferCash(SHOP_BOX, 'صراف', 20000)
+
+      const bb = await boxBalances()
+      eq('پول کل تغییر نکرد', bb.total, 100000)
+      eq('دکان', bb.boxes.find((b) => b.name === SHOP_BOX)!.balance, 50000)
+      eq('خانه', bb.boxes.find((b) => b.name === 'خانه')!.balance, 30000)
+      eq('صراف', bb.boxes.find((b) => b.name === 'صراف')!.balance, 20000)
+
+      const after = await settlement()
+      eq('پول کل در دارایی بدون تغییر', after.cash, 100000)
+      eq('برداشت‌ها هنوز صفر — انتقال برداشت نیست', after.wSum, 0)
+      eq('مفاد هنوز صفر — انتقال مفاد را تغییر نمی‌دهد', after.yearProfit, 0)
+
+      // برگرداندن پول از خانه
+      await transferCash('خانه', SHOP_BOX, 10000)
+      const bb2 = await boxBalances()
+      eq('دکان بعد از برگشت', bb2.boxes.find((b) => b.name === SHOP_BOX)!.balance, 60000)
+      eq('خانه بعد از برگشت', bb2.boxes.find((b) => b.name === 'خانه')!.balance, 20000)
+      eq('پول کل باز هم همان', bb2.total, 100000)
+      eq('مفاد باز هم صفر', (await settlement()).yearProfit, 0)
+    }
+  },
+  {
+    name: 'جای پول — از جایی که پول نیست خرج نشود',
+    run: async () => {
+      await seedCash(50000) // دکان
+      await transferCash(SHOP_BOX, 'خانه', 20000)
+      await throws('انتقال بیشتر از موجودی دکان رد شود', () => transferCash(SHOP_BOX, 'خانه', 40000))
+      await throws('انتقال بیشتر از موجودی خانه رد شود', () => transferCash('خانه', SHOP_BOX, 30000))
+      await throws('انتقال به خودش رد شود', () => transferCash('خانه', 'خانه', 1000))
+      await throws('مبلغ صفر رد شود', () => transferCash(SHOP_BOX, 'خانه', 0))
+
+      const bb = await boxBalances()
+      eq('دکان دست‌نخورده', bb.boxes.find((b) => b.name === SHOP_BOX)!.balance, 30000)
+      eq('خانه دست‌نخورده', bb.boxes.find((b) => b.name === 'خانه')!.balance, 20000)
+      eq('پول کل', bb.total, 50000)
+
+      // مصرف از دکان می‌رود؛ بیشتر از موجودی دکان نباید اجازه داشته باشد
+      const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
+      await throws('مصرف بیشتر از موجودی دکان رد شود', () =>
+        addExpense({ date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه', amount: 35000 } as Expense)
+      )
+      eq('پول کل بعد از خطا', (await boxBalances()).total, 50000)
+    }
+  },
+  {
+    name: 'جای پول — تصفیه هر جا جدا و دفتر برابر بماند',
+    run: async () => {
+      await seedCash(60000)
+      await transferCash(SHOP_BOX, 'صراف', 25000)
+
+      // شمارش دکان: ۳۴٬۰۰۰ به‌جای ۳۵٬۰۰۰ → کسر ۱٬۰۰۰
+      await reconcile(34000, 'شمارش شام', { mode: 'expense' }, SHOP_BOX)
+      eq('دکان برابر شمارش', await cashBalance(SHOP_BOX), 34000)
+      eq('صراف دست‌نخورده', await cashBalance('صراف'), 25000)
+      eq('پول کل', await cashBalance(), 59000)
+      eq('کسر از مفاد کم شد', await profitAndLoss(), -1000)
+
+      // شمارش صراف: ۲۵٬۵۰۰ → ۵۰۰ زیاد
+      await reconcile(25500, undefined, { mode: 'adjust' }, 'صراف')
+      eq('صراف برابر شمارش', await cashBalance('صراف'), 25500)
+      eq('دکان دست‌نخورده', await cashBalance(SHOP_BOX), 34000)
+      eq('مفاد تغییر نکرد', await profitAndLoss(), -1000)
+
+      // دفتر صندوق باید با مجموع همهٔ جاها برابر باشد
+      eq('دفتر = پول کل', await cashLedgerEnd(), await cashBalance())
+      eq('جمع جاها = پول کل', (await boxBalances()).total, await cashBalance())
     }
   },
   {

@@ -76,6 +76,13 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const yearNet = grossProfit(sales ?? []) - returnProfit(yearStart) - yearExpenses
 
   const cashBalance = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
+  // پول در چند جا نگه داشته می‌شود — تفکیک روی داشبورد
+  const boxMap = new Map<string, number>()
+  movements?.forEach((m) => {
+    const b = m.box?.trim() || 'دکان'
+    boxMap.set(b, (boxMap.get(b) ?? 0) + m.amount)
+  })
+  const boxRows = [...boxMap.entries()].sort((a, b) => (a[0] === 'دکان' ? -1 : b[0] === 'دکان' ? 1 : b[1] - a[1]))
   const stockCount = variants?.reduce((s, v) => s + v.stockQty, 0) ?? 0
   const stockValue = variants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
   const receivable = customers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
@@ -142,8 +149,14 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
           <p className={`text-lg font-bold ${yearNet >= 0 ? 'text-teal-700' : 'text-red-600'}`}>{fmtMoney(yearNet)}</p>
         </div>
         <button onClick={() => goTo('expenses')} className="rounded-xl bg-white p-3 text-right shadow-sm">
-          <p className="text-sm text-slate-500">صندوق</p>
+          <p className="text-sm text-slate-500">{boxRows.length > 1 ? 'پول کل' : 'صندوق'}</p>
           <p className="text-lg font-bold text-slate-800">{fmtMoney(cashBalance)}</p>
+          {boxRows.length > 1 &&
+            boxRows.map(([name, bal]) => (
+              <p key={name} className="text-xs text-slate-400">
+                {name}: {fmtMoney(bal)}
+              </p>
+            ))}
         </button>
         <button onClick={() => goTo('inventory')} className="rounded-xl bg-white p-3 text-right shadow-sm">
           <p className="text-sm text-slate-500">موجودی گدام</p>

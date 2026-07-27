@@ -24,19 +24,52 @@ export function allocate(total: number, weights: number[]): number[] {
   return out
 }
 
+/** جای پول پیش‌فرض — صندوق دکان */
+export const SHOP_BOX = 'دکان'
+
+/** نام جای پول یک حرکت (سندهای کهنه بدون نام = دکان) */
+export const boxOf = (m: { box?: string }): string => m.box?.trim() || SHOP_BOX
+
 async function movement(m: Omit<CashMovement, 'id'>, opts?: { allowNegative?: boolean }) {
-  m = { ...m, amount: afn(m.amount) }
+  m = { ...m, amount: afn(m.amount), box: boxOf(m) }
   if (m.amount === 0) return 0
-  // صندوق نقدی نباید منفی شود — پیسه‌ای که نیست خرج نمی‌شود
+  // پول نباید از جایی که نیست خرج شود — کنترل برای همان جای پول
   if (m.amount < 0 && !opts?.allowNegative) {
-    const all = await db.cashMovements.filter((x) => !x.deleted).toArray()
+    const all = await db.cashMovements.filter((x) => !x.deleted && boxOf(x) === m.box).toArray()
     const bal = all.reduce((s, x) => s + x.amount, 0)
     if (bal + m.amount < 0) {
       const nf = new Intl.NumberFormat('fa-AF')
-      throw new Error(`پیسه در صندوق کافی نیست! موجودی صندوق: ${nf.format(bal)} ؋`)
+      throw new Error(`پیسه در «${m.box}» کافی نیست! موجودی: ${nf.format(bal)} ؋`)
     }
   }
   return db.cashMovements.add(m)
+}
+
+/**
+ * انتقال پول بین جاها (دکان ← خانه ← صراف).
+ * دو سند ثبت می‌شود و اثر خالص روی پول کل صفر است — نه مصرف است و نه برداشت،
+ * پس در مفاد و در سهم شرکا هیچ تغییری نمی‌دهد.
+ */
+export async function transferCash(from: string, to: string, amount: number, note?: string): Promise<void> {
+  amount = afn(amount)
+  if (amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
+  if (from.trim() === to.trim()) throw new Error('مبدأ و مقصد یکی است')
+  return db.transaction('rw', db.cashMovements, async () => {
+    await movement({ date: Date.now(), type: 'transfer', box: from, amount: -amount, note: note?.trim() || `انتقال به ${to}` })
+    await movement({ date: Date.now(), type: 'transfer', box: to, amount, note: note?.trim() || `انتقال از ${from}` })
+  })
+}
+
+/** موجودی هر جای پول، و مجموع کل */
+export async function boxBalances(): Promise<{ boxes: { name: string; balance: number }[]; total: number }> {
+  const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
+  const map = new Map<string, number>()
+  for (const m of all) map.set(boxOf(m), (map.get(boxOf(m)) ?? 0) + m.amount)
+  if (!map.has(SHOP_BOX)) map.set(SHOP_BOX, 0)
+  const boxes = [...map.entries()]
+    .map(([name, balance]) => ({ name, balance }))
+    .sort((a, b) => (a.name === SHOP_BOX ? -1 : b.name === SHOP_BOX ? 1 : b.balance - a.balance))
+  return { boxes, total: boxes.reduce((s, b) => s + b.balance, 0) }
 }
 
 /** ثبت فروش: کاهش گدام + قرض مشتری + ورود نقد به صندوق در یک تراکنش */
@@ -565,8 +598,8 @@ export async function applyStocktake(entries: { variantId: number; counted: numb
   })
 }
 
-export async function cashBalance(): Promise<number> {
-  const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
+export async function cashBalance(box?: string): Promise<number> {
+  const all = await db.cashMovements.filter((m) => !m.deleted && (!box || boxOf(m) === box)).toArray()
   return all.reduce((s, m) => s + m.amount, 0)
 }
 
@@ -579,22 +612,22 @@ export type ShortageAction =
  * تصفیه صندوق: مقایسهٔ شمارش با موجودی مورد انتظار.
  * برای کمبود سه راه: مصرف «کسر صندوق» (از مفاد کم می‌شود)، قرض شخص مسئول، یا فقط تنظیم.
  */
-export async function reconcile(counted: number, note?: string, shortage?: ShortageAction): Promise<number> {
+export async function reconcile(counted: number, note?: string, shortage?: ShortageAction, box = SHOP_BOX): Promise<number> {
   counted = afn(counted)
   return db.transaction(
     'rw',
     [db.cashMovements, db.reconciliations, db.expenses, db.expenseCategories, db.customers, db.payments],
     async () => {
-      const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
+      const all = await db.cashMovements.filter((m) => !m.deleted && boxOf(m) === box).toArray()
       const expected = all.reduce((s, m) => s + m.amount, 0)
       const difference = counted - expected
       if (difference < 0 && shortage?.mode === 'expense') {
         const cat = await db.expenseCategories.filter((c) => !c.deleted && c.name === 'کسر صندوق').first()
         const catId = cat?.id ?? ((await db.expenseCategories.add({ name: 'کسر صندوق' })) as number)
         await db.expenses.add({ date: Date.now(), categoryId: catId, categoryName: 'کسر صندوق', amount: -difference, note, type: 'business' })
-        await movement({ date: Date.now(), type: 'expense', amount: difference, note: 'کسر صندوق' })
+        await movement({ date: Date.now(), type: 'expense', amount: difference, box, note: `کسر صندوق — ${box}` })
       } else if (difference < 0 && shortage?.mode === 'debt') {
-        await movement({ date: Date.now(), type: 'openingSet', amount: difference, note: `کسر صندوق — به حساب ${shortage.customerName}` })
+        await movement({ date: Date.now(), type: 'openingSet', amount: difference, box, note: `کسر صندوق — به حساب ${shortage.customerName}` })
         const c = await db.customers.get(shortage.customerId)
         if (c) await db.customers.update(shortage.customerId, { balance: c.balance - difference })
         await db.payments.add({
@@ -606,9 +639,9 @@ export async function reconcile(counted: number, note?: string, shortage?: Short
           note: 'کسر صندوق'
         })
       } else if (difference !== 0) {
-        await movement({ date: Date.now(), type: 'openingSet', amount: difference, note: 'تصفیه صندوق' })
+        await movement({ date: Date.now(), type: 'openingSet', amount: difference, box, note: `تصفیه ${box}` })
       }
-      return (await db.reconciliations.add({ date: Date.now(), expected, counted, difference, note })) as number
+      return (await db.reconciliations.add({ date: Date.now(), expected, counted, difference, note: note?.trim() ? `${box} — ${note.trim()}` : box })) as number
     }
   )
 }

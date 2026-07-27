@@ -16,7 +16,8 @@ export const MOVE_LABELS: Record<CashMovementType, string> = {
   capitalIn: 'سرمایه‌گذاری شریک',
   landing: 'مصارف رسیدن جنس',
   loanIn: 'قرض گرفته‌شده',
-  loanRepay: 'پرداخت قرض'
+  loanRepay: 'پرداخت قرض',
+  transfer: 'انتقال بین جاهای پول'
 }
 
 export const TYPE_LABELS: Record<ExpenseType, string> = {

@@ -182,6 +182,7 @@ export type CashMovementType =
   | 'landing'
   | 'loanIn'
   | 'loanRepay'
+  | 'transfer'
 
 export interface CashMovement extends Synced {
   id?: number
@@ -190,6 +191,8 @@ export interface CashMovement extends Synced {
   refId?: number
   /** مثبت = ورود به صندوق، منفی = خروج */
   amount: number
+  /** جای پول: دکان، خانه، صراف… — خالی یعنی «دکان» */
+  box?: string
   note?: string
   /** برای سرمایه‌گذاری و برداشت شریک */
   partnerName?: string

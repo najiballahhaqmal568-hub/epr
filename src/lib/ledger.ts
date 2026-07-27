@@ -16,6 +16,8 @@ export interface LedgerRow {
   delta: number
   /** عدد بعد از این سند */
   balance: number
+  /** جای پول (فقط برای دفتر پول) */
+  box?: string
 }
 
 /** دفتر صندوق: هر حرکت با موجودی بعد از آن */
@@ -29,6 +31,7 @@ export function buildCashLedger(movements: CashMovement[], labelOf: (t: CashMove
       date: m.date,
       label: labelOf(m.type),
       note: m.note,
+      box: m.box?.trim() || 'دکان',
       delta: m.amount,
       balance: bal
     }
