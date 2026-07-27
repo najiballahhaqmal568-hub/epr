@@ -35,7 +35,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
-import { buildForecast } from '../src/lib/cashflow'
+import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -1148,6 +1148,58 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('رفتنی صفر', f.outgoingTotal, 0)
       eq('تخمین برابر پول امروز', f.projected, 45000)
       eq('شرکا در قرض حساب نشوند', f.outgoing.length, 0)
+    }
+  },
+  {
+    name: 'جریان پول روزانه — آمد و رفت هر روز',
+    run: async () => {
+      const DAY = 86400000
+      const sod = (ts: number) => new Date(ts).setHours(0, 0, 0, 0)
+      const now = Date.now()
+      const t = (d: number) => sod(now - d * DAY) + 3600000
+
+      const moves = [
+        { date: t(9), amount: 40000 }, // پیش از دورهٔ ۷ روزه
+        { date: t(5), amount: 10000 },
+        { date: t(5), amount: -3000 },
+        { date: t(2), amount: 7000 },
+        { date: t(0), amount: -5000 }
+      ]
+      const rows = dailyFlow(moves, 7, (ts) => String(new Date(ts).getDate()), sod, now)
+
+      eq('هفت روز', rows.length, 7)
+      const d5 = rows.find((r) => r.day === sod(now - 5 * DAY))!
+      eq('آمد روز پنجم', d5.inflow, 10000)
+      eq('رفت روز پنجم', d5.outflow, 3000)
+      // ۴۰٬۰۰۰ قبل از دوره + ۱۰٬۰۰۰ − ۳٬۰۰۰
+      eq('موجودی پایان روز پنجم', d5.balance, 47000)
+
+      const d4 = rows.find((r) => r.day === sod(now - 4 * DAY))!
+      eq('روز بدون حرکت آمد صفر', d4.inflow, 0)
+      eq('روز بدون حرکت موجودی همان می‌ماند', d4.balance, 47000)
+
+      const last = rows[rows.length - 1]
+      eq('موجودی امروز = جمع همهٔ حرکات', last.balance, 49000)
+      eq('رفت امروز', last.outflow, 5000)
+      eq('جمع آمد دوره', rows.reduce((s, r) => s + r.inflow, 0), 17000)
+      eq('جمع رفت دوره', rows.reduce((s, r) => s + r.outflow, 0), 8000)
+    }
+  },
+  {
+    name: 'جریان پول روزانه — فقط یک جای پول',
+    run: async () => {
+      const sod = (ts: number) => new Date(ts).setHours(0, 0, 0, 0)
+      const now = Date.now()
+      await seedCash(50000)
+      await transferCash(SHOP_BOX, 'خانه', 20000)
+      const all = await db.cashMovements.filter((m) => !m.deleted).toArray()
+
+      const shopRows = dailyFlow(all.filter((m) => (m.box ?? SHOP_BOX) === SHOP_BOX), 7, () => '', sod, now)
+      eq('موجودی دکان در نمودار', shopRows[shopRows.length - 1].balance, 30000)
+      const homeRows = dailyFlow(all.filter((m) => m.box === 'خانه'), 7, () => '', sod, now)
+      eq('موجودی خانه در نمودار', homeRows[homeRows.length - 1].balance, 20000)
+      const allRows = dailyFlow(all, 7, () => '', sod, now)
+      eq('پول کل در نمودار', allRows[allRows.length - 1].balance, 50000)
     }
   },
   {

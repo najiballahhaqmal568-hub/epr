@@ -6,6 +6,7 @@ import { fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } f
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
 import { buildCashLedger } from '../../lib/ledger'
 import CashForecastCard from '../../components/CashForecastCard'
+import CashFlowChart, { LowCashBanner } from '../../components/CashFlowChart'
 import { MOVE_LABELS } from './labels'
 
 /** دفتر صندوق: هر حرکت با موجودی بعد از آن، گروه‌شده به روز */
@@ -173,6 +174,8 @@ export function CashView() {
 
   return (
     <>
+      <LowCashBanner />
+
       <button onClick={() => setShowLedger(true)} className="mb-3 w-full rounded-2xl bg-teal-700 p-4 text-right text-white">
         <p className="text-sm opacity-80">پول کل تجارت (همهٔ جاها)</p>
         <p className="text-3xl font-bold">{fmtMoney(totalCash)}</p>
@@ -226,6 +229,8 @@ export function CashView() {
           </div>
         </div>
       </Card>
+
+      <CashFlowChart box={box} />
 
       {!accessFlags.readOnly && (
         <button onClick={() => setShowReconcile(true)} className="mb-3 w-full rounded-xl bg-teal-700 py-3 font-bold text-white">

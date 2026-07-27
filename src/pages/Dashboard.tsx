@@ -4,6 +4,7 @@ import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear }
 import { useSyncStatus, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
 import CashForecastCard from '../components/CashForecastCard'
+import { LowCashBanner } from '../components/CashFlowChart'
 
 function SyncChip() {
   const s = useSyncStatus()
@@ -181,6 +182,7 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
         </button>
       </div>
 
+      <LowCashBanner onGo={() => goTo('expenses')} />
       {!isStaff && <CashForecastCard />}
 
       {overdue.length > 0 && (
