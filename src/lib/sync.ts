@@ -145,7 +145,7 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
 const MASTERS: SyncTable[] = ['products', 'variants', 'customers', 'suppliers', 'expenseCategories']
 
 /** اعمال اثرات جانبی یک سند دریافتی (گدام/قرض) — پول نقد سند جداگانه دارد */
-async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, reverse: boolean) {
+export async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, reverse: boolean) {
   const sign = reverse ? -1 : 1
   const bump = async (t: 'variants' | 'customers' | 'suppliers', id: unknown, field: 'stockQty' | 'balance', delta: number) => {
     if (typeof id !== 'number' || delta === 0) return
@@ -159,8 +159,10 @@ async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, r
     if (remainder > 0) await bump('customers', s.customerId, 'balance', remainder * sign)
   } else if (table === 'purchases') {
     const p = rec as unknown as Purchase
-    // جنس «در راه» موجودی ندارد؛ رسیدش بعداً به شکل سند تعدیل می‌آید
-    if (p.received !== false) {
+    // خرید عادی (received تعریف‌نشده) موجودی می‌دهد.
+    // خرید «در راه» — چه هنوز نرسیده (false) و چه رسیده (true) — موجودی‌اش
+    // از سند تعدیلِ رسید می‌آید، پس اینجا نباید دوباره شمرده شود.
+    if (p.received === undefined) {
       for (const l of p.lines) await bump('variants', l.variantId, 'stockQty', l.qty * sign)
     }
     const hawala = p.sarrafAmount ?? 0

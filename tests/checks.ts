@@ -37,6 +37,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
+import { applyDocEffects } from '../src/lib/sync'
 import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
@@ -1267,6 +1268,77 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('پول از دکان پس رفت', await cashBalance(SHOP_BOX), 5000)
       eq('خانه دست‌نخورده', await cashBalance('خانه'), 15000)
       eq('پول کل', await cashBalance(), 20000)
+    }
+  },
+  {
+    name: 'همگام‌سازی — موبایل نو همان موجودی را بسازد',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      const cId = await newCustomer()
+      await seedCash(200000)
+
+      // خرید عادی، خرید «در راه» که بعداً رسید، فروش، مرجوعی، تعدیل
+      await addPurchase(buy(supId, v1, 100, 500))
+      const pid = await addPurchase(buy(supId, v2, 60, 700, { received: false, paid: 0 }))
+      await receivePurchase(pid)
+      await addSale(sell(v1, 10, 900, { customerId: cId, customerName: 'مشتری', paid: 0 }))
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: cId,
+        partyName: 'مشتری',
+        lines: [{ variantId: v1, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 900, restock: true }],
+        amount: 1800,
+        settlement: 'reduceDebt',
+        reason: 'خراب'
+      })
+      await db.adjustments.add({
+        date: Date.now(),
+        variantId: v2,
+        productName: 'اسپرتکس',
+        size: '43',
+        color: 'سیاه',
+        qtyChange: -3,
+        reason: 'damaged'
+      })
+      await db.variants.update(v2, { stockQty: (await stockOf(v2)) - 3 })
+
+      const stock1 = await stockOf(v1)
+      const stock2 = await stockOf(v2)
+      const debt = (await db.customers.get(cId))!.balance
+      const owed = (await db.suppliers.get(supId))!.balance
+      eq('موجودی جنس اول در موبایل اول', stock1, 92)
+      eq('موجودی جنس دوم در موبایل اول', stock2, 57)
+
+      // موبایل نو: همهٔ اسناد را از نو پخش می‌کند (عیناً همان کاری که همگام‌سازی می‌کند)
+      const [sales, purchases, payments, adjustments, returns] = await Promise.all([
+        db.sales.filter((x) => !x.deleted).toArray(),
+        db.purchases.filter((x) => !x.deleted).toArray(),
+        db.payments.filter((x) => !x.deleted).toArray(),
+        db.adjustments.filter((x) => !x.deleted).toArray(),
+        db.returns.filter((x) => !x.deleted).toArray()
+      ])
+      await db.variants.update(v1, { stockQty: 0 })
+      await db.variants.update(v2, { stockQty: 0 })
+      await db.customers.update(cId, { balance: 0 })
+      await db.suppliers.update(supId, { balance: 0 })
+      for (const [table, rows] of [
+        ['purchases', purchases],
+        ['sales', sales],
+        ['payments', payments],
+        ['adjustments', adjustments],
+        ['returns', returns]
+      ] as const) {
+        for (const r of rows) await applyDocEffects(table, r as unknown as Record<string, unknown>, false)
+      }
+
+      eq('موبایل نو — جنس اول', await stockOf(v1), stock1)
+      eq('موبایل نو — جنس دوم (خرید در راه)', await stockOf(v2), stock2)
+      eq('موبایل نو — قرض مشتری', (await db.customers.get(cId))!.balance, debt)
+      eq('موبایل نو — قرض تأمین‌کننده', (await db.suppliers.get(supId))!.balance, owed)
+      is('کنترل حساب‌ها هم سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {

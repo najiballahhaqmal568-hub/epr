@@ -23,15 +23,6 @@ export interface IntegrityReport {
   mismatches: Mismatch[]
 }
 
-/**
- * سند رسیدِ جنسِ «در راه» است؟
- * چنین سندی موجودی را بالا می‌برد، ولی خودِ خرید هم بعد از رسید received=true می‌شود؛
- * پس فقط یکی از آن دو باید شمرده شود.
- */
-export function isReceiveAdjustment(a: Adjustment): boolean {
-  return a.reason === 'purchaseReceived' || (a.reason === 'correction' && Boolean(a.note?.startsWith('رسید خرید')))
-}
-
 /** موجودی مورد انتظار هر سایز، از روی اسناد */
 export function computeStock(
   sales: Sale[],
@@ -43,9 +34,10 @@ export function computeStock(
   const add = (id: number, n: number) => out.set(id, (out.get(id) ?? 0) + n)
 
   for (const s of sales) for (const l of s.lines) add(l.variantId, -l.qty)
-  // جنس «در راه» موجودی ندارد؛ رسیدش به شکل سند تعدیل شمرده می‌شود
-  for (const p of purchases) if (p.received !== false) for (const l of p.lines) add(l.variantId, l.qty)
-  for (const a of adjustments) if (!isReceiveAdjustment(a)) add(a.variantId, a.qtyChange)
+  // خرید عادی موجودی می‌دهد؛ خرید «در راه» (چه رسیده و چه نرسیده) موجودی‌اش
+  // از سند تعدیلِ رسید می‌آید — تا دو بار شمرده نشود
+  for (const p of purchases) if (p.received === undefined) for (const l of p.lines) add(l.variantId, l.qty)
+  for (const a of adjustments) add(a.variantId, a.qtyChange)
   for (const r of returns) {
     if (r.kind === 'customer') {
       for (const l of r.lines) if (l.restock) add(l.variantId, l.qty)
