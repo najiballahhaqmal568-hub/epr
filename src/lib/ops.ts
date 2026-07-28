@@ -117,10 +117,30 @@ export async function deleteSale(saleId: number): Promise<void> {
       const c = await db.customers.get(sale.customerId)
       if (c) await db.customers.update(sale.customerId, { balance: c.balance - remainder })
     }
-    // حذفِ اصلاحی است — حتی اگر صندوق کم شود باید ثبت گردد
-    await movement({ date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, note: 'حذف فروش' }, { allowNegative: true })
+    // پول در همان جایی برمی‌گردد که آمده بود
+    const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
+    // حذفِ اصلاحی است — حتی اگر پول کم شود باید ثبت گردد
+    await movement(
+      { date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, box: orig ? boxOf(orig) : SHOP_BOX, note: 'حذف فروش' },
+      { allowNegative: true }
+    )
     await db.sales.update(saleId, { deleted: true })
   })
+}
+
+/**
+ * اثر حذف یک فروش بر پول — پیش از تأیید نشان داده می‌شود.
+ * حذف هرگز جلو گرفته نمی‌شود (باید بتوان اشتباه را پس گرفت)، ولی اگر پول منفی شود هشدار داده می‌شود.
+ */
+export async function deleteSaleImpact(
+  saleId: number
+): Promise<{ paid: number; box: string; before: number; after: number } | null> {
+  const sale = await db.sales.get(saleId)
+  if (!sale || sale.deleted) return null
+  const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
+  const box = orig ? boxOf(orig) : SHOP_BOX
+  const before = await cashBalance(box)
+  return { paid: sale.paid, box, before, after: before - sale.paid }
 }
 
 /** میانگین وزنی قیمت خرید — تا موجودی قدیم با قیمت نو تبدیل نشود */

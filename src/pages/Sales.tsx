@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale } from '../db'
-import { deleteSale } from '../lib/ops'
+import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { Fab, Empty, Card } from '../components/ui'
 import SalesStats from './sales/SalesStats'
@@ -72,7 +72,14 @@ export default function Sales({ isStaff }: { isStaff?: boolean }) {
               <button
                 className="text-xs text-red-500"
                 onClick={async () => {
-                  if (confirm('این فروش حذف شود؟ اجناس به گدام برمی‌گردد.')) await deleteSale(s.id!)
+                  const im = await deleteSaleImpact(s.id!)
+                  let msg = 'این فروش حذف شود؟ اجناس به گدام برمی‌گردد.'
+                  if (im && im.paid > 0) {
+                    msg += `\n\nپول ${fmtMoney(im.paid)} از «${im.box}» پس می‌رود: ${fmtMoney(im.before)} ← ${fmtMoney(im.after)}`
+                    // حذف جلو گرفته نمی‌شود، ولی باید بدانید که پول منفی می‌شود
+                    if (im.after < 0) msg += '\n\n⚠️ با این حذف پول «' + im.box + '» منفی می‌شود! اگر آن پول را قبلاً خرج کرده‌اید، بهتر است به‌جای حذف، «مرجوعی» ثبت کنید.'
+                  }
+                  if (confirm(msg)) await deleteSale(s.id!)
                 }}
               >
                 حذف فروش

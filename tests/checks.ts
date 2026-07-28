@@ -29,6 +29,8 @@ import {
   convertLoanToCapital,
   transferCash,
   boxBalances,
+  deleteSale,
+  deleteSaleImpact,
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
@@ -1200,6 +1202,71 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('موجودی خانه در نمودار', homeRows[homeRows.length - 1].balance, 20000)
       const allRows = dailyFlow(all, 7, () => '', sod, now)
       eq('پول کل در نمودار', allRows[allRows.length - 1].balance, 50000)
+    }
+  },
+  {
+    name: 'حذف فروش — اثرش پیش از تأیید معلوم شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const cId = await newCustomer()
+      await addPurchase(buy(supId, vId, 20, 500, { paid: 0 }))
+      await seedCash(5000)
+
+      // فروش نقدی ۳ × ۹۰۰ = ۲٬۷۰۰
+      const saleId = await addSale(sell(vId, 3, 900))
+      eq('پول بعد از فروش', await cashBalance(SHOP_BOX), 7700)
+
+      const im1 = (await deleteSaleImpact(saleId))!
+      eq('مبلغی که پس می‌رود', im1.paid, 2700)
+      is('از کدام جای پول', im1.box, SHOP_BOX)
+      eq('پول فعلی', im1.before, 7700)
+      eq('پول بعد از حذف', im1.after, 5000)
+      is('منفی نمی‌شود', im1.after < 0, false)
+
+      // حالا پول را خرج می‌کنیم تا حذف، پول را منفی کند
+      const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
+      await addExpense({ date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه', amount: 7000 } as Expense)
+      eq('پول بعد از مصرف', await cashBalance(SHOP_BOX), 700)
+
+      const im2 = (await deleteSaleImpact(saleId))!
+      eq('پول بعد از حذف منفی می‌شود', im2.after, -2000)
+      is('هشدار باید داده شود', im2.after < 0, true)
+
+      // حذف باید باز هم ممکن باشد — اصلاح اشتباه نباید بسته شود
+      await deleteSale(saleId)
+      eq('پول واقعاً منفی شد', await cashBalance(SHOP_BOX), -2000)
+      eq('جنس به گدام برگشت', await stockOf(vId), 20)
+      eq('دفتر با پول برابر ماند', await cashLedgerEnd(), await cashBalance())
+
+      // فروش قرضی: پولی پس نمی‌رود
+      const s2 = await addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'مشتری', paid: 0 }))
+      const im3 = (await deleteSaleImpact(s2))!
+      eq('فروش قرضی پول پس نمی‌دهد', im3.paid, 0)
+      eq('پول تغییر نمی‌کند', im3.after, im3.before)
+
+      is('فروش حذف‌شده اثری ندارد', await deleteSaleImpact(saleId), null)
+    }
+  },
+  {
+    name: 'حذف فروش — پول در همان جای خود برمی‌گردد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      await seedCash(20000)
+      await transferCash(SHOP_BOX, 'خانه', 15000)
+
+      const saleId = await addSale(sell(vId, 2, 900)) // به دکان می‌آید
+      eq('دکان', await cashBalance(SHOP_BOX), 6800)
+      eq('خانه', await cashBalance('خانه'), 15000)
+
+      const im = (await deleteSaleImpact(saleId))!
+      is('جای پول درست شناخته شد', im.box, SHOP_BOX)
+      await deleteSale(saleId)
+      eq('پول از دکان پس رفت', await cashBalance(SHOP_BOX), 5000)
+      eq('خانه دست‌نخورده', await cashBalance('خانه'), 15000)
+      eq('پول کل', await cashBalance(), 20000)
     }
   },
   {
