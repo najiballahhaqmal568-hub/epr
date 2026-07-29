@@ -37,7 +37,6 @@ function YearStartCard() {
 function YearStartWizard({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState(0)
   const [ownerName, setOwnerName] = useState('')
-  const [ownerShare, setOwnerShare] = useState('')
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [addingPartner, setAddingPartner] = useState(false)
@@ -79,7 +78,9 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
       const name = ownerName.trim()
       if (!name) return setError('نام خود را بنویسید')
       if (ownerCapital < 0) return setError('سرمایهٔ شما منفی می‌شود — اعداد گدام و قرض‌ها را دوباره ببینید')
-      const share = parseNum(ownerShare) || 100 - othersShare
+      // سهم مالک همیشه باقی‌ماندهٔ فیصدی شرکاست — پس مجموع دقیقاً ۱۰۰٪ می‌شود
+      const share = 100 - othersShare
+      if (share < 0) return setError('مجموع فیصدی شرکا بیشتر از ۱۰۰٪ شده')
       const existing = nums!.partners.find((p) => p.name === name)
       if (existing) {
         await db.suppliers.update(existing.id!, { capital: ownerCapital, share, kind: 'partner' })
@@ -204,6 +205,12 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
               <Field label="فیصدی سهم او از مفاد *">
                 <input className={inputCls} inputMode="numeric" value={pShare} onChange={(e) => setPShare(e.target.value)} />
               </Field>
+              {parseNum(pShare) > 0 && parseNum(pShare) < 100 && (
+                <p className="-mt-2 mb-3 rounded-lg bg-white p-2 text-center text-sm">
+                  او <span className="font-bold text-purple-800">{fmtNum(parseNum(pShare))}٪</span> ← پس شما{' '}
+                  <span className="font-bold text-teal-700">{fmtNum(100 - othersShare - parseNum(pShare))}٪</span>
+                </p>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={() => setAddingPartner(false)}
@@ -254,18 +261,24 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
             <Field label="نام شما *">
               <input className={inputCls} value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="مثلاً نجیب‌الله" />
             </Field>
-            <Field label="فیصدی سهم شما از مفاد">
-              <input className={inputCls} inputMode="numeric" value={ownerShare} onChange={(e) => setOwnerShare(e.target.value)} placeholder={String(100 - othersShare)} />
-            </Field>
-            <div className="flex justify-between text-sm">
+            {/* فیصدی شما پرسیده نمی‌شود — هرچه از شرکا بماند مالِ شماست */}
+            <div className="flex justify-between border-b border-slate-200 py-1.5 text-sm">
+              <span className="text-slate-600">سهم شما از مفاد (خودکار)</span>
+              <span className="text-lg font-bold text-teal-700">{fmtNum(100 - othersShare)}٪</span>
+            </div>
+            <div className="flex justify-between py-1.5 text-sm">
               <span className="text-slate-600">سرمایهٔ شما (خودکار)</span>
               <span className="font-bold text-purple-800">{fmtMoney(ownerCapital)}</span>
             </div>
           </div>
 
-          {othersShare + (parseNum(ownerShare) || 100 - othersShare) !== 100 && (
-            <p className="mb-2 rounded-xl bg-amber-50 p-2 text-xs font-bold text-amber-800">
-              ⚠️ مجموع فیصدی‌ها {fmtNum(othersShare + (parseNum(ownerShare) || 100 - othersShare))}٪ است، نه ۱۰۰٪
+          <p className="mb-2 text-xs text-slate-400">
+            فیصدی را فقط برای شریک می‌نویسید — سهم شما هرچه باقی بماند است، پس مجموع همیشه ۱۰۰٪ می‌شود.
+          </p>
+
+          {othersShare > 100 && (
+            <p className="mb-2 rounded-xl bg-red-50 p-2 text-xs font-bold text-red-700">
+              ⚠️ مجموع فیصدی شرکا {fmtNum(othersShare)}٪ شده — بیشتر از ۱۰۰٪ ممکن نیست.
             </p>
           )}
 
@@ -274,7 +287,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
               →
             </button>
             <div className="flex-1">
-              <PrimaryBtn disabled={!ownerName.trim() || addingPartner} onClick={() => setStep(2)}>
+              <PrimaryBtn disabled={!ownerName.trim() || addingPartner || othersShare > 100} onClick={() => setStep(2)}>
                 بعدی
               </PrimaryBtn>
             </div>
@@ -313,7 +326,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
             <div className="mt-1 flex justify-between border-t border-purple-200 pt-1">
               <span className="font-bold text-slate-700">
                 {ownerName.trim()}{' '}
-                <span className="text-xs font-normal text-slate-400">({fmtNum(parseNum(ownerShare) || 100 - othersShare)}٪)</span>
+                <span className="text-xs font-normal text-slate-400">({fmtNum(100 - othersShare)}٪)</span>
               </span>
               <span className="text-lg font-bold text-purple-800">{fmtMoney(ownerCapital)}</span>
             </div>
