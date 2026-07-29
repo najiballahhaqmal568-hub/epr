@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../db'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
-import { addCapital, addPartnerWithdrawal, recordCapitalCash } from '../../lib/ops'
+import { addCapital, addPartnerWithdrawal, recordCapitalCash, afn } from '../../lib/ops'
 import { parseNum } from '../../lib/format'
 import Row from './Row'
 
@@ -65,7 +65,11 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
   const yearProfit = assets + wSum - capSum
   const shareSum = partners?.reduce((s, p) => s + (p.share ?? 0), 0) ?? 0
 
-  const suggested = assets
+  // سرمایهٔ باقی‌مانده = دارایی خالص منهای سرمایهٔ شرکای ثبت‌شده.
+  // اگر مجموع سرمایه‌ها از دارایی بیشتر شود، مفاد روز اول به‌غلط منفی می‌شود.
+  const remainingCapital = afn(assets - capSum)
+  const suggested = Math.max(0, remainingCapital)
+  const overCapital = capSum > assets + 0.5
 
   return (
     <Card>
@@ -115,6 +119,34 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
           </div>
         </div>
       ))}
+      {overCapital && (
+        <div className="mb-2 rounded-xl bg-red-50 p-3 text-sm text-red-800">
+          <p className="mb-1 font-bold">⚠️ مجموع سرمایه‌ها از دارایی خالص بیشتر است</p>
+          <p>
+            مجموع سرمایه‌ها: <b>{fmtMoney(capSum)}</b> — ولی دارایی خالص دکان: <b>{fmtMoney(assets)}</b>. به همین سبب
+            «فایده/نقص سال» به‌غلط <b>{fmtMoney(capSum - assets)}</b> نقص نشان می‌دهد.
+          </p>
+          <p className="mt-1">سرمایهٔ درست هر شریک، پولی است که خودش گذاشته؛ سرمایهٔ مالک = باقی‌ماندهٔ دارایی.</p>
+          <div className="mt-2">
+            {partners?.map((p) => {
+              const correct = afn(assets - (capSum - (p.capital ?? 0)))
+              if (correct === (p.capital ?? 0)) return null
+              return (
+                <button
+                  key={p.id}
+                  className="mb-1 w-full rounded-lg bg-white px-3 py-2 text-right text-xs font-bold text-red-700"
+                  onClick={async () => {
+                    if (confirm(`سرمایهٔ «${p.name}» از ${fmtMoney(p.capital ?? 0)} به ${fmtMoney(correct)} اصلاح شود؟`))
+                      await db.suppliers.update(p.id!, { capital: correct })
+                  }}
+                >
+                  اصلاح سرمایهٔ «{p.name}» ← {fmtMoney(correct)}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {(partners?.length ?? 0) > 0 && shareSum !== 100 && (
         <p className="mb-2 text-xs font-bold text-red-600">⚠️ مجموع فیصدی‌ها {fmtNum(shareSum)}٪ است — باید ۱۰۰٪ شود.</p>
       )}
@@ -155,15 +187,27 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
             <input className={inputCls} inputMode="numeric" value={capitalStr} onChange={(e) => setCapitalStr(e.target.value)} />
           </Field>
           <button className="mb-2 text-xs font-bold text-teal-700" onClick={() => setCapitalStr(String(suggested))}>
-            پیشنهاد برای مالک: گدام + صندوق + طلب مشتریان − قرض ما = {fmtMoney(suggested)}
+            باقی‌ماندهٔ دارایی (دارایی خالص − سرمایهٔ شرکای ثبت‌شده) = {fmtMoney(suggested)}
           </button>
+          {parseNum(capitalStr) > remainingCapital + 0.5 && !cashNow && (
+            <p className="mb-2 rounded-xl bg-red-50 p-2 text-xs font-bold text-red-700">
+              ⚠️ این مبلغ از باقی‌ماندهٔ دارایی ({fmtMoney(remainingCapital)}) بیشتر است. اگر پول نو نمی‌آورد، مفاد سال
+              به‌غلط {fmtMoney(parseNum(capitalStr) - remainingCapital)} نقص نشان می‌دهد. اگر پول نو می‌آورد، گزینهٔ زیر را
+              علامت بزنید.
+            </p>
+          )}
           <label className="mb-2 flex items-center gap-2 text-sm">
             <input type="checkbox" className="h-4 w-4" checked={cashNow} onChange={(e) => setCashNow(e.target.checked)} />
             این سرمایه نقد است و حالا وارد صندوق شود (برای شریک نقدی)
           </label>
           <p className="mb-3 text-xs text-slate-400">این عدد قید می‌شود و با خرید و فروش تغییر نمی‌کند. برای <b>شروع سال</b> از «تنظیمات ← شروع سال مالی» استفاده کنید — آنجا سرمایهٔ شما خودکار حساب می‌شود تا مفاد روز اول صفر بماند. این فورم برای شریکی است که <b>در میان سال</b> با پول نو می‌آید.</p>
           <PrimaryBtn
-            disabled={!name.trim() || parseNum(share) <= 0 || parseNum(capitalStr) <= 0}
+            disabled={
+              !name.trim() ||
+              parseNum(share) <= 0 ||
+              parseNum(capitalStr) <= 0 ||
+              (parseNum(capitalStr) > remainingCapital + 0.5 && !cashNow)
+            }
             onClick={async () => {
               await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share), capital: parseNum(capitalStr) })
               if (cashNow) await recordCapitalCash(name.trim(), parseNum(capitalStr))
