@@ -126,7 +126,10 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
             مجموع سرمایه‌ها: <b>{fmtMoney(capSum)}</b> — ولی دارایی خالص دکان: <b>{fmtMoney(assets)}</b>. به همین سبب
             «فایده/نقص سال» به‌غلط <b>{fmtMoney(capSum - assets)}</b> نقص نشان می‌دهد.
           </p>
-          <p className="mt-1">سرمایهٔ درست هر شریک، پولی است که خودش گذاشته؛ سرمایهٔ مالک = باقی‌ماندهٔ دارایی.</p>
+          <p className="mt-1">
+            سرمایهٔ شریک = همان پولی که داده (دست نزنید). فقط <b>سرمایهٔ خودتان (مالک)</b> را اصلاح کنید — سرمایهٔ مالک
+            یعنی باقی‌ماندهٔ دارایی.
+          </p>
           <div className="mt-2">
             {partners?.map((p) => {
               const correct = afn(assets - (capSum - (p.capital ?? 0)))
