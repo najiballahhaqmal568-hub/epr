@@ -17,7 +17,8 @@ function YearStartCard() {
     <Card>
       <p className="mb-1 font-bold text-slate-800">🎬 شروع سال مالی</p>
       <p className="mb-3 text-sm text-slate-500">
-        بعد از شمارش گدام و صندوق، اینجا سال را شروع کنید. اپ سرمایهٔ شما را خودش حساب می‌کند تا مفاد روز اول صفر باشد.
+        ترتیب کار: <b>۱)</b> اول همهٔ حساب‌ها را در اپ وارد کنید (گدام، صندوق، طلب، قرض) — <b>۲)</b> بعد اینجا سهم شریک را
+        تعیین کنید. سهم و سرمایهٔ خودتان خودکار حساب می‌شود تا مفاد روز اول صفر باشد.
       </p>
       {started ? (
         <p className="mb-3 rounded-xl bg-teal-50 p-2.5 text-sm font-bold text-teal-800">
@@ -154,10 +155,20 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
       {step === 1 && (
         <>
           <p className="mb-3 font-bold text-slate-800">۲) شرکا و سرمایه‌ها</p>
+          <div className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="mb-1 font-bold">سهم را کِی وارد کنم؟</p>
+            <p>
+              <b>بعد از</b> اینکه همهٔ حساب‌ها (گدام، صندوق، طلب، قرض) در اپ وارد شد — یعنی همین حالا، در قدم ۱ آن‌ها را
+              دیدید. سهم فقط <b>یک بار و همین‌جا</b> تعیین می‌شود.
+            </p>
+            <p className="mt-1">
+              و فیصدی را <b>فقط برای شریک</b> می‌نویسید. فیصدی و سرمایهٔ خودتان را تایپ نمی‌کنید — اپ خودش حساب می‌کند تا
+              مفاد روز اول صفر شود.
+            </p>
+          </div>
           <p className="mb-3 text-sm text-slate-500">
             سرمایهٔ هر شریک = پولی که واقعاً گذاشته. فرقی نمی‌کند آن پول حالا نقد است یا جنس شده یا قرض تأمین‌کننده را خلاص
-            کرده — همه‌اش در «دارایی خالص» بالا حساب شده. <b>سرمایهٔ خودتان را تایپ نمی‌کنید</b>؛ اپ باقی‌مانده را به شما
-            می‌دهد تا مفاد روز اول صفر شود.
+            کرده — همه‌اش در «دارایی خالص» بالا حساب شده.
           </p>
 
           {nums.partners.length > 0 && (
@@ -202,7 +213,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
                   </span>
                 </p>
               )}
-              <Field label="فیصدی سهم او از مفاد *">
+              <Field label="فیصدی سهم او از مفاد (فیصدی خودتان را ننویسید) *">
                 <input className={inputCls} inputMode="numeric" value={pShare} onChange={(e) => setPShare(e.target.value)} />
               </Field>
               {parseNum(pShare) > 0 && parseNum(pShare) < 100 && (
