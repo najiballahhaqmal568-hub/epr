@@ -147,7 +147,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
             <input type="checkbox" className="h-4 w-4" checked={cashNow} onChange={(e) => setCashNow(e.target.checked)} />
             این سرمایه نقد است و حالا وارد صندوق شود (برای شریک نقدی)
           </label>
-          <p className="mb-3 text-xs text-slate-400">این عدد قید می‌شود و با خرید و فروش تغییر نمی‌کند. خودتان را هم با فیصدی خودتان ثبت کنید.</p>
+          <p className="mb-3 text-xs text-slate-400">این عدد قید می‌شود و با خرید و فروش تغییر نمی‌کند. برای <b>شروع سال</b> از «تنظیمات ← شروع سال مالی» استفاده کنید — آنجا سرمایهٔ شما خودکار حساب می‌شود تا مفاد روز اول صفر بماند. این فورم برای شریکی است که <b>در میان سال</b> با پول نو می‌آید.</p>
           <PrimaryBtn
             disabled={!name.trim() || parseNum(share) <= 0 || parseNum(capitalStr) <= 0}
             onClick={async () => {

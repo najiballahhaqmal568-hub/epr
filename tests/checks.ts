@@ -1342,6 +1342,45 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'مصرف خانه به نام شریک — از سهم خودش کم شود',
+    run: async () => {
+      // دو شریک، هر کدام ۵۰٪
+      const meId = (await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', share: 50, capital: 50000 })) as number
+      const heId = (await db.suppliers.add({ name: 'شریک', balance: 0, kind: 'partner', share: 50, capital: 50000 })) as number
+      await seedCash(100000)
+      await db.settings.put({ key: 'partnershipStart', value: 1 })
+      const catId = (await db.expenseCategories.add({ name: 'خرچ خانه' })) as number
+
+      // مالک ۱۰٬۰۰۰ مصرف خانه کرد — به نام خودش
+      await addExpense(
+        { date: Date.now(), type: 'home', categoryId: catId, categoryName: 'خرچ خانه', amount: 10000 } as Expense,
+        'مالک'
+      )
+
+      const movements = await db.cashMovements.filter((m) => !m.deleted).toArray()
+      const DRAW = ['withdrawal', 'homeExpense', 'personalExpense']
+      const draws = movements.filter((m) => DRAW.includes(m.type))
+      const wOf = (n: string) => draws.filter((m) => m.partnerName === n).reduce((s, m) => s - m.amount, 0)
+      const untagged = draws.filter((m) => !m.partnerName).reduce((s, m) => s - m.amount, 0)
+
+      eq('برداشت مالک', wOf('مالک'), 10000)
+      eq('برداشت شریک', wOf('شریک'), 0)
+      eq('برداشت بی‌نام صفر است', untagged, 0)
+
+      const s0 = await settlement()
+      eq('پول صندوق', s0.cash, 90000)
+      eq('دارایی', s0.assets, 90000)
+      eq('مجموع برداشت‌ها', s0.wSum, 10000)
+      eq('مفاد سال صفر — مصرف خانه مفاد تجارت نیست', s0.yearProfit, 0)
+
+      // سهم هر کس صفر است؛ ولی مالک ۱۰٬۰۰۰ گرفته پس باید همان از او کم شود
+      const shareOf = (share: number) => Math.round((s0.yearProfit * share) / 100)
+      eq('پرداختنی به مالک', shareOf(50) - wOf('مالک'), -10000)
+      eq('پرداختنی به شریک', shareOf(50) - wOf('شریک'), 0)
+      is('مالک و شریک هر دو ثبت‌اند', (await db.suppliers.bulkGet([meId, heId])).every(Boolean), true)
+    }
+  },
+  {
     name: 'تخفیف از مفاد کم شود و قرض نسازد',
     run: async () => {
       const supId = await newSupplier()

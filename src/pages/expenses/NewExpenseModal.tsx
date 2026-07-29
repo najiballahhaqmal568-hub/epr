@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type ExpenseType, type Expense } from '../../db'
+import { db, type Expense } from '../../db'
 import { addExpense, addPartnerWithdrawal } from '../../lib/ops'
 import { parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
@@ -21,16 +21,23 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
 
   const type = mode === 'partner' ? 'withdrawal' : mode
   const modeLabels: Record<ExpenseMode, string> = { ...TYPE_LABELS, partner: 'شریک' }
-  const modes: ExpenseMode[] = [...(Object.keys(TYPE_LABELS) as ExpenseType[]), ...((partners?.length ?? 0) > 0 ? (['partner'] as const) : [])]
+  const hasPartners = (partners?.length ?? 0) > 0
+  // با وجود شریک، هر پولی که از تجارت بیرون می‌رود باید به نام کسی باشد
+  const modes: ExpenseMode[] = hasPartners
+    ? ['business', 'home', 'personal', 'partner']
+    : ['business', 'home', 'personal', 'withdrawal']
+  const needsPartner = hasPartners && mode !== 'business'
+  // اگر فقط یک شریک باشد، خودکار انتخاب می‌شود
+  const soloPartner = partners?.length === 1 ? partners[0] : undefined
+  const chosenPartner = partners?.find((x) => x.id === partnerId) ?? soloPartner
 
   async function save() {
     const amt = parseNum(amount)
     if (amt <= 0) return setError('مبلغ را وارد کنید')
     try {
+      if (needsPartner && !chosenPartner) return setError('انتخاب کنید این پول از سهم چه کسی کم شود')
       if (mode === 'partner') {
-        if (!partnerId) return setError('شریک را انتخاب کنید')
-        const p = partners?.find((x) => x.id === partnerId)
-        await addPartnerWithdrawal(p!.name, amt, note.trim() || undefined)
+        await addPartnerWithdrawal(chosenPartner!.name, amt, note.trim() || undefined)
         onClose()
         return
       }
@@ -43,7 +50,7 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
         catId = undefined
       }
       const e: Expense = { date: Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
-      await addExpense(e)
+      await addExpense(e, needsPartner ? chosenPartner!.name : undefined)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -69,10 +76,11 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
           : mode === 'partner'
             ? 'برداشت/مصرف شریک — آخر سال از سهم فایدهٔ همان شریک کم می‌شود.'
             : 'از صندوق کم می‌شود اما در مفاد تجارت حساب نمی‌شود.'}
+        {needsPartner && mode !== 'partner' && ' این پول آخر سال از سهم همان شریک کم می‌شود.'}
       </p>
 
-      {mode === 'partner' && (
-        <Field label="کدام شریک؟ *">
+      {needsPartner && (
+        <Field label={mode === 'partner' ? 'کدام شریک؟ *' : 'از سهم چه کسی کم شود؟ *'}>
           <select className={inputCls} value={partnerId} onChange={(e) => setPartnerId(e.target.value ? Number(e.target.value) : '')}>
             <option value="">انتخاب کنید...</option>
             {partners?.map((p) => (

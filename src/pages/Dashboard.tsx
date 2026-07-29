@@ -125,9 +125,13 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
       {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
         <div className="mb-3 rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 p-4">
           <p className="mb-2 font-bold text-teal-800">👋 خوش آمدید! برای شروع:</p>
-          <p className="mb-1 text-sm text-slate-700">۱. در بخش «گدام» اجناس‌تان را با سایز و قیمت ثبت کنید</p>
-          <p className="mb-1 text-sm text-slate-700">۲. بعد از بخش «فروش» اولین فروش را بزنید</p>
-          <p className="text-sm text-slate-700">۳. مشتریان قرضی را در «مشتریان» ثبت کنید</p>
+          <p className="mb-1 text-sm text-slate-700">۱. در «گدام» اجناس‌تان را با سایز و قیمت ثبت کنید</p>
+          <p className="mb-1 text-sm text-slate-700">۲. پول صندوق را در «مصارف ← صندوق ← تصفیه» بگذارید</p>
+          <p className="mb-1 text-sm text-slate-700">۳. قرض مشتریان و تأمین‌کنندگان را ثبت کنید</p>
+          <p className="mb-1 text-sm font-bold text-teal-800">
+            ۴. بعد «تنظیمات ← 🎬 شروع سال مالی» را بزنید تا سرمایه و مفاد از روز اول درست باشد
+          </p>
+          <p className="text-sm text-slate-700">۵. حالا فروش را شروع کنید</p>
         </div>
       )}
       <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white">

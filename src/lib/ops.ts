@@ -456,7 +456,7 @@ const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'persona
 }
 
 /** ثبت مصرف (تجارت/خانه/شخصی) یا برداشت مالک: خروج نقد از صندوق */
-export async function addExpense(expense: Expense): Promise<number> {
+export async function addExpense(expense: Expense, partnerName?: string): Promise<number> {
   expense.amount = afn(expense.amount)
   return db.transaction('rw', db.expenses, db.cashMovements, async () => {
     const id = (await db.expenses.add(expense)) as number
@@ -465,6 +465,9 @@ export async function addExpense(expense: Expense): Promise<number> {
       type: EXPENSE_MOVE[expense.type],
       refId: id,
       amount: -expense.amount,
+      // مصرف خانه/شخصی و برداشت باید به نام یک شریک ثبت شود، وگرنه آخر سال
+      // از سهم هیچ‌کس کم نمی‌شود و بار آن روی همهٔ شرکا می‌افتد
+      ...(partnerName ? { partnerName } : {}),
       note: expense.categoryName
     })
     return id
