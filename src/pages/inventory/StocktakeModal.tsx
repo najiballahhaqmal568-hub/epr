@@ -4,25 +4,53 @@ import { db, type Variant } from '../../db'
 import { applyStocktake, type StocktakeResult } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum, toLatinDigits } from '../../lib/format'
 import { Modal, inputCls, PrimaryBtn } from '../../components/ui'
+import { periodBounds } from '../../lib/period'
+import { soldVariantIds } from '../../lib/sold'
+
+/** دامنهٔ شمارش: همه، یا فقط اجناسی که در دوره حرکت کرده‌اند */
+type Scope = 'all' | 'thisMonth' | 'lastMonth'
+
+const SCOPES: { id: Scope; label: string }[] = [
+  { id: 'lastMonth', label: 'فروخته‌شدهٔ ماه گذشته' },
+  { id: 'thisMonth', label: 'فروخته‌شدهٔ این ماه' },
+  { id: 'all', label: 'همهٔ گدام' }
+]
 
 export function StocktakeModal({ onClose }: { onClose: () => void }) {
   const [counts, setCounts] = useState<Record<number, string>>({})
   const [filter, setFilter] = useState('')
+  const [scope, setScope] = useState<Scope>('lastMonth')
   const [phase, setPhase] = useState<'counting' | 'confirm' | 'done'>('counting')
   const [result, setResult] = useState<StocktakeResult | null>(null)
 
   const products = useLiveQuery(() => db.products.orderBy('name').filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
 
+  // اجناسی که در دوره حرکت کرده‌اند — فقط همین‌ها نیاز به شمارش دوباره دارند
+  const { from, to } = periodBounds(scope === 'thisMonth' ? 'month' : 'prevMonth')
+  const moved = useLiveQuery(async () => {
+    if (scope === 'all') return null
+    const [sales, returns] = await Promise.all([
+      db.sales.where('date').between(from, to, true, true).toArray(),
+      db.returns.where('date').between(from, to, true, true).toArray()
+    ])
+    return soldVariantIds(sales, returns)
+  }, [scope, from, to])
+
+  const inScope = (v: Variant) => scope === 'all' || !moved || moved.has(v.id!)
+
   const byProduct = new Map<number, Variant[]>()
-  variants?.forEach((v) => {
+  variants?.filter(inScope).forEach((v) => {
     const list = byProduct.get(v.productId) ?? []
     list.push(v)
     byProduct.set(v.productId, list)
   })
 
-  const visible = (products ?? []).filter((p) => !filter || p.name.includes(filter) || (p.brand ?? '').includes(filter))
-  const total = variants?.length ?? 0
+  const visible = (products ?? [])
+    .filter((p) => byProduct.has(p.id!))
+    .filter((p) => !filter || p.name.includes(filter) || (p.brand ?? '').includes(filter))
+  const total = variants?.filter(inScope).length ?? 0
+  const skipped = (variants?.length ?? 0) - total
   const countedEntries = Object.entries(counts).filter(([, val]) => toLatinDigits(val).trim() !== '')
   const countedNum = countedEntries.length
 
@@ -51,10 +79,34 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
           <p className="mb-2 text-sm text-slate-500">
             هر جنس را بشمارید و تعداد واقعی را بنویسید. اجناسی که خالی بمانند تغییری نمی‌کنند.
           </p>
+          <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
+            {SCOPES.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setScope(s.id)}
+                className={`whitespace-nowrap rounded-full px-3 py-1 text-sm font-bold ${
+                  scope === s.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          {scope !== 'all' && (
+            <p className="mb-2 rounded-xl bg-teal-50 p-2.5 text-xs text-teal-900">
+              فقط اجناسی که در این دوره فروخته شده نشان داده می‌شود — {fmtNum(skipped)} سایز دیگر حرکت نکرده و لازم نیست
+              دوباره شمرده شود.
+            </p>
+          )}
           <input className={inputCls} placeholder="فلتر نام یا برند..." value={filter} onChange={(e) => setFilter(e.target.value)} />
           <p className="my-2 text-sm font-bold text-teal-700">
             {fmtNum(countedNum)} از {fmtNum(total)} شمارش شده
           </p>
+          {total === 0 && (
+            <p className="mb-3 rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
+              در این دوره چیزی فروخته نشده — چیزی برای شمارش نیست.
+            </p>
+          )}
           {visible.map((p) => (
             <div key={p.id} className="mb-3">
               <p className="mb-1 font-bold text-slate-700">

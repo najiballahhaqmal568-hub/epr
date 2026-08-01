@@ -11,6 +11,7 @@ import {
   MonthsCard,
   PeriodCompareCard
 } from '../../components/AnalyticsCards'
+import SoldListCard from '../../components/SoldListCard'
 
 /** آمار فروش: مجموع دوره + پرفروش‌ترین اجناس + بهترین مشتریان */
 export function SalesStats({ isStaff }: { isStaff?: boolean }) {
@@ -91,6 +92,8 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
           </div>
         ))}
       </Card>
+
+      <SoldListCard sales={sales ?? []} returns={returns ?? []} showProfit={!isStaff} />
 
       {isStaff && (
       <Card>

@@ -40,6 +40,7 @@ import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../s
 import { applyDocEffects } from '../src/lib/sync'
 import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
+import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -1449,6 +1450,44 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // مهم‌ترین بررسی: عددهای ذخیره‌شده هنوز با اسناد جور است
       is('کنترل حساب‌ها بعد از یکجا کردن سالم', (await runIntegrityCheck()).mismatches.length, 0)
       eq('جنس تکراری دیگر نمانده', findDuplicateGroups(await db.products.filter((p) => !p.deleted).toArray()).length, 0)
+    }
+  },
+  {
+    name: 'لیست اجناس فروخته‌شده — فقط همان‌ها، نه تمام گدام',
+    run: async () => {
+      const supId = await newSupplier()
+      const sold = await makeVariant()
+      const untouched = await makeVariant({ size: '44' })
+      const cId = await newCustomer()
+      await addPurchase(buy(supId, sold, 10, 500, { paid: 0 }))
+      await addPurchase(buy(supId, untouched, 10, 500, { paid: 0 }))
+      await addSale(sell(sold, 3, 900, { customerId: cId, customerName: 'مشتری' }))
+      await addSale(sell(sold, 2, 900))
+
+      const sales = await db.sales.toArray()
+      const rows = soldInPeriod(sales, [])
+      eq('فقط یک سایز در لیست است', rows.length, 1)
+      eq('تعداد فروخته‌شده جمع می‌شود', rows[0].qty, 5)
+      eq('فروش پولی', rows[0].revenue, 4500)
+      is('سایز فروخته‌نشده در لیست نیست', rows.some((r) => r.variantId === untouched), false)
+
+      // مرجوعی از تعداد کم می‌شود
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: cId,
+        partyName: 'مشتری',
+        lines: [{ variantId: sold, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+        amount: 900,
+        settlement: 'cash'
+      })
+      const after = soldInPeriod(await db.sales.toArray(), await db.returns.toArray())
+      eq('مرجوعی از فروش کم شد', after[0].qty, 4)
+
+      // شمارش کوتاه: فقط همین سایزها
+      const ids = soldVariantIds(await db.sales.toArray(), await db.returns.toArray())
+      is('سایز فروخته‌شده باید شمرده شود', ids.has(sold), true)
+      is('سایز حرکت‌نکرده لازم نیست شمرده شود', ids.has(untouched), false)
     }
   }
 ]
