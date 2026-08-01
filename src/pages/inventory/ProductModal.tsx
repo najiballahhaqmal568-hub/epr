@@ -1,3 +1,4 @@
+import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
 import { db, makeSku, type Product, type Variant } from '../../db'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
@@ -186,6 +187,7 @@ export function ProductModal({
       <Field label="نام بوت *">
         <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً بوت چرمی مردانه" />
       </Field>
+      <DuplicateNameHint name={name} ignoreId={product?.id} />
       <div className="grid grid-cols-2 gap-2">
         <Field label="برند">
           <input className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)} list="brand-list" />

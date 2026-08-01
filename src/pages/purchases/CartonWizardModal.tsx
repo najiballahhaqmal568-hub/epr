@@ -1,3 +1,4 @@
+import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
 import { db, makeSku, type PurchaseLine, type Product, type Variant } from '../../db'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
@@ -134,9 +135,12 @@ export function CartonWizardModal({
         <>
           <p className="mb-2 text-sm font-bold text-slate-700">۱) مشخصات جنس</p>
           {isNew ? (
-            <Field label="نام جنس *">
-              <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
+            <>
+              <Field label="نام جنس *">
+                <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              <DuplicateNameHint name={name} />
+            </>
           ) : (
             <p className="mb-3 rounded-xl bg-slate-50 p-3 font-bold text-slate-800">{name}</p>
           )}

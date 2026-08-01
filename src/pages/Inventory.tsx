@@ -8,6 +8,8 @@ import StocktakeModal from './inventory/StocktakeModal'
 import AdjustModal from './inventory/AdjustModal'
 import ReorderModal from './inventory/ReorderModal'
 import ProductModal from './inventory/ProductModal'
+import MergeProductsModal from './inventory/MergeProductsModal'
+import { findDuplicateGroups } from '../lib/merge'
 
 /** عکس را کوچک می‌کند تا دیتابیس و بکاپ سنگین نشود */
 
@@ -18,6 +20,7 @@ export default function Inventory() {
   const [adjusting, setAdjusting] = useState<{ v: Variant; p: Product } | null>(null)
   const [showReorder, setShowReorder] = useState(false)
   const [showStocktake, setShowStocktake] = useState(false)
+  const [showMerge, setShowMerge] = useState(false)
 
   const products = useLiveQuery(() => db.products.orderBy('name').filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
@@ -44,6 +47,9 @@ export default function Inventory() {
   })
 
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
+  // یک جنس که چند بار ثبت شده (کارتنی/جوړه‌ای/بوجی) — باید یکجا شود
+  const dupGroups = findDuplicateGroups(products ?? [])
+  const dupNames = new Set(dupGroups.flatMap((g) => g.products.map((p) => p.id!)))
 
   return (
     <div className="p-4">
@@ -65,6 +71,18 @@ export default function Inventory() {
         onChange={(e) => setSearch(e.target.value)}
       />
 
+      {dupGroups.length > 0 && (
+        <button
+          onClick={() => setShowMerge(true)}
+          className="mt-3 w-full rounded-xl bg-amber-500 p-3 text-right font-bold text-white"
+        >
+          🔗 {fmtNum(dupGroups.length)} جنس چند بار ثبت شده — یکجا کنید
+          <span className="block text-xs font-normal">
+            {dupGroups.slice(0, 3).map((g) => g.products[0].name).join('، ')}
+          </span>
+        </button>
+      )}
+
       <div className="mt-3">
         {filtered?.length === 0 && <Empty text="هنوز جنسی ثبت نشده. با دکمه + بوت جدید اضافه کنید." />}
         {filtered?.map((p) => {
@@ -80,7 +98,10 @@ export default function Inventory() {
                   <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-xl">👞</div>
                 )}
                 <div className="flex-1">
-                  <p className="font-bold text-slate-800">{p.name}</p>
+                  <p className="font-bold text-slate-800">
+                    {p.name}
+                    {dupNames.has(p.id!) && <span className="mr-1 text-xs font-normal text-amber-600">🔗 تکراری</span>}
+                  </p>
                   <p className="text-sm text-slate-500">
                     {p.brand} {p.category && `· ${p.category}`}
                   </p>
@@ -144,6 +165,7 @@ export default function Inventory() {
       {adjusting && <AdjustModal variant={adjusting.v} product={adjusting.p} onClose={() => setAdjusting(null)} />}
       {showReorder && <ReorderModal onClose={() => setShowReorder(false)} />}
       {showStocktake && <StocktakeModal onClose={() => setShowStocktake(false)} />}
+      {showMerge && <MergeProductsModal onClose={() => setShowMerge(false)} />}
     </div>
   )
 }

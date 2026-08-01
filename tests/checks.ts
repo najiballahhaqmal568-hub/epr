@@ -39,6 +39,7 @@ import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects } from '../src/lib/sync'
 import { buildForecast, dailyFlow } from '../src/lib/cashflow'
+import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -1391,6 +1392,63 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'مشتری', discount: 300, total: 1500, paid: 1500 }))
       eq('قرض مشتری صفر', (await db.customers.get(cId))!.balance, 0)
       eq('مفاد = ۸۰۰ − ۳۰۰ تخفیف', await profitAndLoss(), 500)
+    }
+  },
+  {
+    name: 'یکجا کردن یک جنس که کارتنی و جوړه‌ای جدا ثبت شده',
+    run: async () => {
+      // «کوهستان» کارتنی: سایز ۴۲ و ۴۳ — و «کوهستان جوړه‌ای»: سایز ۴۲ و ۴۴
+      const pA = (await db.products.add({ name: 'کوهستان', createdAt: Date.now() })) as number
+      const pB = (await db.products.add({ name: 'کوهستان جوړه‌ای', createdAt: Date.now() })) as number
+      const mk = async (pid: number, size: string, qty: number) =>
+        (await db.variants.add({
+          productId: pid,
+          size,
+          color: 'سیاه',
+          stockQty: qty,
+          purchasePrice: 500,
+          retailPrice: 900,
+          wholesalePrice: 800,
+          lowStock: 2
+        })) as number
+      const a42 = await mk(pA, '42', 480)
+      await mk(pA, '43', 240)
+      await mk(pB, '42', 12)
+      await mk(pB, '44', 7)
+      // اسناد «موجودی اولیه» تا کنترل حساب‌ها از ابتدا سالم باشد
+      for (const v of await db.variants.toArray())
+        await db.adjustments.add({
+          date: Date.now(),
+          variantId: v.id!,
+          productName: '',
+          size: v.size,
+          color: v.color,
+          qtyChange: v.stockQty,
+          reason: 'correction',
+          note: 'موجودی اولیه'
+        })
+
+      const before = (await db.variants.filter((v) => !v.deleted).toArray()).reduce((s, v) => s + v.stockQty, 0)
+      eq('مجموع جوړه پیش از یکجا کردن', before, 739)
+      is('کنترل حساب‌ها پیش از یکجا کردن سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      const groups = findDuplicateGroups(await db.products.toArray())
+      eq('گروه تکراری پیدا شد', groups.length, 1)
+      is('«جوړه‌ای» در نام نادیده گرفته می‌شود', normalizeName('کوهستان جوړه‌ای'), normalizeName('کوهستان'))
+
+      const r = await mergeProducts(pA, [pB])
+      eq('یک سایز جمع شد (۴۲)', r.combined, 1)
+      eq('یک سایز منتقل شد (۴۴)', r.moved, 1)
+
+      const after = (await db.variants.filter((v) => !v.deleted).toArray()).reduce((s, v) => s + v.stockQty, 0)
+      eq('مجموع جوړه تغییر نکرد', after, before)
+      eq('سایز ۴۲ جمع شد: ۴۸۰ + ۱۲', (await db.variants.get(a42))!.stockQty, 492)
+      const kept = await db.variants.filter((v) => !v.deleted && v.productId === pA).toArray()
+      eq('همه زیر یک جنس آمدند', kept.length, 3)
+      is('جنس تکراری برداشته شد', (await db.products.get(pB))!.deleted, true)
+      // مهم‌ترین بررسی: عددهای ذخیره‌شده هنوز با اسناد جور است
+      is('کنترل حساب‌ها بعد از یکجا کردن سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      eq('جنس تکراری دیگر نمانده', findDuplicateGroups(await db.products.filter((p) => !p.deleted).toArray()).length, 0)
     }
   }
 ]

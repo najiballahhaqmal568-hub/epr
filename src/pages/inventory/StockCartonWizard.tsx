@@ -1,3 +1,4 @@
+import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
 import { db, makeSku } from '../../db'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
@@ -131,6 +132,7 @@ export function StockCartonWizard({ onClassic, onClose }: { onClassic: () => voi
           <Field label="نام جنس *">
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً اسکچرز" />
           </Field>
+          <DuplicateNameHint name={name} />
           <div className="grid grid-cols-2 gap-2">
             <Field label="برند">
               <input className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)} />
