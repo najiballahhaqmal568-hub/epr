@@ -111,7 +111,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 353 checks in 50 scenarios
+npm test          # tests/checks.ts — currently 364 checks in 51 scenarios
 ```
 
 ```bash

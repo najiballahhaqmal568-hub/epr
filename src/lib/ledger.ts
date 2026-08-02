@@ -12,6 +12,8 @@ export interface LedgerRow {
   date: number
   label: string
   note?: string
+  /** کدام بوت — «کوهستان ۴۲ سیاه ×۲» */
+  items?: string
   /** اثر این سند بر عدد نهایی */
   delta: number
   /** عدد بعد از این سند */
@@ -39,11 +41,21 @@ export function buildCashLedger(movements: CashMovement[], labelOf: (t: CashMove
 }
 
 /**
+ * نامِ اجناس یک سند — «کوهستان ۴۲ سیاه ×۲، بامیان ۴۰ خاکی ×۱».
+ * یک تعریف، تا دفتر شخص و دفتر خانواده هرگز فرق نکنند.
+ */
+export function itemsLabel(lines: { productName: string; size: string; color: string; qty: number }[]): string {
+  return lines
+    .map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ').trim())
+    .join('، ')
+}
+
+/**
  * دفتر حساب یک مشتری: قرض بعد از هر سند.
  * مثبت = مشتری به ما قرضدار است.
  */
 export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns: ReturnDoc[]): LedgerRow[] {
-  type Ev = { key: string; date: number; label: string; note?: string; delta: number }
+  type Ev = { key: string; date: number; label: string; note?: string; items?: string; delta: number }
   const events: Ev[] = []
 
   for (const s of sales) {
@@ -54,6 +66,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       date: s.date,
       label: credit > 0 ? 'فروش قرضی' : 'پرداخت اضافی در فروش',
       note: `فاکتور ${fmtNum(s.total)} — نقد ${fmtNum(s.paid)}`,
+      items: itemsLabel(s.lines),
       delta: credit
     })
   }
@@ -77,6 +90,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       date: r.date,
       label: 'مرجوعی — کم شدن از قرض',
       note: r.reason,
+      items: itemsLabel(r.lines),
       delta: -r.amount
     })
   }

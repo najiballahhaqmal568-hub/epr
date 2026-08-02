@@ -111,9 +111,22 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         <div key={r.key} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="font-bold text-slate-800">{r.label}</p>
+              {/* بوت اول می‌آید — «از بابت چه قرضدار است» */}
+              {r.items ? (
+                <>
+                  <p className="font-bold text-slate-800">{r.items}</p>
+                  <p className="text-xs text-slate-500">
+                    {r.label}
+                    {r.note ? ` · ${r.note}` : ''}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-slate-800">{r.label}</p>
+                  {r.note && <p className="truncate text-xs text-slate-500">{r.note}</p>}
+                </>
+              )}
               <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
-              {r.note && <p className="truncate text-xs text-slate-500">{r.note}</p>}
             </div>
             <div className="shrink-0 text-left">
               <p className={`font-bold ${r.delta > 0 ? 'text-red-600' : 'text-teal-700'}`}>

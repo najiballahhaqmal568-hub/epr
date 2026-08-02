@@ -1767,6 +1767,69 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       for (const a of adjustments) await applyDocEffects('adjustments', a as unknown as Record<string, unknown>, false)
       eq('موبایل نو همان ۲۰ را می‌سازد', (await db.variants.get(vId))!.stockQty, 20)
     }
+  },
+  {
+    name: 'قرض پرچون — از بابت کدام بوت و کدام تاریخ',
+    run: async () => {
+      const supId = await newSupplier()
+      const cId = await newCustomer('کریم')
+      await seedCash(100000)
+      const pid = (await db.products.add({ name: 'کوهستان', createdAt: Date.now() })) as number
+      const v42 = await addVariant(
+        { productId: pid, size: '42', color: 'سیاه', purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, stockQty: 20, lowStock: 2 },
+        'کوهستان'
+      )
+      const v40 = await addVariant(
+        { productId: pid, size: '40', color: 'خاکی', purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, stockQty: 20, lowStock: 2 },
+        'کوهستان'
+      )
+
+      // قرض قبلی، بعد دو فروش قرضی از دو بوت مختلف، بعد یک پرداخت
+      await addOpeningDebt('customer', cId, 'کریم', 1000)
+      await addSale({
+        date: Date.parse('2026-05-10'),
+        customerId: cId,
+        customerName: 'کریم',
+        saleType: 'retail',
+        lines: [{ variantId: v42, productName: 'کوهستان', size: '42', color: 'سیاه', qty: 2, unitPrice: 900 }],
+        total: 1800,
+        paid: 0
+      })
+      await addSale({
+        date: Date.parse('2026-06-01'),
+        customerId: cId,
+        customerName: 'کریم',
+        saleType: 'retail',
+        lines: [{ variantId: v40, productName: 'کوهستان', size: '40', color: 'خاکی', qty: 1, unitPrice: 900 }],
+        total: 900,
+        paid: 400
+      })
+      await addPayment({ date: Date.parse('2026-06-05'), partyType: 'customer', partyId: cId, partyName: 'کریم', amount: 700 })
+
+      const sales = await db.sales.filter((x) => !x.deleted && x.customerId === cId).toArray()
+      const payments = await db.payments.filter((x) => !x.deleted && x.partyId === cId).toArray()
+      const rows = buildCustomerLedger(sales, payments, [])
+
+      eq('چهار سند در دفتر', rows.length, 4)
+      // هر فروش قرضی باید بگوید کدام بوت
+      const s1 = rows.find((r) => r.items?.includes('42'))!
+      is('بوت اول با سایز و رنگ و تعداد', s1.items, 'کوهستان 42 سیاه ×۲')
+      eq('قرضِ همان فروش', s1.delta, 1800)
+      is('تاریخش همان روز فروش است', s1.date, Date.parse('2026-05-10'))
+
+      const s2 = rows.find((r) => r.items?.includes('40'))!
+      is('بوت دوم', s2.items, 'کوهستان 40 خاکی ×۱')
+      eq('فقط باقی‌ماندهٔ آن فروش قرض شد', s2.delta, 500)
+
+      // قرض قبلی و پرداخت، بوت ندارند
+      is('قرض قبلی بوت ندارد', rows.find((r) => r.delta === 1000)!.items, undefined)
+      is('دریافت پول بوت ندارد', rows.find((r) => r.delta === -700)!.items, undefined)
+
+      // قرض نهایی: ۱٬۰۰۰ + ۱٬۸۰۰ + ۵۰۰ − ۷۰۰
+      eq('قرض نهایی دفتر', rows[rows.length - 1].balance, 2600)
+      eq('با عدد ذخیره‌شده هم برابر است', (await db.customers.get(cId))!.balance, 2600)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
   }
 ]
 

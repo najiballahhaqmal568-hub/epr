@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { itemsLabel } from '../../lib/ledger'
 import { db, type Customer } from '../../db'
-import { fmtNum, fmtMoney, fmtDate } from '../../lib/format'
+import { fmtMoney, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
 
 /** دفتر خانواده: قرض مجموعی + تاریخچهٔ همهٔ اعضا با جزئیات کامل */
@@ -34,7 +35,7 @@ export function FamilyDetail({
     events.push({
       date: s.date,
       who: nameOf.get(s.customerId!) ?? '',
-      label: s.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، '),
+      label: itemsLabel(s.lines),
       sub: `مجموع ${fmtMoney(s.total)} · نقد ${fmtMoney(s.paid)}`,
       amount: rem,
       red: rem > 0
