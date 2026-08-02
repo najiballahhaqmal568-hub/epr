@@ -33,6 +33,16 @@ Integer afghani only. `afn()` rounds at **every write boundary**; `allocate()`
 splits a total across weights by largest remainder so parts always sum to the
 whole. Never store fractional currency.
 
+### Attribution must be stored, never re-derived from a mutable field
+
+If a total accumulates across several calls (`landingCost`) but the field that
+says *who it belongs to* holds only the latest call (`landingVia`), then any
+rule that reads "the whole total belongs to whoever `via` names" is wrong the
+moment a second call uses a different `via`. Store the attributed portion
+explicitly (`landingSarrafAmount`) and expose **one shared reader**
+(`landingSarrafOwed()` in `src/db.ts`) that all three places import — a shared
+reader is the only thing that actually prevents the three from drifting.
+
 ### Derived values are never synced as absolutes
 
 `variant.stockQty`, `customer.balance`, `supplier.balance` are **rebuilt from
@@ -71,6 +81,22 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 npm run build     # tsc -b + vite build, must be clean
 npm test          # tests/checks.ts — currently 296 checks in 43 scenarios
 ```
+
+```bash
+npm run fuzz -- 20 200        # 20 random shops × 200 operations each
+npm run fuzz -- 5 150 42      # runs, steps, starting seed — seeds are reproducible
+```
+
+The fuzzer (`tests/fuzz.ts`) drives random shop operations and after **every
+step** asserts four rules: `integrity.ts` agrees with the stored numbers, a
+full document replay through `sync.ts` rebuilds the *same* numbers, no stock or
+cash box goes negative, and every amount is a whole afghani. It found the
+landing-cost attribution bug that 43 hand-written scenarios missed. Failures
+print the seed, step, and last operations, so they replay exactly.
+
+Before trusting a green fuzz run, prove the loop can still go **red** — break a
+rule on purpose (e.g. change the purchase stock rule in `sync.ts`) and confirm
+it fails within a few steps.
 
 `npm test` runs the real ops against a real IndexedDB in headless Chromium.
 Every change to `src/lib/ops.ts` needs a scenario. When a test disagrees with

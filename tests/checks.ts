@@ -1510,6 +1510,30 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('سایز فروخته‌شده باید شمرده شود', ids.has(sold), true)
       is('سایز حرکت‌نکرده لازم نیست شمرده شود', ids.has(untouched), false)
     }
+  },
+  {
+    name: 'مصارف رسیدن دو بار — یک بار نقد، یک بار از صراف',
+    run: async () => {
+      const supId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
+      const vId = await makeVariant()
+      await seedCash(100000)
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+
+      // اول ۱٬۰۰۰ نقد، بعد ۴۰۰ از طریق صراف — روی همان خرید
+      await addLandingCost([pid], 1000, 'cash')
+      await addLandingCost([pid], 400, 'sarraf', { id: sarrafId, name: 'صراف' })
+
+      // فقط ۴۰۰ قرض صراف است، نه مجموع ۱٬۴۰۰
+      eq('قرض ما به صراف فقط بخش خودش است', (await db.suppliers.get(sarrafId))!.balance, 400)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // و موبایل نو هم باید همان ۴۰۰ را بسازد
+      const purchases = await db.purchases.filter((p) => !p.deleted).toArray()
+      await db.suppliers.update(sarrafId, { balance: 0 })
+      for (const p of purchases) await applyDocEffects('purchases', p as unknown as Record<string, unknown>, false)
+      eq('موبایل نو هم همان ۴۰۰ را می‌سازد', (await db.suppliers.get(sarrafId))!.balance, 400)
+    }
   }
 ]
 

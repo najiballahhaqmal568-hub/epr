@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Sale, type Purchase, type Payment, type Adjustment, type ReturnDoc } from '../db'
+import { db, syncFlags, newUuid, SYNC_TABLES, landingSarrafOwed, type SyncTable, type Sale, type Purchase, type Payment, type Adjustment, type ReturnDoc } from '../db'
 import { getSupa, getProfile } from './supa'
 
 /** نام جدول‌ها در سرور (snake_case) */
@@ -170,7 +170,7 @@ export async function applyDocEffects(table: SyncTable, rec: Record<string, unkn
     if (remainder > 0) await bump('suppliers', p.supplierId, 'balance', remainder * sign)
     if (hawala > 0) await bump('suppliers', p.sarrafId, 'balance', hawala * sign)
     // مصارف رسیدن از طریق صراف — قرض ما به صراف زیاد می‌شود
-    const landing = p.landingVia === 'sarraf' ? (p.landingCost ?? 0) : 0
+    const landing = landingSarrafOwed(p)
     if (landing > 0) await bump('suppliers', p.landingSarrafId, 'balance', landing * sign)
   } else if (table === 'payments') {
     const p = rec as unknown as Payment
@@ -279,7 +279,7 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
               const v = await db.variants.where('id').equals(l.variantId).first()
               if (v) await db.variants.update(l.variantId, { purchasePrice: v.purchasePrice + perPair })
             }
-            const deltaSarraf = inc.landingVia === 'sarraf' ? newLanding - oldLanding : 0
+            const deltaSarraf = landingSarrafOwed(inc as unknown as Purchase) - landingSarrafOwed(existing as Purchase)
             if (deltaSarraf > 0 && typeof inc.landingSarrafId === 'number') {
               const sf = await db.suppliers.get(inc.landingSarrafId)
               if (sf) await db.suppliers.update(inc.landingSarrafId, { balance: sf.balance + deltaSarraf })
@@ -292,7 +292,8 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
             landingVia: inc.landingVia,
             landingPaid: inc.landingPaid,
             landingSarrafId: inc.landingSarrafId,
-            landingSarrafName: inc.landingSarrafName
+            landingSarrafName: inc.landingSarrafName,
+            landingSarrafAmount: inc.landingSarrafAmount
           })
         }
       }

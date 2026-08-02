@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <title>آزمایش تصادفی حساب‌ها</title>
+    <style>
+      body { font-family: monospace; background: #0f172a; color: #e2e8f0; padding: 16px; line-height: 1.9; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <pre id="out">در حال اجرا…</pre>
+    <script type="module">
+      // محافظ: این صفحه دیتابیس را پاک می‌کند، پس فقط روی کمپیوتر توسعه اجرا شود
+      const local = ['localhost', '127.0.0.1', ''].includes(location.hostname)
+      if (!local) {
+        document.getElementById('out').textContent = 'این صفحهٔ آزمایش فقط روی کمپیوتر توسعه اجرا می‌شود.'
+        window.FUZZ_FAIL = -1
+      } else {
+        const q = new URLSearchParams(location.search)
+        const from = Number(q.get('from') ?? 1)
+        const runs = Number(q.get('runs') ?? 20)
+        const steps = Number(q.get('steps') ?? 120)
+        const { runFuzz } = await import('/tests/fuzz.ts')
+        const out = document.getElementById('out')
+        let failure = null
+        for (let i = 0; i < runs && !failure; i++) {
+          const seed = from + i
+          out.textContent = `seed ${seed} (${i + 1}/${runs}) × ${steps} قدم…`
+          failure = await runFuzz(seed, steps)
+        }
+        const report = failure
+          ? [
+              `❌ قانون شکست: ${failure.rule}`,
+              `   seed=${failure.seed}  قدم=${failure.step}  عملیات=${failure.op}`,
+              `   ${failure.detail}`,
+              '',
+              'آخرین قدم‌ها:',
+              ...failure.log.map((l) => '   ' + l)
+            ].join('\n')
+          : `✅ هیچ قانونی نشکست — ${runs} دکان تصادفی × ${steps} قدم (seed ${from}..${from + runs - 1})`
+        out.textContent = report
+        window.FUZZ_REPORT = report
+        window.FUZZ_FAIL = failure ? 1 : 0
+      }
+    </script>
+  </body>
+</html>

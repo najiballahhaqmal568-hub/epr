@@ -133,6 +133,22 @@ export interface Purchase extends Synced {
   landingPaid?: boolean
   /** بخشی از مصارف رسیدن که هنوز پرداخت نشده (حالت «بعداً») */
   landingUnpaid?: number
+  /**
+   * بخشی از مصارف رسیدن که از طریق صراف پرداخت شده — جمع می‌شود.
+   * `landingCost` مجموع همهٔ دفعات است و `landingVia` فقط آخرین دفعه را نگه می‌دارد،
+   * پس اگر یک خرید هم نقد و هم از صراف مصارف بگیرد، از روی آن دو نمی‌توان
+   * فهمید چقدرش قرضِ صراف است. این عدد همان را جدا نگه می‌دارد.
+   */
+  landingSarrafAmount?: number
+}
+
+/**
+ * قرض ما به صراف بابت مصارف رسیدنِ یک خرید.
+ * هر سه جا (ops، sync، integrity) باید از همین یک تابع بخوانند تا فرق نکنند.
+ * خریدهای قدیمی این عدد را ندارند؛ برای آن‌ها همان قاعدهٔ قبلی به کار می‌رود.
+ */
+export function landingSarrafOwed(p: Purchase): number {
+  return p.landingSarrafAmount ?? (p.landingVia === 'sarraf' ? (p.landingCost ?? 0) : 0)
 }
 
 export interface Payment extends Synced {

@@ -235,7 +235,14 @@ export async function addLandingCost(
         landingUnpaid: unpaidAfter,
         landingVia: via,
         landingPaid: unpaidAfter <= 0,
-        ...(via === 'sarraf' && sarraf ? { landingSarrafId: sarraf.id, landingSarrafName: sarraf.name } : {})
+        ...(via === 'sarraf' && sarraf
+          ? {
+              landingSarrafId: sarraf.id,
+              landingSarrafName: sarraf.name,
+              // فقط بخشِ صراف جمع می‌شود — نه مجموع مصارف رسیدن
+              landingSarrafAmount: (p.landingSarrafAmount ?? 0) + share
+            }
+          : { landingSarrafAmount: p.landingSarrafAmount ?? 0 })
       })
     }
 

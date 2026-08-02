@@ -5,7 +5,7 @@
  * قاعده‌های بازسازی دقیقاً همان قاعده‌هایی است که همگام‌سازی
  * (applyDocEffects در lib/sync.ts) هنگام پخش اسناد بین موبایل‌ها به کار می‌برد.
  */
-import { db, type Adjustment, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
+import { db, landingSarrafOwed, type Adjustment, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
 
 export interface Mismatch {
   kind: 'variant' | 'customer' | 'supplier'
@@ -76,7 +76,7 @@ export function computeSupplierBalances(purchases: Purchase[], payments: Payment
     if (remainder > 0) add(p.supplierId, remainder)
     if (hawala > 0) add(p.sarrafId, hawala)
     // مصارف رسیدن از طریق صراف — قرض ما به صراف
-    if (p.landingVia === 'sarraf') add(p.landingSarrafId, p.landingCost ?? 0)
+    add(p.landingSarrafId, landingSarrafOwed(p))
   }
   for (const p of payments) {
     if (p.partyType !== 'supplier') continue
