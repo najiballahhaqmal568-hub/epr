@@ -1,6 +1,7 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
-import { db, makeSku, type PurchaseLine, type Product, type Variant } from '../../db'
+import { db, type PurchaseLine, type Product, type Variant } from '../../db'
+import { addVariant } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls } from '../../components/ui'
 
@@ -93,17 +94,19 @@ export function CartonWizardModal({
           if (existing) vid = existing.id!
         }
         if (vid === undefined) {
-          vid = (await db.variants.add({
-            productId: pid,
-            size,
-            color: rColor,
-            purchasePrice: unitCost,
-            retailPrice: parseNum(retail) || first?.retailPrice || 0,
-            wholesalePrice: parseNum(wholesale) || parseNum(retail) || first?.wholesalePrice || 0,
-            stockQty: 0,
-            lowStock: first?.lowStock ?? 2
-          })) as number
-          await db.variants.update(vid, { sku: makeSku(vid, size) })
+          // موجودی صفر — جنس با خودِ سند خرید وارد گدام می‌شود
+          vid = await addVariant(
+            {
+              productId: pid,
+              size,
+              color: rColor,
+              purchasePrice: unitCost,
+              retailPrice: parseNum(retail) || first?.retailPrice || 0,
+              wholesalePrice: parseNum(wholesale) || parseNum(retail) || first?.wholesalePrice || 0,
+              lowStock: first?.lowStock ?? 2
+            },
+            name.trim()
+          )
         }
         items.push({ size, color: rColor, qty: per })
         lines.push({ variantId: vid, productName: name.trim(), size, color: rColor, qty: per * nCartons, unitCost })

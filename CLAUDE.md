@@ -79,6 +79,13 @@ A purchase bumps stock **only when `received === undefined`**. Creating a
 purchase already marked `received: true` is refused, because such a row's stock
 would come from neither the purchase nor a receive adjustment.
 
+### Creating stock
+
+`ops.addVariant()` and `ops.setOpeningStock()` are the only ways a component may
+put stock into a variant. Both write the adjustment document, refuse a negative
+quantity, assign the `sku`, and rebuild costs. Never write `stockQty` straight
+from a form — three forms used to do that and none of them got the guard.
+
 ### Moving stock without breaking the books
 
 Any operation that shifts quantity between variants (e.g. merging duplicate
@@ -104,7 +111,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 340 checks in 49 scenarios
+npm test          # tests/checks.ts — currently 353 checks in 50 scenarios
 ```
 
 ```bash

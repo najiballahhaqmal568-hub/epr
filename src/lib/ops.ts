@@ -1,5 +1,5 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
-import { db, makeSku, landingUnpaidOf, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
+import { db, makeSku, landingUnpaidOf, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -589,6 +589,57 @@ export interface StocktakeResult {
 }
 
 /** شمارش فزیکی گدام: اختلاف هر جنس به شکل سند تصحیح ثبت می‌شود */
+/**
+ * ساختن یک سایز نو. موجودی اولیه با سند ثبت می‌شود، نه با نوشتنِ مستقیمِ عدد —
+ * تا موبایل دوم همان عدد را بسازد و «کنترل حساب‌ها» راضی بماند.
+ */
+export async function addVariant(
+  data: Omit<Variant, 'id' | 'stockQty'> & { stockQty?: number },
+  productName = ''
+): Promise<number> {
+  return db.transaction('rw', [db.variants, db.adjustments, db.products, db.sales, db.purchases, db.returns], async () => {
+    const opening = afn(data.stockQty ?? 0)
+    if (opening < 0) throw new Error('موجودی اولیه منفی نمی‌شود')
+    const id = (await db.variants.add({ ...data, stockQty: 0 })) as number
+    await db.variants.update(id, { sku: makeSku(id, data.size) })
+    if (opening !== 0) await setOpeningStock(id, opening, productName)
+    return id
+  })
+}
+
+/**
+ * گذاشتن موجودی یک سایز روی عددِ شمرده‌شده — با سند تعدیل، نه با نوشتنِ عدد.
+ * همان کاری که «شمارش گدام» می‌کند، ولی برای یک سایز.
+ */
+export async function setOpeningStock(variantId: number, counted: number, productName = ''): Promise<void> {
+  const qty = afn(counted)
+  if (qty < 0) throw new Error('موجودی منفی نمی‌شود')
+  return db.transaction('rw', [db.variants, db.adjustments, db.products, db.sales, db.purchases, db.returns], async () => {
+    const v = await db.variants.get(variantId)
+    if (!v || v.deleted) throw new Error('جنس یافت نشد')
+    const delta = qty - v.stockQty
+    if (delta === 0) return
+    const p = await db.products.get(v.productId)
+    await db.variants.update(variantId, {
+      stockQty: qty,
+      ...(delta > 0 ? { lastPurchaseAt: Date.now() } : {})
+    })
+    await db.adjustments.add({
+      date: Date.now(),
+      variantId,
+      productName: productName || p?.name || '',
+      size: v.size,
+      color: v.color,
+      qtyChange: delta,
+      reason: 'correction',
+      note: v.stockQty === 0 && delta > 0 ? 'موجودی اولیه' : 'تصحیح از فورم گدام',
+      // قیمت با سند می‌رود تا بازسازیِ قیمت هم به همان عدد برسد
+      ...(delta > 0 ? { unitCost: v.purchasePrice } : {})
+    })
+    await applyRebuiltCosts()
+  })
+}
+
 export async function applyStocktake(entries: { variantId: number; counted: number }[]): Promise<StocktakeResult> {
   const stamp = `شمارش گدام ${new Intl.DateTimeFormat('fa-AF', { dateStyle: 'short' }).format(Date.now())}`
   return db.transaction('rw', db.variants, db.adjustments, db.products, async () => {

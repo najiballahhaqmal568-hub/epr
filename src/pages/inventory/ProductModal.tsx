@@ -1,6 +1,7 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
-import { db, makeSku, type Product, type Variant } from '../../db'
+import { db, type Product, type Variant } from '../../db'
+import { addVariant, setOpeningStock } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { emptyVariant, downscalePhoto, type VariantForm } from './helpers'
@@ -82,67 +83,43 @@ export function ProductModal({
     const valid = forms.filter((f) => f.size.trim())
     if (!valid.length) return setError('حداقل یک سایز اضافه کنید')
     try {
-      await db.transaction('rw', db.products, db.variants, db.adjustments, async () => {
-        let productId = product?.id
-        const cartonItems = valid
-          .filter((f) => parseNum(f.cartonQty) > 0)
-          .map((f) => ({ size: f.size.trim(), color: f.color.trim(), qty: parseNum(f.cartonQty) }))
-        const carton = cartonItems.length
-          ? { ...(parseNum(cartonPrice) > 0 ? { price: parseNum(cartonPrice) } : {}), items: cartonItems }
-          : undefined
-        const pData = { name: name.trim(), brand: brand.trim(), category: category.trim(), photo, carton }
-        if (productId) {
-          await db.products.update(productId, pData)
+      let productId = product?.id
+      const cartonItems = valid
+        .filter((f) => parseNum(f.cartonQty) > 0)
+        .map((f) => ({ size: f.size.trim(), color: f.color.trim(), qty: parseNum(f.cartonQty) }))
+      const carton = cartonItems.length
+        ? { ...(parseNum(cartonPrice) > 0 ? { price: parseNum(cartonPrice) } : {}), items: cartonItems }
+        : undefined
+      const pData = { name: name.trim(), brand: brand.trim(), category: category.trim(), photo, carton }
+      if (productId) await db.products.update(productId, pData)
+      else productId = (await db.products.add({ ...pData, createdAt: Date.now() })) as number
+
+      const keptIds = new Set(valid.map((f) => f.id).filter(Boolean))
+      for (const v of variants) if (!keptIds.has(v.id)) await db.variants.update(v.id!, { deleted: true })
+
+      for (const f of valid) {
+        const data = {
+          productId: productId!,
+          size: f.size.trim(),
+          color: f.color.trim(),
+          purchasePrice: parseNum(f.purchasePrice),
+          retailPrice: parseNum(f.retailPrice),
+          wholesalePrice: parseNum(f.wholesalePrice),
+          stockQty: parseNum(f.stockQty),
+          lowStock: parseNum(f.lowStock)
+        }
+        if (f.id) {
+          const { stockQty, ...rest } = data
+          await db.variants.update(f.id, rest)
+          // موجودی همیشه با سند تعدیل عوض می‌شود، نه با نوشتنِ مستقیمِ عدد
+          await setOpeningStock(f.id, stockQty, name.trim())
         } else {
-          productId = (await db.products.add({ ...pData, createdAt: Date.now() })) as number
+          await addVariant(data, name.trim())
         }
-        const keptIds = new Set(valid.map((f) => f.id).filter(Boolean))
-        for (const v of variants) {
-          if (!keptIds.has(v.id)) await db.variants.update(v.id!, { deleted: true })
-        }
-        for (const f of valid) {
-          const data = {
-            productId: productId!,
-            size: f.size.trim(),
-            color: f.color.trim(),
-            purchasePrice: parseNum(f.purchasePrice),
-            retailPrice: parseNum(f.retailPrice),
-            wholesalePrice: parseNum(f.wholesalePrice),
-            stockQty: parseNum(f.stockQty),
-            lowStock: parseNum(f.lowStock)
-          }
-          // تغییر موجودی از فورم به شکل سند تعدیل ثبت می‌شود تا بین دستگاه‌ها درست همگام شود
-          const baselineDoc = (variantId: number, delta: number, note: string) =>
-            db.adjustments.add({
-              date: Date.now(),
-              variantId,
-              productName: name.trim(),
-              size: data.size,
-              color: data.color,
-              qtyChange: delta,
-              reason: 'correction',
-              note
-            })
-          if (f.id) {
-            const prev = variants.find((v) => v.id === f.id)
-            await db.variants.update(f.id, data)
-            const delta = data.stockQty - (prev?.stockQty ?? 0)
-            if (delta !== 0) await baselineDoc(f.id, delta, 'تصحیح از فورم بوت')
-            // جنس نو وارد گدام شد — تاریخ ورود تازه می‌شود
-            if (delta > 0) await db.variants.update(f.id, { lastPurchaseAt: Date.now() })
-          } else {
-            const vid = (await db.variants.add(data)) as number
-            await db.variants.update(vid, { sku: makeSku(vid, data.size) })
-            if (data.stockQty !== 0) {
-              await baselineDoc(vid, data.stockQty, 'موجودی اولیه')
-              await db.variants.update(vid, { lastPurchaseAt: Date.now() })
-            }
-          }
-        }
-      })
+      }
       onClose()
     } catch (e) {
-      setError(String(e))
+      setError(e instanceof Error ? e.message : String(e))
     }
   }
 

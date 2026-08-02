@@ -1,6 +1,7 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
-import { db, makeSku } from '../../db'
+import { db } from '../../db'
+import { addVariant } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls } from '../../components/ui'
 import { downscalePhoto } from './helpers'
@@ -54,44 +55,30 @@ export function StockCartonWizard({ onClassic, onClose }: { onClassic: () => voi
 
   async function confirm() {
     try {
-      await db.transaction('rw', db.products, db.variants, db.adjustments, async () => {
-        const items = activeRows.map((r) => ({ size: r.size.trim(), color: color.trim(), qty: parseNum(r.qty) }))
-        const pid = (await db.products.add({
-          name: name.trim(),
-          brand: brand.trim(),
-          photo,
-          carton: { items },
-          createdAt: Date.now()
-        })) as number
-        for (const it of items) {
-          const stock = it.qty * nCartons
-          const vid = (await db.variants.add({
+      const items = activeRows.map((r) => ({ size: r.size.trim(), color: color.trim(), qty: parseNum(r.qty) }))
+      const pid = (await db.products.add({
+        name: name.trim(),
+        brand: brand.trim(),
+        photo,
+        carton: { items },
+        createdAt: Date.now()
+      })) as number
+      for (const it of items) {
+        // موجودی اولیه با سند ثبت می‌شود — همان راهی که فورم بوت هم می‌رود
+        await addVariant(
+          {
             productId: pid,
             size: it.size,
             color: it.color,
             purchasePrice: parseNum(cost),
             retailPrice: parseNum(retail),
             wholesalePrice: parseNum(wholesale) || parseNum(retail),
-            stockQty: stock,
-            lowStock: 2,
-            // تاریخ ورود به گدام — برای سن جنس
-            ...(stock > 0 ? { lastPurchaseAt: Date.now() } : {})
-          })) as number
-          await db.variants.update(vid, { sku: makeSku(vid, it.size) })
-          if (stock !== 0) {
-            await db.adjustments.add({
-              date: Date.now(),
-              variantId: vid,
-              productName: name.trim(),
-              size: it.size,
-              color: it.color,
-              qtyChange: stock,
-              reason: 'correction',
-              note: 'موجودی اولیه'
-            })
-          }
-        }
-      })
+            stockQty: it.qty * nCartons,
+            lowStock: 2
+          },
+          name.trim()
+        )
+      }
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

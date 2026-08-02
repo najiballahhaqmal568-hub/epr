@@ -21,6 +21,8 @@ import {
   addPayment,
   addOpeningDebt,
   addAdjustment,
+  addVariant,
+  setOpeningStock,
   addCapital,
   addPartnerWithdrawal,
   reconcile,
@@ -799,19 +801,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const cId = await newCustomer()
       const v1 = await makeVariant()
       const v2 = await makeVariant({ size: '43' })
-      // موجودی اولیه — عیناً مثل فورم گدام: عدد + سند «موجودی اولیه»
-      const openStock = async (id: number, qty: number, cost: number, size: string) => {
-        await db.variants.update(id, { stockQty: qty, purchasePrice: cost, lastPurchaseAt: Date.now() })
-        await db.adjustments.add({
-          date: Date.now(),
-          variantId: id,
-          productName: 'اسپرتکس',
-          size,
-          color: 'سیاه',
-          qtyChange: qty,
-          reason: 'correction',
-          note: 'موجودی اولیه'
-        })
+      // همان تابعی که فورم گدام صدا می‌زند — نه کپیِ دستی از آن
+      const openStock = async (id: number, qty: number, cost: number, _size: string) => {
+        await db.variants.update(id, { purchasePrice: cost })
+        await setOpeningStock(id, qty, 'اسپرتکس')
       }
       await openStock(v1, 300, 550, '42') // ۱۶۵٬۰۰۰
       await openStock(v2, 120, 700, '43') // ۸۴٬۰۰۰
@@ -1732,6 +1725,47 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('سهم مالک ۷۰٪ = ۲٬۸۰۰', after.find((p) => p.name === 'مالک')!.capital!, 82800)
       eq('مجموع سرمایه‌ها = دارایی، پس سال نو با مفاد صفر شروع می‌شود', await totalCapital(), (await netWorth()).assets)
       is('تاریخ سال نو ثبت شد', Number((await db.settings.get('partnershipStart'))?.value ?? 0) > 0, true)
+    }
+  },
+  {
+    name: 'ثبت جنس و موجودی اولیه — همیشه با سند، و منفی رد می‌شود',
+    run: async () => {
+      const pid = (await db.products.add({ name: 'کوهستان', createdAt: Date.now() })) as number
+
+      // ساختن سایز با موجودی اولیه — عدد و سند با هم
+      const vId = await addVariant(
+        { productId: pid, size: '42', color: 'سیاه', purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, stockQty: 24, lowStock: 2 },
+        'کوهستان'
+      )
+      eq('موجودی ثبت شد', (await db.variants.get(vId))!.stockQty, 24)
+      const docs = await db.adjustments.filter((a) => a.variantId === vId).toArray()
+      eq('یک سند «موجودی اولیه» نوشته شد', docs.length, 1)
+      eq('سند همان تعداد را می‌گوید', docs[0].qtyChange, 24)
+      is('سند نامش «موجودی اولیه» است', docs[0].note, 'موجودی اولیه')
+      is('کد جنس ساخته شد', typeof (await db.variants.get(vId))!.sku, 'string')
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // اصلاح موجودی از فورم — باز هم سند می‌سازد، نه نوشتنِ مستقیم
+      await setOpeningStock(vId, 20, 'کوهستان')
+      eq('موجودی اصلاح شد', (await db.variants.get(vId))!.stockQty, 20)
+      eq('سند دوم هم نوشته شد', (await db.adjustments.filter((a) => a.variantId === vId).toArray()).length, 2)
+      is('کنترل حساب‌ها باز هم سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // محافظ — دیگر فقط در ظاهر فورم نیست
+      await throws('موجودی منفی رد می‌شود', () => setOpeningStock(vId, -5))
+      await throws('ساختن سایز با موجودی منفی رد می‌شود', () =>
+        addVariant(
+          { productId: pid, size: '44', color: 'سیاه', purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, stockQty: -3, lowStock: 2 },
+          'کوهستان'
+        )
+      )
+      eq('بعد از رد شدن، چیزی عوض نشد', (await db.variants.get(vId))!.stockQty, 20)
+
+      // موبایل نو هم همان عدد را می‌سازد
+      const adjustments = await db.adjustments.filter((a) => !a.deleted).toArray()
+      await db.variants.update(vId, { stockQty: 0 })
+      for (const a of adjustments) await applyDocEffects('adjustments', a as unknown as Record<string, unknown>, false)
+      eq('موبایل نو همان ۲۰ را می‌سازد', (await db.variants.get(vId))!.stockQty, 20)
     }
   }
 ]
