@@ -88,6 +88,11 @@ result and a second device will rebuild different numbers.
 
 ### Partnership accounting
 
+All of it lives in `src/lib/partnership.ts` — `startYear()`, `addPartner()`,
+`setPartnerCapital()`, `settleYear()`. Never write `capital`, `share`, or
+`partnershipStart` straight from a component: the guards and the transaction
+are in the module, and a UI-only guard is bypassed by every other path.
+
 The identity is `دارایی = سرمایه + مفاد − برداشت‌ها`. On the day the year starts,
 profit must be **exactly zero** — so the owner's capital is always computed as
 `دارایی خالص − سرمایهٔ شرکا`, never typed by hand. Any place that lets a human
@@ -99,7 +104,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 325 checks in 47 scenarios
+npm test          # tests/checks.ts — currently 340 checks in 49 scenarios
 ```
 
 ```bash

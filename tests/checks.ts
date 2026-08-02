@@ -44,6 +44,7 @@ import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/me
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { rebuildCosts } from '../src/lib/costing'
+import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -1659,6 +1660,78 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('پخش برعکس — جنس اول صفر', (await db.variants.get(v1))!.stockQty, 0)
       eq('پخش برعکس — قرض مشتری صفر', (await db.customers.get(cId))!.balance, 0)
       eq('پخش برعکس — قرض صراف صفر', (await db.suppliers.get(sarrafId))!.balance, 0)
+    }
+  },
+  {
+    name: 'شراکت — شروع سال با تابع واقعی اپ، نه کپیِ آزمایش',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(100000)
+      await addPurchase(buy(supId, vId, 100, 500, { paid: 50000 }))
+
+      // شریک ۲۰٬۰۰۰ گذاشته؛ دارایی خالص = ۵۰٬۰۰۰ نقد + ۵۰٬۰۰۰ گدام = ۱۰۰٬۰۰۰
+      const n = await netWorth()
+      eq('دارایی خالص', n.assets, 100000)
+
+      await addPartner({ name: 'شریک', capital: 20000, share: 30 })
+      const left = await remainingCapital()
+      eq('باقی‌مانده برای مالک', left, 80000)
+
+      await startYear('مالک')
+      const partners = await listPartners()
+      const owner = partners.find((p) => p.name === 'مالک')!
+      eq('سرمایهٔ مالک خودکار = باقی‌ماندهٔ دارایی', owner.capital!, 80000)
+      eq('فیصدی مالک = باقی‌ماندهٔ فیصدی', owner.share!, 70)
+      eq('مجموع فیصدی‌ها دقیقاً ۱۰۰', partners.reduce((s, p) => s + (p.share ?? 0), 0), 100)
+      eq('مجموع سرمایه‌ها = دارایی، پس مفاد روز اول صفر', await totalCapital(), 100000)
+
+      // محافظ‌ها — دیگر فقط در ظاهرِ فورم نیستند
+      await throws('سرمایهٔ بیشتر از دارایی رد می‌شود', () =>
+        addPartner({ name: 'زیادی', capital: 999999, share: 10 })
+      )
+      await throws('فیصدی که سهمی برای مالک نگذارد رد می‌شود', () =>
+        addPartner({ name: 'حریص', capital: 100, share: 95 })
+      )
+      await throws('اصلاح سرمایه به عددی بیشتر از دارایی رد می‌شود', () =>
+        setPartnerCapital(owner.id!, 500000)
+      )
+    }
+  },
+  {
+    name: 'شراکت — بستن سال اتمی است و سهم درست تقسیم می‌شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const cId = await newCustomer()
+      await seedCash(100000)
+      await addPurchase(buy(supId, vId, 100, 500, { paid: 50000 }))
+      await addPartner({ name: 'شریک', capital: 20000, share: 30 })
+      await startYear('مالک')
+      eq('مفاد روز اول صفر', (await netWorth()).assets - (await totalCapital()), 0)
+
+      // حالا ۱۰ جوړه به ۹۰۰ فروش نقدی → مفاد ۴٬۰۰۰
+      await addSale(sell(vId, 10, 900, { customerId: cId, customerName: 'مشتری' }))
+      const profit = (await netWorth()).assets - (await totalCapital())
+      eq('مفاد سال = ۱۰ × (۹۰۰ − ۵۰۰)', profit, 4000)
+
+      const partners = await listPartners()
+      const owner = partners.find((p) => p.name === 'مالک')!
+      const mate = partners.find((p) => p.name === 'شریک')!
+
+      // هر دو فایده را دوباره سرمایه می‌کنند → سرمایه‌ها زیاد و مفاد صفر می‌شود
+      await settleYear({
+        choices: { [owner.id!]: 'reinvest', [mate.id!]: 'reinvest' },
+        payCash: false,
+        yearProfit: profit,
+        withdrawnBy: () => 0
+      })
+
+      const after = await listPartners()
+      eq('سهم شریک ۳۰٪ = ۱٬۲۰۰', after.find((p) => p.name === 'شریک')!.capital!, 21200)
+      eq('سهم مالک ۷۰٪ = ۲٬۸۰۰', after.find((p) => p.name === 'مالک')!.capital!, 82800)
+      eq('مجموع سرمایه‌ها = دارایی، پس سال نو با مفاد صفر شروع می‌شود', await totalCapital(), (await netWorth()).assets)
+      is('تاریخ سال نو ثبت شد', Number((await db.settings.get('partnershipStart'))?.value ?? 0) > 0, true)
     }
   }
 ]

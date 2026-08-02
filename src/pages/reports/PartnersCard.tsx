@@ -3,8 +3,9 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../db'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
-import { addCapital, addPartnerWithdrawal, recordCapitalCash, afn } from '../../lib/ops'
+import { addCapital, addPartnerWithdrawal, afn } from '../../lib/ops'
 import { netWorth } from '../../lib/networth'
+import { addPartner, setPartnerCapital, settleYear, type SettleChoice } from '../../lib/partnership'
 import { parseNum } from '../../lib/format'
 import Row from './Row'
 
@@ -128,7 +129,11 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
                   className="mb-1 w-full rounded-lg bg-white px-3 py-2 text-right text-xs font-bold text-red-700"
                   onClick={async () => {
                     if (confirm(`سرمایهٔ «${p.name}» از ${fmtMoney(p.capital ?? 0)} به ${fmtMoney(correct)} اصلاح شود؟`))
-                      await db.suppliers.update(p.id!, { capital: correct })
+                      try {
+                        await setPartnerCapital(p.id!, correct)
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : String(e))
+                      }
                   }}
                 >
                   اصلاح سرمایهٔ «{p.name}» ← {fmtMoney(correct)}
@@ -200,11 +205,20 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
               (parseNum(capitalStr) > remainingCapital + 0.5 && !cashNow)
             }
             onClick={async () => {
-              await db.suppliers.add({ name: name.trim(), balance: 0, kind: 'partner', share: parseNum(share), capital: parseNum(capitalStr) })
-              if (cashNow) await recordCapitalCash(name.trim(), parseNum(capitalStr))
-              if (!start) await db.settings.put({ key: 'partnershipStart', value: Date.now() })
-              setCashNow(false)
-              setShowAdd(false)
+              try {
+                await addPartner({
+                  name,
+                  capital: parseNum(capitalStr),
+                  share: parseNum(share),
+                  bringsCash: cashNow
+                })
+                if (!start) await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+                setCashNow(false)
+                setShowAdd(false)
+                setError('')
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
             }}
           >
             ذخیره
@@ -306,7 +320,7 @@ function SettleModal({
   yearProfit: number
   onClose: () => void
 }) {
-  const [choices, setChoices] = useState<Record<number, 'take' | 'reinvest' | 'exit'>>({})
+  const [choices, setChoices] = useState<Record<number, SettleChoice>>({})
   const [payCash, setPayCash] = useState(true)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -316,24 +330,12 @@ function SettleModal({
 
   async function closeYear() {
     try {
-      for (const p of partners) {
-        const choice = choices[p.id!] ?? 'take'
-        const pay = payableOf(p)
-        if (choice === 'exit') {
-          const total = (p.capital ?? 0) + pay
-          if (payCash && total > 0) {
-            await addPartnerWithdrawal(p.name, total, 'تصفیهٔ خروج از شراکت')
-          }
-          await db.suppliers.update(p.id!, { deleted: true })
-        } else if (choice === 'reinvest') {
-          await db.suppliers.update(p.id!, { capital: Math.max(0, (p.capital ?? 0) + pay) })
-        } else {
-          // فقط فایده برداشت — نقص از سرمایه کم می‌شود
-          if (pay > 0 && payCash) await addPartnerWithdrawal(p.name, pay, 'سهم فایدهٔ سال')
-          if (pay < 0) await db.suppliers.update(p.id!, { capital: Math.max(0, (p.capital ?? 0) + pay) })
-        }
-      }
-      await db.settings.put({ key: 'partnershipStart', value: Date.now() + 1000 })
+      await settleYear({
+        choices,
+        payCash,
+        yearProfit,
+        withdrawnBy: wSince
+      })
       setDone(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -378,7 +380,7 @@ function SettleModal({
             <select
               className={inputCls + ' mt-2'}
               value={choices[p.id!] ?? 'take'}
-              onChange={(e) => setChoices((c) => ({ ...c, [p.id!]: e.target.value as 'take' | 'reinvest' | 'exit' }))}
+              onChange={(e) => setChoices((c) => ({ ...c, [p.id!]: e.target.value as SettleChoice }))}
             >
               <option value="take">فایده را برمی‌دارد (سرمایه می‌ماند)</option>
               <option value="reinvest">فایده دوباره سرمایه‌گذاری شود</option>

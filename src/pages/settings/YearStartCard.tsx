@@ -5,6 +5,7 @@ import { fmtNum, fmtMoney, fmtDateShort, parseNum } from '../../lib/format'
 import { Card, Field, inputCls, PrimaryBtn, Modal } from '../../components/ui'
 import { afn } from '../../lib/ops'
 import { netWorth } from '../../lib/networth'
+import { startYear, addPartner, removePartner } from '../../lib/partnership'
 
 /**
  * شروع سال مالی: سرمایهٔ مالک را خودش حساب می‌کند تا مفاد روز اول دقیقاً صفر باشد.
@@ -60,19 +61,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
 
   async function finish() {
     try {
-      const name = ownerName.trim()
-      if (!name) return setError('نام خود را بنویسید')
-      if (ownerCapital < 0) return setError('سرمایهٔ شما منفی می‌شود — اعداد گدام و قرض‌ها را دوباره ببینید')
-      // سهم مالک همیشه باقی‌ماندهٔ فیصدی شرکاست — پس مجموع دقیقاً ۱۰۰٪ می‌شود
-      const share = 100 - othersShare
-      if (share < 0) return setError('مجموع فیصدی شرکا بیشتر از ۱۰۰٪ شده')
-      const existing = nums!.partners.find((p) => p.name === name)
-      if (existing) {
-        await db.suppliers.update(existing.id!, { capital: ownerCapital, share, kind: 'partner' })
-      } else {
-        await db.suppliers.add({ name, balance: 0, kind: 'partner', capital: ownerCapital, share })
-      }
-      await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+      await startYear(ownerName)
       setDone(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -171,7 +160,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
                     <button
                       className="text-red-500"
                       onClick={async () => {
-                        if (confirm(`${p.name} از شرکا حذف شود؟`)) await db.suppliers.update(p.id!, { deleted: true })
+                        if (confirm(`${p.name} از شرکا حذف شود؟`)) await removePartner(p.id!)
                       }}
                     >
                       ✕
@@ -227,17 +216,16 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
                     disabled={!pName.trim() || parseNum(pCapital) <= 0 || parseNum(pCapital) > assets - othersCapital}
                     onClick={async () => {
                       try {
-                        await db.suppliers.add({
-                          name: pName.trim(),
-                          balance: 0,
-                          kind: 'partner',
-                          capital: afn(parseNum(pCapital)),
+                        await addPartner({
+                          name: pName,
+                          capital: parseNum(pCapital),
                           share: parseNum(pShare)
                         })
                         setPName('')
                         setPCapital('')
                         setPShare('')
                         setAddingPartner(false)
+                        setError('')
                       } catch (e) {
                         setError(e instanceof Error ? e.message : String(e))
                       }
