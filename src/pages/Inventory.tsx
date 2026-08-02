@@ -49,7 +49,7 @@ export default function Inventory() {
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
   // یک جنس که چند بار ثبت شده (کارتنی/جوړه‌ای/بوجی) — باید یکجا شود
   const dupGroups = findDuplicateGroups(products ?? [])
-  const dupNames = new Set(dupGroups.flatMap((g) => g.products.map((p) => p.id!)))
+  const dupIds = new Set(dupGroups.flatMap((g) => g.products.map((p) => p.id!)))
 
   return (
     <div className="p-4">
@@ -58,6 +58,10 @@ export default function Inventory() {
         <div className="flex gap-2">
           <button onClick={() => setShowStocktake(true)} className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-800">
             📋 شمارش
+          </button>
+          {/* همیشه در دسترس — چون نام‌های کاملاً متفاوت خودکار پیدا نمی‌شوند */}
+          <button onClick={() => setShowMerge(true)} className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-600">
+            🔗 یکجا کردن
           </button>
           <button onClick={() => setShowReorder(true)} className={`rounded-full px-3 py-1 text-sm font-bold ${reorderCount ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
             خرید مجدد {reorderCount > 0 && `(${fmtNum(reorderCount)})`}
@@ -100,7 +104,7 @@ export default function Inventory() {
                 <div className="flex-1">
                   <p className="font-bold text-slate-800">
                     {p.name}
-                    {dupNames.has(p.id!) && <span className="mr-1 text-xs font-normal text-amber-600">🔗 تکراری</span>}
+                    {dupIds.has(p.id!) && <span className="mr-1 text-xs font-normal text-amber-600">🔗 تکراری</span>}
                   </p>
                   <p className="text-sm text-slate-500">
                     {p.brand} {p.category && `· ${p.category}`}

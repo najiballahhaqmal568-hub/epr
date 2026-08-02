@@ -12,6 +12,8 @@ import { findDuplicateGroups, mergeProducts, normalizeName } from '../../lib/mer
 export default function MergeProductsModal({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<{ key: string; keepId: number; withIds: number[] } | null>(null)
   const [manual, setManual] = useState(false)
+  // انتخاب دستی چند جنس — تا وقتی «ادامه» نزده‌اند به صفحهٔ تأیید نمی‌رویم
+  const [manualPicks, setManualPicks] = useState<number[]>([])
   const [search, setSearch] = useState('')
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
@@ -114,29 +116,55 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
         </>
       ) : manual ? (
         <>
-          <p className="mb-2 text-sm font-bold text-slate-700">دو یا چند جنس را خودتان انتخاب کنید</p>
+          <p className="mb-1 text-sm font-bold text-slate-700">دو یا چند جنس را خودتان انتخاب کنید</p>
+          <p className="mb-2 text-xs text-slate-500">
+            روی هر جنس بزنید تا انتخاب شود؛ دوباره بزنید تا لغو شود. حداقل دو جنس لازم است.
+          </p>
           <input className={inputCls} placeholder="جستجو نام..." value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="my-2 max-h-72 overflow-y-auto">
-            {manualList.map((p) => (
-              <button
-                key={p.id}
-                onClick={() =>
-                  setPicked((cur) =>
-                    cur === null
-                      ? { key: 'manual', keepId: p.id!, withIds: [] }
-                      : { ...cur, withIds: [...cur.withIds, p.id!] }
-                  )
-                }
-                className="mb-1 flex w-full items-center justify-between rounded-xl bg-slate-50 p-2.5 text-right"
-              >
-                {label(p)}
-                <span className="text-xs font-bold text-teal-700">انتخاب</span>
-              </button>
-            ))}
+            {manualList.map((p) => {
+              const on = manualPicks.includes(p.id!)
+              return (
+                <button
+                  key={p.id}
+                  onClick={() =>
+                    setManualPicks((cur) => (on ? cur.filter((x) => x !== p.id) : [...cur, p.id!]))
+                  }
+                  className={`mb-1 flex w-full items-center justify-between rounded-xl border-2 p-2.5 text-right ${
+                    on ? 'border-teal-600 bg-teal-50' : 'border-transparent bg-slate-50'
+                  }`}
+                >
+                  {label(p)}
+                  <span className="text-xs font-bold text-teal-700">{on ? '✓ انتخاب شد' : 'انتخاب'}</span>
+                </button>
+              )
+            })}
           </div>
-          <button onClick={() => setManual(false)} className="w-full rounded-xl bg-slate-100 py-2.5 text-sm font-bold text-slate-600">
-            ← برگشت
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setManual(false)
+                setManualPicks([])
+              }}
+              className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600"
+            >
+              ← برگشت
+            </button>
+            <div className="flex-1">
+              <PrimaryBtn
+                disabled={manualPicks.length < 2}
+                onClick={() => {
+                  // آن که بیشترین جوړه دارد پیش‌فرض می‌ماند — در قدم بعد قابل تغییر است
+                  const sorted = [...manualPicks].sort((a, b) => pairsOf(b) - pairsOf(a))
+                  setPicked({ key: 'manual', keepId: sorted[0], withIds: sorted.slice(1) })
+                  setManual(false)
+                  setManualPicks([])
+                }}
+              >
+                ادامه ({fmtNum(manualPicks.length)} جنس)
+              </PrimaryBtn>
+            </div>
+          </div>
         </>
       ) : (
         <>

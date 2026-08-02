@@ -10,6 +10,7 @@
  * مثبت به مقصد) تا کنترل حساب‌ها و همگام‌سازی موبایل‌های دیگر هم درست بماند.
  */
 import { db, type Product, type Variant } from '../db'
+import { afn } from './ops'
 
 /** کلمه‌هایی که فقط بسته‌بندی را می‌گویند، نه نام جنس را */
 const PACK_WORDS = new Set([
@@ -84,7 +85,8 @@ export interface MergeResult {
  * سایز+رنگ یکسان جمع می‌شود؛ سایز نو فقط جابه‌جا می‌شود (بدون تغییر موجودی).
  */
 export async function mergeProducts(targetId: number, sourceIds: number[]): Promise<MergeResult> {
-  const sources = sourceIds.filter((id) => id !== targetId)
+  // تکراری‌ها حذف می‌شوند — ورنه موجودی یک جنس دو بار جمع می‌شد
+  const sources = [...new Set(sourceIds)].filter((id) => id !== targetId)
   if (sources.length === 0) return { moved: 0, combined: 0, pairsBefore: 0, pairsAfter: 0 }
 
   const result: MergeResult = { moved: 0, combined: 0, pairsBefore: 0, pairsAfter: 0 }
@@ -112,36 +114,30 @@ export async function mergeProducts(targetId: number, sourceIds: number[]): Prom
           result.moved++
           continue
         }
-        // سایز تکراری — موجودی جمع می‌شود، با دو سند تا حساب‌ها درست بماند
+        // سایز تکراری — موجودی جمع می‌شود، با دو سند (منفی از مبدأ، مثبت به مقصد)
+        // تا کنترل حساب‌ها و موبایل دوم همان عدد را بسازند
         const qty = v.stockQty
         if (qty !== 0) {
           const note = `یکجا شدن با «${target.name}»`
-          await db.adjustments.add({
-            date: now,
-            variantId: v.id!,
-            productName: src?.name ?? '',
-            size: v.size,
-            color: v.color,
-            qtyChange: -qty,
-            reason: 'correction',
-            note
-          })
-          await db.adjustments.add({
-            date: now,
-            variantId: twin.id!,
-            productName: target.name,
-            size: twin.size,
-            color: twin.color,
-            qtyChange: qty,
-            reason: 'correction',
-            note
-          })
+          const move = (from: Variant, name: string, change: number) =>
+            db.adjustments.add({
+              date: now,
+              variantId: from.id!,
+              productName: name,
+              size: from.size,
+              color: from.color,
+              qtyChange: change,
+              reason: 'correction',
+              note
+            })
+          await move(v, src?.name ?? '', -qty)
+          await move(twin, target.name, qty)
         }
         // قیمت خرید: میانگین وزنی (اگر قیمت‌ها یکی باشد همان می‌ماند)
         const total = twin.stockQty + qty
         const price =
           total > 0 && twin.purchasePrice !== v.purchasePrice
-            ? Math.round((twin.stockQty * twin.purchasePrice + qty * v.purchasePrice) / total)
+            ? afn((twin.stockQty * twin.purchasePrice + qty * v.purchasePrice) / total)
             : twin.purchasePrice
         await db.variants.update(twin.id!, {
           stockQty: total,

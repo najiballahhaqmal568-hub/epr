@@ -1450,6 +1450,25 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // مهم‌ترین بررسی: عددهای ذخیره‌شده هنوز با اسناد جور است
       is('کنترل حساب‌ها بعد از یکجا کردن سالم', (await runIntegrityCheck()).mismatches.length, 0)
       eq('جنس تکراری دیگر نمانده', findDuplicateGroups(await db.products.filter((p) => !p.deleted).toArray()).length, 0)
+
+      // اگر یک جنس دو بار در لیست بیاید، نباید موجودی‌اش دو بار جمع شود
+      const pC = (await db.products.add({ name: 'بامیان', createdAt: Date.now() })) as number
+      const c42 = await mk(pC, '42', 30)
+      await db.adjustments.add({
+        date: Date.now(),
+        variantId: c42,
+        productName: 'بامیان',
+        size: '42',
+        color: 'سیاه',
+        qtyChange: 30,
+        reason: 'correction',
+        note: 'موجودی اولیه'
+      })
+      const beforeDup = (await db.variants.filter((v) => !v.deleted).toArray()).reduce((s, v) => s + v.stockQty, 0)
+      await mergeProducts(pA, [pC, pC, pC])
+      const afterDup = (await db.variants.filter((v) => !v.deleted).toArray()).reduce((s, v) => s + v.stockQty, 0)
+      eq('نام تکراری در لیست، موجودی را دو بار جمع نمی‌کند', afterDup, beforeDup)
+      is('کنترل حساب‌ها بعد از لیست تکراری سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {
@@ -1483,6 +1502,8 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       })
       const after = soldInPeriod(await db.sales.toArray(), await db.returns.toArray())
       eq('مرجوعی از فروش کم شد', after[0].qty, 4)
+      // ۴ جوړه × (۹۰۰ − ۵۰۰) = ۱٬۶۰۰ — قیمت خرید مرجوعی هم باید پس رفته باشد
+      eq('مفاد بعد از مرجوعی درست است', after[0].revenue - after[0].cost, 1600)
 
       // شمارش کوتاه: فقط همین سایزها
       const ids = soldVariantIds(await db.sales.toArray(), await db.returns.toArray())

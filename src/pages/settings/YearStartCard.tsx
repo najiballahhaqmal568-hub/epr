@@ -213,6 +213,12 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
                   </span>
                 </p>
               )}
+              {parseNum(pCapital) > assets - othersCapital && (
+                <p className="-mt-2 mb-3 rounded-lg bg-red-50 p-2 text-xs font-bold text-red-700">
+                  ⚠️ این مبلغ از دارایی خالص دکان ({fmtMoney(assets - othersCapital)}) بیشتر است — سرمایهٔ شریک نمی‌تواند
+                  از کل دارایی زیادتر باشد. اگر پول نو می‌آورد، اول آن را در «مصارف ← صندوق» ثبت کنید.
+                </p>
+              )}
               <Field label="فیصدی سهم او از مفاد (فیصدی خودتان را ننویسید) *">
                 <input className={inputCls} inputMode="numeric" value={pShare} onChange={(e) => setPShare(e.target.value)} />
               </Field>
@@ -231,7 +237,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
                 </button>
                 <div className="flex-1">
                   <PrimaryBtn
-                    disabled={!pName.trim() || parseNum(pCapital) <= 0}
+                    disabled={!pName.trim() || parseNum(pCapital) <= 0 || parseNum(pCapital) > assets - othersCapital}
                     onClick={async () => {
                       try {
                         await db.suppliers.add({

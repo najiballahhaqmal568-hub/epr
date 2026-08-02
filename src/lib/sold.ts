@@ -50,6 +50,8 @@ export function soldInPeriod(sales: Sale[], returns: ReturnDoc[] = []): SoldRow[
       if (!r) continue
       r.qty -= l.qty
       r.revenue -= l.qty * l.unitPrice
+      // قیمت خرید هم باید پس برود، ورنه «مفاد» کمتر از واقعیت نشان می‌دهد
+      r.cost -= l.qty * (l.unitCost ?? 0)
     }
   }
 
