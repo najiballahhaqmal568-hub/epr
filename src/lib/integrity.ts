@@ -6,7 +6,8 @@
  * (applyDocEffects در lib/sync.ts) هنگام پخش اسناد بین موبایل‌ها به کار می‌برد.
  */
 import { computeCosts } from './costing'
-import { db, landingSarrafOwed, type Adjustment, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
+import { foldEffects } from './effects'
+import { db, type Adjustment, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
 
 export interface Mismatch {
   kind: 'variant' | 'customer' | 'supplier' | 'cost'
@@ -24,68 +25,40 @@ export interface IntegrityReport {
   mismatches: Mismatch[]
 }
 
-/** موجودی مورد انتظار هر سایز، از روی اسناد */
+/**
+ * موجودی و بیلانس‌های مورد انتظار — همه از یک تعریف در lib/effects.ts.
+ * این سه تابع فقط پوستهٔ نازکی روی همان‌اند تا امضایشان عوض نشود.
+ */
 export function computeStock(
   sales: Sale[],
   purchases: Purchase[],
   adjustments: Adjustment[],
   returns: ReturnDoc[]
 ): Map<number, number> {
-  const out = new Map<number, number>()
-  const add = (id: number, n: number) => out.set(id, (out.get(id) ?? 0) + n)
-
-  for (const s of sales) for (const l of s.lines) add(l.variantId, -l.qty)
-  // خرید عادی موجودی می‌دهد؛ خرید «در راه» (چه رسیده و چه نرسیده) موجودی‌اش
-  // از سند تعدیلِ رسید می‌آید — تا دو بار شمرده نشود
-  for (const p of purchases) if (p.received === undefined) for (const l of p.lines) add(l.variantId, l.qty)
-  for (const a of adjustments) add(a.variantId, a.qtyChange)
-  for (const r of returns) {
-    if (r.kind === 'customer') {
-      for (const l of r.lines) if (l.restock) add(l.variantId, l.qty)
-    } else {
-      for (const l of r.lines) add(l.variantId, -l.qty)
-    }
-  }
-  return out
+  return foldEffects([
+    { table: 'sales', rows: sales },
+    { table: 'purchases', rows: purchases },
+    { table: 'adjustments', rows: adjustments },
+    { table: 'returns', rows: returns }
+  ]).stockQty
 }
 
 /** قرض مورد انتظار هر مشتری، از روی اسناد */
 export function computeCustomerBalances(sales: Sale[], payments: Payment[], returns: ReturnDoc[]): Map<number, number> {
-  const out = new Map<number, number>()
-  const add = (id: number | undefined, n: number) => {
-    if (typeof id === 'number') out.set(id, (out.get(id) ?? 0) + n)
-  }
-  for (const s of sales) {
-    const remainder = s.total - s.paid
-    if (remainder > 0) add(s.customerId, remainder)
-  }
-  // مبلغ منفی = قرض قبلی، پس همیشه «منهای مبلغ»
-  for (const p of payments) if (p.partyType === 'customer') add(p.partyId, -p.amount)
-  for (const r of returns) if (r.kind === 'customer' && r.settlement === 'reduceDebt') add(r.partyId, -r.amount)
-  return out
+  return foldEffects([
+    { table: 'sales', rows: sales },
+    { table: 'payments', rows: payments.filter((p) => p.partyType === 'customer') },
+    { table: 'returns', rows: returns }
+  ]).customerBalance
 }
 
 /** بیلانس مورد انتظار هر تأمین‌کننده/صراف، از روی اسناد */
 export function computeSupplierBalances(purchases: Purchase[], payments: Payment[], returns: ReturnDoc[]): Map<number, number> {
-  const out = new Map<number, number>()
-  const add = (id: number | undefined, n: number) => {
-    if (typeof id === 'number' && n !== 0) out.set(id, (out.get(id) ?? 0) + n)
-  }
-  for (const p of purchases) {
-    const hawala = p.sarrafAmount ?? 0
-    const remainder = p.total - p.paid - hawala
-    if (remainder > 0) add(p.supplierId, remainder)
-    if (hawala > 0) add(p.sarrafId, hawala)
-    // مصارف رسیدن از طریق صراف — قرض ما به صراف
-    add(p.landingSarrafId, landingSarrafOwed(p))
-  }
-  for (const p of payments) {
-    if (p.partyType !== 'supplier') continue
-    add(p.partyId, -p.amount)
-    if (p.via === 'sarraf') add(p.sarrafId, p.amount)
-  }
-  for (const r of returns) if (r.kind === 'supplier' && r.settlement === 'reduceDebt') add(r.partyId, -r.amount)
-  return out
+  return foldEffects([
+    { table: 'purchases', rows: purchases },
+    { table: 'payments', rows: payments.filter((p) => p.partyType === 'supplier') },
+    { table: 'returns', rows: returns }
+  ]).supplierBalance
 }
 
 const near = (a: number, b: number) => Math.abs(a - b) < 0.5

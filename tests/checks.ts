@@ -20,6 +20,7 @@ import {
   addExpense,
   addPayment,
   addOpeningDebt,
+  addAdjustment,
   addCapital,
   addPartnerWithdrawal,
   reconcile,
@@ -1587,6 +1588,77 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('قیمت خرابْ گرفته می‌شود', bad.mismatches.filter((m) => m.kind === 'cost').length, 1)
       for (const m of bad.mismatches) await fixMismatch(m)
       eq('بعد از اصلاح، قیمت درست شد', (await db.variants.get(vId))!.purchasePrice, 550)
+    }
+  },
+  {
+    name: 'اثر سندها یک تعریف دارد — پخش و کنترل و ثبت هر سه یکی‌اند',
+    run: async () => {
+      const supId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
+      const cId = await newCustomer()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      await seedCash(300000)
+
+      // هر نوع سند یک بار: خرید عادی، خرید در راه که رسید، حواله، فروش قرضی،
+      // پرداخت، مرجوعی مشتری، مرجوعی به تأمین‌کننده، تعدیل
+      await addPurchase(buy(supId, v1, 100, 500, { paid: 20000 }))
+      const inTransit = await addPurchase(buy(supId, v2, 60, 700, { received: false, paid: 0 }))
+      await receivePurchase(inTransit)
+      await addPurchase(buy(supId, v1, 10, 500, { paid: 0, sarrafId, sarrafAmount: 3000 }))
+      await addSale(sell(v1, 10, 900, { customerId: cId, customerName: 'مشتری', paid: 1000 }))
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 500 })
+      await addCustomerReturn({
+        date: Date.now(), kind: 'customer', partyId: cId, partyName: 'مشتری',
+        lines: [{ variantId: v1, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 900, restock: true }],
+        amount: 1800, settlement: 'reduceDebt'
+      })
+      await addSupplierReturn({
+        date: Date.now(), kind: 'supplier', partyId: supId, partyName: 'تأمین‌کننده',
+        lines: [{ variantId: v2, productName: 'اسپرتکس', size: '43', color: 'سیاه', qty: 5, unitPrice: 700, restock: false }],
+        amount: 3500, settlement: 'reduceDebt'
+      })
+      await addAdjustment({
+        date: Date.now(), variantId: v1, productName: 'اسپرتکس', size: '42', color: 'سیاه',
+        qtyChange: -3, reason: 'damaged'
+      })
+
+      // ۱) آنچه ops.ts نوشته
+      const stored = {
+        v1: (await db.variants.get(v1))!.stockQty,
+        v2: (await db.variants.get(v2))!.stockQty,
+        cust: (await db.customers.get(cId))!.balance,
+        sup: (await db.suppliers.get(supId))!.balance,
+        sarraf: (await db.suppliers.get(sarrafId))!.balance
+      }
+      is('کنترل حساب‌ها با ثبت می‌خواند', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // ۲) موبایل نو: همه‌چیز صفر و بعد پخش دوبارهٔ اسناد
+      const docs = {
+        purchases: await db.purchases.filter((x) => !x.deleted).toArray(),
+        sales: await db.sales.filter((x) => !x.deleted).toArray(),
+        payments: await db.payments.filter((x) => !x.deleted).toArray(),
+        adjustments: await db.adjustments.filter((x) => !x.deleted).toArray(),
+        returns: await db.returns.filter((x) => !x.deleted).toArray()
+      }
+      for (const id of [v1, v2]) await db.variants.update(id, { stockQty: 0 })
+      await db.customers.update(cId, { balance: 0 })
+      for (const id of [supId, sarrafId]) await db.suppliers.update(id, { balance: 0 })
+      for (const [table, rows] of Object.entries(docs))
+        for (const r of rows) await applyDocEffects(table as 'sales', r as unknown as Record<string, unknown>, false)
+
+      eq('موبایل نو — موجودی جنس اول', (await db.variants.get(v1))!.stockQty, stored.v1)
+      eq('موبایل نو — موجودی جنس دوم (خرید در راه)', (await db.variants.get(v2))!.stockQty, stored.v2)
+      eq('موبایل نو — قرض مشتری', (await db.customers.get(cId))!.balance, stored.cust)
+      eq('موبایل نو — قرض تأمین‌کننده', (await db.suppliers.get(supId))!.balance, stored.sup)
+      eq('موبایل نو — قرض صراف', (await db.suppliers.get(sarrafId))!.balance, stored.sarraf)
+
+      // ۳) و پخشِ برعکس باید همه را به صفر برگرداند
+      for (const [table, rows] of Object.entries(docs))
+        for (const r of rows) await applyDocEffects(table as 'sales', r as unknown as Record<string, unknown>, true)
+      eq('پخش برعکس — جنس اول صفر', (await db.variants.get(v1))!.stockQty, 0)
+      eq('پخش برعکس — قرض مشتری صفر', (await db.customers.get(cId))!.balance, 0)
+      eq('پخش برعکس — قرض صراف صفر', (await db.suppliers.get(sarrafId))!.balance, 0)
     }
   }
 ]

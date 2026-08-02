@@ -160,11 +160,14 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
   purchase.paid = afn(purchase.paid)
   if (purchase.sarrafAmount !== undefined) purchase.sarrafAmount = afn(purchase.sarrafAmount)
   return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
+    // «رسیده» فقط با receivePurchase ساخته می‌شود، نه در لحظهٔ ثبت خرید.
+    // اگر اینجا اجازه داده شود، موجودی‌اش نه از سند خرید می‌آید و نه از سند رسید.
+    if (purchase.received === true) throw new Error('خرید نو نمی‌تواند «رسیده» ثبت شود')
     for (const line of purchase.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
-      // جنس «در راه» تا وقت رسیدن به گدام اضافه نمی‌شود
-      if (purchase.received !== false) {
+      // جنس «در راه» تا وقت رسیدن به گدام اضافه نمی‌شود — همان قاعدهٔ lib/effects.ts
+      if (purchase.received === undefined) {
         await db.variants.update(line.variantId, {
           stockQty: v.stockQty + line.qty,
           // میانگین وزنی با موجودی قبلی — قیمت تمام‌شده شامل مصارف رسیدن

@@ -61,17 +61,23 @@ rebuild can reproduce the same average.
 
 `variant.stockQty`, `customer.balance`, `supplier.balance` are **rebuilt from
 document replay**, never copied device-to-device. Masters (products, names,
-prices) are last-write-wins. If you change how a document affects stock or a
-balance, you must change it **identically in three places**:
+prices) are last-write-wins.
 
-1. `src/lib/ops.ts` (the local write)
-2. `src/lib/sync.ts` `applyDocEffects` (the remote replay)
-3. `src/lib/integrity.ts` (the rebuild-and-compare check)
+Every rule about how a document changes those numbers lives in **one place**:
+`src/lib/effects.ts` → `effectsOf(table, doc)`. `sync.ts` applies those effects,
+`integrity.ts` folds them, and the fuzzer checks that `ops.ts` arrived at the
+same answer. Change a rule there and all three follow. Do **not** restate a rule
+inside `sync.ts` or `integrity.ts` — that duplication is what caused both money
+bugs this project has had (in-transit purchases counted twice, and landing cost
+attributed wholly to the last `via`).
 
-Getting this wrong causes silent double-counting that only appears on a second
-phone. It has happened once already (in-transit purchases counted both the
-purchase and the receive adjustment). The rule that fixed it: a purchase bumps
-stock **only when `received === undefined`**.
+`ops.ts` still writes locally (it also does guards, cash movements and
+transactions), so it is the one place that can drift. The fuzzer is what holds
+it honest — it compares stored numbers against `effectsOf` after every step.
+
+A purchase bumps stock **only when `received === undefined`**. Creating a
+purchase already marked `received: true` is refused, because such a row's stock
+would come from neither the purchase nor a receive adjustment.
 
 ### Moving stock without breaking the books
 
@@ -93,7 +99,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 296 checks in 43 scenarios
+npm test          # tests/checks.ts — currently 325 checks in 47 scenarios
 ```
 
 ```bash
@@ -102,9 +108,10 @@ npm run fuzz -- 5 150 42      # runs, steps, starting seed — seeds are reprodu
 ```
 
 The fuzzer (`tests/fuzz.ts`) drives random shop operations and after **every
-step** asserts four rules: `integrity.ts` agrees with the stored numbers, a
-full document replay through `sync.ts` rebuilds the *same* numbers, no stock or
-cash box goes negative, and every amount is a whole afghani. It found the
+step** asserts: `integrity.ts` agrees with the stored numbers, a full document
+replay through `sync.ts` rebuilds the *same* numbers, `purchasePrice` matches
+the documents, net worth agrees from two directions, no stock or cash box goes
+negative, and every amount is a whole afghani. It found the
 landing-cost attribution bug that 43 hand-written scenarios missed. Failures
 print the seed, step, and last operations, so they replay exactly.
 

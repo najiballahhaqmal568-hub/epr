@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { applyRebuiltCosts } from './costing'
-import { db, syncFlags, newUuid, SYNC_TABLES, landingSarrafOwed, type SyncTable, type Sale, type Purchase, type Payment, type Adjustment, type ReturnDoc } from '../db'
+import { effectsOf, type DocTable } from './effects'
+import { db, syncFlags, newUuid, SYNC_TABLES, landingSarrafOwed, type SyncTable, type Purchase } from '../db'
 import { getSupa, getProfile } from './supa'
 
 /** نام جدول‌ها در سرور (snake_case) */
@@ -145,50 +146,16 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
 
 const MASTERS: SyncTable[] = ['products', 'variants', 'customers', 'suppliers', 'expenseCategories']
 
-/** اعمال اثرات جانبی یک سند دریافتی (گدام/قرض) — پول نقد سند جداگانه دارد */
+/**
+ * اعمال اثرات جانبی یک سند دریافتی (گدام/قرض) — پول نقد سند جداگانه دارد.
+ * قاعده‌ها اینجا نوشته نمی‌شوند؛ همه از lib/effects.ts می‌آیند تا با
+ * «کنترل حساب‌ها» و با ops.ts هرگز فرق نکنند.
+ */
 export async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, reverse: boolean) {
   const sign = reverse ? -1 : 1
-  const bump = async (t: 'variants' | 'customers' | 'suppliers', id: unknown, field: 'stockQty' | 'balance', delta: number) => {
-    if (typeof id !== 'number' || delta === 0) return
-    const row = await db.table(t).get(id)
-    if (row) await db.table(t).update(id, { [field]: (row[field] ?? 0) + delta })
-  }
-  if (table === 'sales') {
-    const s = rec as unknown as Sale
-    for (const l of s.lines) await bump('variants', l.variantId, 'stockQty', -l.qty * sign)
-    const remainder = s.total - s.paid
-    if (remainder > 0) await bump('customers', s.customerId, 'balance', remainder * sign)
-  } else if (table === 'purchases') {
-    const p = rec as unknown as Purchase
-    // خرید عادی (received تعریف‌نشده) موجودی می‌دهد.
-    // خرید «در راه» — چه هنوز نرسیده (false) و چه رسیده (true) — موجودی‌اش
-    // از سند تعدیلِ رسید می‌آید، پس اینجا نباید دوباره شمرده شود.
-    if (p.received === undefined) {
-      for (const l of p.lines) await bump('variants', l.variantId, 'stockQty', l.qty * sign)
-    }
-    const hawala = p.sarrafAmount ?? 0
-    const remainder = p.total - p.paid - hawala
-    if (remainder > 0) await bump('suppliers', p.supplierId, 'balance', remainder * sign)
-    if (hawala > 0) await bump('suppliers', p.sarrafId, 'balance', hawala * sign)
-    // مصارف رسیدن از طریق صراف — قرض ما به صراف زیاد می‌شود
-    const landing = landingSarrafOwed(p)
-    if (landing > 0) await bump('suppliers', p.landingSarrafId, 'balance', landing * sign)
-  } else if (table === 'payments') {
-    const p = rec as unknown as Payment
-    await bump(p.partyType === 'customer' ? 'customers' : 'suppliers', p.partyId, 'balance', -p.amount * sign)
-    if (p.via === 'sarraf') await bump('suppliers', p.sarrafId, 'balance', p.amount * sign)
-  } else if (table === 'adjustments') {
-    const a = rec as unknown as Adjustment
-    await bump('variants', a.variantId, 'stockQty', a.qtyChange * sign)
-  } else if (table === 'returns') {
-    const r = rec as unknown as ReturnDoc
-    if (r.kind === 'customer') {
-      for (const l of r.lines) if (l.restock) await bump('variants', l.variantId, 'stockQty', l.qty * sign)
-      if (r.settlement === 'reduceDebt') await bump('customers', r.partyId, 'balance', -r.amount * sign)
-    } else {
-      for (const l of r.lines) await bump('variants', l.variantId, 'stockQty', -l.qty * sign)
-      if (r.settlement === 'reduceDebt') await bump('suppliers', r.partyId, 'balance', -r.amount * sign)
-    }
+  for (const e of effectsOf(table as DocTable, rec)) {
+    const row = await db.table(e.table).get(e.id!)
+    if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) + e.delta * sign })
   }
 }
 
