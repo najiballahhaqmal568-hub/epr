@@ -9,8 +9,8 @@
  * برای همین هر انتقالِ موجودی با دو سند تعدیل ثبت می‌شود (منفی از مبدأ،
  * مثبت به مقصد) تا کنترل حساب‌ها و همگام‌سازی موبایل‌های دیگر هم درست بماند.
  */
+import { weightedCost, applyRebuiltCosts } from './costing'
 import { db, type Product, type Variant } from '../db'
-import { afn } from './ops'
 
 /** کلمه‌هایی که فقط بسته‌بندی را می‌گویند، نه نام جنس را */
 const PACK_WORDS = new Set([
@@ -91,7 +91,7 @@ export async function mergeProducts(targetId: number, sourceIds: number[]): Prom
 
   const result: MergeResult = { moved: 0, combined: 0, pairsBefore: 0, pairsAfter: 0 }
 
-  await db.transaction('rw', db.products, db.variants, db.adjustments, async () => {
+  await db.transaction('rw', [db.products, db.variants, db.adjustments, db.sales, db.purchases, db.returns], async () => {
     const target = await db.products.get(targetId)
     if (!target) throw new Error('جنس مقصد پیدا نشد')
 
@@ -119,7 +119,7 @@ export async function mergeProducts(targetId: number, sourceIds: number[]): Prom
         const qty = v.stockQty
         if (qty !== 0) {
           const note = `یکجا شدن با «${target.name}»`
-          const move = (from: Variant, name: string, change: number) =>
+          const move = (from: Variant, name: string, change: number, unitCost?: number) =>
             db.adjustments.add({
               date: now,
               variantId: from.id!,
@@ -128,23 +128,27 @@ export async function mergeProducts(targetId: number, sourceIds: number[]): Prom
               color: from.color,
               qtyChange: change,
               reason: 'correction',
-              note
+              note,
+              ...(unitCost !== undefined ? { unitCost } : {})
             })
           await move(v, src?.name ?? '', -qty)
-          await move(twin, target.name, qty)
+          // سند مقصد قیمتِ جنسی را که می‌آید با خود دارد، تا بازسازیِ قیمت
+          // از روی اسناد همان میانگینی را بسازد که همین‌جا ساخته می‌شود
+          await move(twin, target.name, qty, v.purchasePrice)
         }
         // قیمت خرید: میانگین وزنی (اگر قیمت‌ها یکی باشد همان می‌ماند)
         const total = twin.stockQty + qty
-        const price =
-          total > 0 && twin.purchasePrice !== v.purchasePrice
-            ? afn((twin.stockQty * twin.purchasePrice + qty * v.purchasePrice) / total)
-            : twin.purchasePrice
+        // قیمت میانگین است نه پول، پس گرد نمی‌شود — وگرنه با بازسازی فرق می‌کند
+        const price = weightedCost(twin.stockQty, twin.purchasePrice, qty, v.purchasePrice)
         await db.variants.update(twin.id!, {
           stockQty: total,
           purchasePrice: price,
           lastPurchaseAt: Math.max(twin.lastPurchaseAt ?? 0, v.lastPurchaseAt ?? 0) || undefined
         })
+        // نسخهٔ در حافظه هم تازه می‌شود — اگر جنس سومی هم به همین سایز بیاید،
+        // میانگینش باید روی عددِ نو حساب شود، نه عددِ کهنه
         twin.stockQty = total
+        twin.purchasePrice = price
         await db.variants.update(v.id!, { stockQty: 0, deleted: true })
         result.combined++
       }
@@ -159,6 +163,9 @@ export async function mergeProducts(targetId: number, sourceIds: number[]): Prom
       }
       await db.products.update(srcId, { deleted: true })
     }
+
+    // قیمت تمام‌شده از روی اسناد بازسازی می‌شود — همان دو سندی که همین‌جا نوشتیم
+    await applyRebuiltCosts()
 
     const after = await db.variants.filter((v) => !v.deleted && v.productId === targetId).toArray()
     result.pairsAfter = after.reduce((s, v) => s + v.stockQty, 0)

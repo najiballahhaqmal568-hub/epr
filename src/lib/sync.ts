@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { applyRebuiltCosts } from './costing'
 import { db, syncFlags, newUuid, SYNC_TABLES, landingSarrafOwed, type SyncTable, type Sale, type Purchase, type Payment, type Adjustment, type ReturnDoc } from '../db'
 import { getSupa, getProfile } from './supa'
 
@@ -272,13 +273,7 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
           const inc = rec as unknown as Purchase
           const oldLanding = (existing as Purchase).landingCost ?? 0
           const newLanding = inc.landingCost ?? 0
-          const pairs = inc.lines.reduce((s, l) => s + l.qty, 0)
-          if (newLanding > oldLanding && pairs > 0) {
-            const perPair = (newLanding - oldLanding) / pairs
-            for (const l of inc.lines) {
-              const v = await db.variants.where('id').equals(l.variantId).first()
-              if (v) await db.variants.update(l.variantId, { purchasePrice: v.purchasePrice + perPair })
-            }
+          if (newLanding !== oldLanding) {
             const deltaSarraf = landingSarrafOwed(inc as unknown as Purchase) - landingSarrafOwed(existing as Purchase)
             if (deltaSarraf > 0 && typeof inc.landingSarrafId === 'number') {
               const sf = await db.suppliers.get(inc.landingSarrafId)
@@ -286,7 +281,7 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
             }
           }
           await db.table(table).update(existing.id, {
-            ...(inc.received !== false ? { received: true } : {}),
+            ...(inc.received !== false ? { received: true, receivedAt: inc.receivedAt ?? Date.now() } : {}),
             landingCost: newLanding || undefined,
             landingUnpaid: inc.landingUnpaid,
             landingVia: inc.landingVia,
@@ -295,6 +290,8 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
             landingSarrafName: inc.landingSarrafName,
             landingSarrafAmount: inc.landingSarrafAmount
           })
+          // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
+          await applyRebuiltCosts()
         }
       }
     } finally {

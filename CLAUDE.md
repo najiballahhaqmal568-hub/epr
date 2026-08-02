@@ -43,6 +43,20 @@ explicitly (`landingSarrafAmount`) and expose **one shared reader**
 (`landingSarrafOwed()` in `src/db.ts`) that all three places import — a shared
 reader is the only thing that actually prevents the three from drifting.
 
+### Cost is derived too — never patched incrementally
+
+`variant.purchasePrice` is a weighted average, so it depends on the *order* of
+events. Two devices only agree if both compute it the same way, so it is
+**rebuilt from documents** (`src/lib/costing.ts` → `applyRebuiltCosts()`) at the
+end of every operation that changes the document set: purchase, receive,
+landing cost, merge, and sale deletion. Do not hand-adjust it — an incremental
+patch and a replay disagree whenever two documents share a timestamp, or when a
+document is later deleted.
+
+If an operation moves stock in at a cost that no purchase document explains
+(merging duplicates), the adjustment document must carry `unitCost` so the
+rebuild can reproduce the same average.
+
 ### Derived values are never synced as absolutes
 
 `variant.stockQty`, `customer.balance`, `supplier.balance` are **rebuilt from
@@ -97,6 +111,9 @@ print the seed, step, and last operations, so they replay exactly.
 Before trusting a green fuzz run, prove the loop can still go **red** — break a
 rule on purpose (e.g. change the purchase stock rule in `sync.ts`) and confirm
 it fails within a few steps.
+
+`runIntegrityCheck()` compares stored stock, balances **and** `purchasePrice`
+against the documents. `fixMismatch()` can repair any of them.
 
 `npm test` runs the real ops against a real IndexedDB in headless Chromium.
 Every change to `src/lib/ops.ts` needs a scenario. When a test disagrees with

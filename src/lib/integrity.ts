@@ -5,10 +5,11 @@
  * قاعده‌های بازسازی دقیقاً همان قاعده‌هایی است که همگام‌سازی
  * (applyDocEffects در lib/sync.ts) هنگام پخش اسناد بین موبایل‌ها به کار می‌برد.
  */
+import { computeCosts } from './costing'
 import { db, landingSarrafOwed, type Adjustment, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
 
 export interface Mismatch {
-  kind: 'variant' | 'customer' | 'supplier'
+  kind: 'variant' | 'customer' | 'supplier' | 'cost'
   id: number
   name: string
   stored: number
@@ -108,6 +109,16 @@ export async function runIntegrityCheck(): Promise<IntegrityReport> {
   const label = (v: Variant) => `${productName.get(v.productId) ?? 'جنس'} ${v.size} ${v.color}`.trim()
 
   const stock = computeStock(sales, purchases, adjustments, returns)
+  // قیمت تمام‌شده هم از اسناد بازسازی می‌شود — پیش از این هیچ کنترلی نداشت
+  const bought = new Set<number>()
+  for (const p of purchases) if (p.received !== false) for (const l of p.lines) bought.add(l.variantId)
+  const costs = computeCosts(
+    sales,
+    purchases,
+    adjustments,
+    returns,
+    new Map(variants.filter((v) => !bought.has(v.id!)).map((v) => [v.id!, v.purchasePrice]))
+  )
   const custBal = computeCustomerBalances(sales, payments, returns)
   const suppBal = computeSupplierBalances(purchases, payments, returns)
 
@@ -116,6 +127,19 @@ export async function runIntegrityCheck(): Promise<IntegrityReport> {
     const computed = stock.get(v.id!) ?? 0
     if (!near(v.stockQty, computed))
       mismatches.push({ kind: 'variant', id: v.id!, name: label(v), stored: v.stockQty, computed, diff: v.stockQty - computed })
+  }
+  for (const v of variants) {
+    const computed = costs.get(v.id!)
+    // قیمت میانگین است، نه پول واقعی — پس مقایسه با رواداری کوچک
+    if (computed !== undefined && Math.abs(v.purchasePrice - computed) > 0.01)
+      mismatches.push({
+        kind: 'cost',
+        id: v.id!,
+        name: label(v),
+        stored: v.purchasePrice,
+        computed,
+        diff: v.purchasePrice - computed
+      })
   }
   for (const c of customers) {
     const computed = custBal.get(c.id!) ?? 0
@@ -135,7 +159,8 @@ export async function runIntegrityCheck(): Promise<IntegrityReport> {
 
 /** اصلاح: عدد ذخیره‌شده برابر عددِ ساخته‌شده از اسناد می‌شود */
 export async function fixMismatch(m: Mismatch): Promise<void> {
-  if (m.kind === 'variant') await db.variants.update(m.id, { stockQty: m.computed })
+  if (m.kind === 'cost') await db.variants.update(m.id, { purchasePrice: m.computed })
+  else if (m.kind === 'variant') await db.variants.update(m.id, { stockQty: m.computed })
   else if (m.kind === 'customer') await db.customers.update(m.id, { balance: m.computed })
   else await db.suppliers.update(m.id, { balance: m.computed })
 }

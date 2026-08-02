@@ -42,6 +42,7 @@ import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
+import { rebuildCosts } from '../src/lib/costing'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -1555,6 +1556,37 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('بعد از پرداخت، قرضی نمانده', after.unpaidLanding, 0)
       eq('پول به اندازهٔ پرداخت کم شد', after.cash, 43000)
       eq('دارایی خالص دست‌نخورده — قرض دادن سود و زیان نیست', after.assets, 50000)
+    }
+  },
+  {
+    name: 'قیمت تمام‌شده — مصارف رسیدن روی موجودی قبلی پخش نشود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(200000)
+      // ۱۰ جوړه × ۵۰۰ خرید اول
+      await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+      eq('قیمت بعد از خرید اول', (await db.variants.get(vId))!.purchasePrice, 500)
+      // ۱۰ جوړهٔ دیگر × ۵۰۰ — حالا ۲۰ جوړه به قیمت ۵۰۰
+      const p2 = await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+      eq('قیمت بعد از خرید دوم', (await db.variants.get(vId))!.purchasePrice, 500)
+
+      // ۱٬۰۰۰ مصارف رسیدن فقط روی حملِ دوم (۱۰ جوړه) → ۱۰۰ فی جوړه
+      // میانگین درست: (۱۰×۵۰۰ + ۱۰×۶۰۰) ÷ ۲۰ = ۵۵۰ — نه ۶۰۰
+      await addLandingCost([p2], 1000, 'cash')
+      eq('میانگین وزنی، نه جمع ساده', (await db.variants.get(vId))!.purchasePrice, 550)
+      is('کنترل حساب‌ها قیمت را هم می‌سنجد و سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // موبایل نو باید به همان ۵۵۰ برسد
+      const rebuilt = await rebuildCosts()
+      eq('موبایل نو همان قیمت را می‌سازد', rebuilt.get(vId)!, 550)
+
+      // و اگر کسی قیمت را دستی خراب کند، کنترل حساب‌ها می‌گیردش
+      await db.variants.update(vId, { purchasePrice: 999 })
+      const bad = await runIntegrityCheck()
+      eq('قیمت خرابْ گرفته می‌شود', bad.mismatches.filter((m) => m.kind === 'cost').length, 1)
+      for (const m of bad.mismatches) await fixMismatch(m)
+      eq('بعد از اصلاح، قیمت درست شد', (await db.variants.get(vId))!.purchasePrice, 550)
     }
   }
 ]

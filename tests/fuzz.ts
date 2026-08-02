@@ -8,8 +8,9 @@
  *  ۲) پخش دوبارهٔ اسناد (sync.ts) هم همان عدد را بسازد — یعنی هر سه پیاده‌سازی
  *     (ops / sync / integrity) یکی باشند
  *  ۳) موجودی هیچ سایز منفی نشود و پول هیچ صندوق منفی نشود
- *  ۴) «دارایی خالص» از هر دو راه یک جواب بدهد
- *  ۵) هر مبلغ عدد صحیح افغانی باشد
+ *  ۴) قیمت تمام‌شده هم با اسناد بخواند — مفادِ هر فروش از همین می‌آید
+ *  ۵) «دارایی خالص» از هر دو راه یک جواب بدهد
+ *  ۶) هر مبلغ عدد صحیح افغانی باشد
  *
  * با seed اجرا می‌شود، پس هر شکست دقیقاً قابل تکرار است.
  */
@@ -42,6 +43,7 @@ import { computeStock, computeCustomerBalances, computeSupplierBalances } from '
 import { applyDocEffects } from '../src/lib/sync'
 import { mergeProducts } from '../src/lib/merge'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
+import { computeCosts } from '../src/lib/costing'
 
 // ── تصادفِ قابل تکرار ────────────────────────────────────────────
 function rng(seed: number) {
@@ -471,6 +473,22 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         return bad('کنترل حساب‌ها — موجودی', `سایز ${v.id} ذخیره ${v.stockQty} ولی از اسناد ${want}`)
       if (v.stockQty < 0) return bad('موجودی منفی', `سایز ${v.id} = ${v.stockQty}`)
     }
+    // قیمت تمام‌شده هم باید با اسناد بخواند — مفادِ هر فروش از همین می‌آید
+    const boughtIds = new Set<number>()
+    for (const p of purchases) if (p.received !== false) for (const l of p.lines) boughtIds.add(l.variantId)
+    const costs = computeCosts(
+      sales,
+      purchases,
+      adjustments,
+      returns,
+      new Map(vars.filter((v) => !boughtIds.has(v.id!)).map((v) => [v.id!, v.purchasePrice]))
+    )
+    for (const v of vars) {
+      const want = costs.get(v.id!)
+      if (want !== undefined && Math.abs(v.purchasePrice - want) > 0.01)
+        return bad('قیمت تمام‌شده با اسناد نمی‌خواند', `سایز ${v.id} ذخیره ${v.purchasePrice} ولی از اسناد ${want}`)
+    }
+
     const cb = computeCustomerBalances(sales, payments, returns)
     for (const c of custs) {
       const want = cb.get(c.id!) ?? 0

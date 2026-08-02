@@ -32,7 +32,12 @@ function IntegrityCard() {
   }
 
   const unit = (m: Mismatch) => (m.kind === 'variant' ? `${fmtNum(m.stored)} → ${fmtNum(m.computed)} جوړه` : `${fmtMoney(m.stored)} → ${fmtMoney(m.computed)}`)
-  const kindLabel = { variant: 'موجودی گدام', customer: 'قرض مشتری', supplier: 'حساب تأمین‌کننده' }
+  const kindLabel: Record<Mismatch['kind'], string> = {
+    variant: 'موجودی گدام',
+    customer: 'قرض مشتری',
+    supplier: 'حساب تأمین‌کننده',
+    cost: 'قیمت تمام‌شدهٔ جنس'
+  }
 
   return (
     <Card>

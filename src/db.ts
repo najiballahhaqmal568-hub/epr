@@ -121,6 +121,8 @@ export interface Purchase extends Synced {
   paid: number
   /** false = جنس هنوز نرسیده (در راه)؛ undefined/true = تحویل گدام شده */
   received?: boolean
+  /** تاریخ رسیدن به گدام — قیمت تمام‌شده در همین لحظه در میانگین می‌نشیند */
+  receivedAt?: number
   /** پرداخت از طریق صراف (حواله) */
   sarrafId?: number
   sarrafName?: string
@@ -244,6 +246,12 @@ export interface Adjustment extends Synced {
   qtyChange: number
   reason: AdjustReason
   note?: string
+  /**
+   * قیمت تمام‌شدهٔ جنسی که با این سند وارد گدام می‌شود.
+   * فقط وقتی لازم است که موجودی از جای دیگری بیاید (مثلاً یکجا کردن دو جنس)،
+   * تا بازسازیِ قیمت از روی اسناد همان میانگین را بسازد که خودِ عملیات ساخت.
+   */
+  unitCost?: number
 }
 
 export interface ReturnLine {

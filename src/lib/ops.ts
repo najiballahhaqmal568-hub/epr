@@ -1,3 +1,4 @@
+import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { db, makeSku, landingUnpaidOf, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
@@ -108,7 +109,7 @@ export async function addSale(sale: Sale): Promise<number> {
 
 /** حذف فروش: برگشت گدام + برگشت قرض + خروج نقد */
 export async function deleteSale(saleId: number): Promise<void> {
-  return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
+  return db.transaction('rw', [db.sales, db.variants, db.customers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const sale = await db.sales.get(saleId)
     if (!sale || sale.deleted) return
     for (const line of sale.lines) {
@@ -128,6 +129,10 @@ export async function deleteSale(saleId: number): Promise<void> {
       { allowNegative: true }
     )
     await db.sales.update(saleId, { deleted: true })
+    // حذف یک سند، تاریخچه را عوض می‌کند و میانگین قیمت به ترتیب رویدادها بند است.
+    // پس قیمت دوباره از روی اسنادِ باقی‌مانده ساخته می‌شود تا موبایل دوم هم به
+    // همان عدد برسد.
+    await applyRebuiltCosts()
   })
 }
 
@@ -146,28 +151,15 @@ export async function deleteSaleImpact(
   return { paid: sale.paid, box, before, after: before - sale.paid }
 }
 
-/** میانگین وزنی قیمت خرید — تا موجودی قدیم با قیمت نو تبدیل نشود */
-function weightedCost(oldQty: number, oldCost: number, addQty: number, addCost: number): number {
-  const total = oldQty + addQty
-  if (total <= 0) return addCost
-  if (oldQty <= 0) return addCost
-  return (oldQty * oldCost + addQty * addCost) / total
-}
-
-/** قیمت تمام‌شدهٔ هر جوړه = قیمت خرید + سهم مصارف رسیدن (تقسیم مساوی) */
-export function landedUnitCost(purchase: Purchase, unitCost: number): number {
-  const landing = purchase.landingCost ?? 0
-  const totalPairs = purchase.lines.reduce((s, l) => s + l.qty, 0)
-  if (landing <= 0 || totalPairs <= 0) return unitCost
-  return unitCost + landing / totalPairs
-}
+// قاعده‌های قیمت تمام‌شده در lib/costing.ts زندگی می‌کنند تا sync و integrity هم همان را ببینند
+export { landedUnitCost }
 
 /** ثبت خرید: افزایش گدام (به قیمت تمام‌شده) + قرض ما + خروج نقد + مصارف رسیدن */
 export async function addPurchase(purchase: Purchase): Promise<number> {
   purchase.total = afn(purchase.total)
   purchase.paid = afn(purchase.paid)
   if (purchase.sarrafAmount !== undefined) purchase.sarrafAmount = afn(purchase.sarrafAmount)
-  return db.transaction('rw', db.purchases, db.variants, db.suppliers, db.cashMovements, async () => {
+  return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     for (const line of purchase.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
@@ -193,6 +185,9 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
     }
     const id = (await db.purchases.add(purchase)) as number
     await movement({ date: purchase.date, type: 'purchase', refId: id, amount: -purchase.paid, note: purchase.supplierName })
+    // قیمت تمام‌شده تابعی از اسناد است — بعد از ثبت، از نو ساخته می‌شود تا
+    // این موبایل و موبایل دوم دقیقاً به یک عدد برسند
+    await applyRebuiltCosts()
     return id
   })
 }
@@ -210,7 +205,7 @@ export async function addLandingCost(
 ): Promise<void> {
   amount = afn(amount)
   if (amount <= 0 || !purchaseIds.length) return
-  return db.transaction('rw', db.purchases, db.variants, db.suppliers, db.cashMovements, async () => {
+  return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     const list = (await db.purchases.bulkGet(purchaseIds)).filter((p): p is Purchase => Boolean(p) && !p!.deleted)
     if (!list.length) throw new Error('خریدی یافت نشد')
     const pairsOf = (p: Purchase) => p.lines.reduce((a, l) => a + l.qty, 0)
@@ -219,19 +214,10 @@ export async function addLandingCost(
     // سهم هر خرید به افغانی صحیح — جمع سهم‌ها دقیقاً برابر مبلغ کل می‌شود
     const shares = allocate(amount, list.map(pairsOf))
 
-    // مصارف رسیدن فقط روی جوړه‌های همین حمل می‌نشیند (میانگین وزنی با بقیهٔ موجودی)
+    // قیمت تمام‌شده بعد از ثبت مصارف، یک‌جا از روی اسناد بازسازی می‌شود (پایین‌تر)
     for (const [idx, p] of list.entries()) {
       const share = shares[idx]
-      const perPair = share / pairsOf(p)
-      for (const line of p.lines) {
-        const v = await db.variants.get(line.variantId)
-        if (v) {
-          const rest = Math.max(0, v.stockQty - line.qty)
-          const newCost = v.stockQty > 0 ? (rest * v.purchasePrice + line.qty * (v.purchasePrice + perPair)) / v.stockQty : v.purchasePrice + perPair
-          await db.variants.update(line.variantId, { purchasePrice: newCost })
-        }
-      }
-      const unpaidBefore = p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
+      const unpaidBefore = landingUnpaidOf(p)
       const unpaidAfter = via === 'later' ? unpaidBefore + share : unpaidBefore
       await db.purchases.update(p.id!, {
         landingCost: (p.landingCost ?? 0) + share,
@@ -248,6 +234,10 @@ export async function addLandingCost(
           : { landingSarrafAmount: p.landingSarrafAmount ?? 0 })
       })
     }
+
+    // قیمت تمام‌شده = تابعی از اسناد. بعد از تغییرِ مصارف رسیدن، دوباره ساخته می‌شود
+    // تا این موبایل و موبایل دوم به یک عدد برسند.
+    await applyRebuiltCosts()
 
     const names = list.map((p) => p.supplierName).join('، ')
     const whole = shares.reduce((a, b) => a + b, 0)
@@ -276,7 +266,7 @@ export async function payLanding(purchaseId: number): Promise<void> {
 
 /** رسید جنسِ خرید «در راه»: ورود به گدام به شکل سند تعدیل (تا به دستگاه‌های دیگر هم برسد) */
 export async function receivePurchase(purchaseId: number): Promise<void> {
-  return db.transaction('rw', db.purchases, db.variants, db.adjustments, async () => {
+  return db.transaction('rw', [db.purchases, db.variants, db.adjustments, db.sales, db.returns], async () => {
     const p = await db.purchases.get(purchaseId)
     if (!p || p.deleted || p.received !== false) return
     for (const line of p.lines) {
@@ -300,7 +290,8 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
         note: `رسید خرید — ${p.supplierName}`
       })
     }
-    await db.purchases.update(purchaseId, { received: true })
+    await db.purchases.update(purchaseId, { received: true, receivedAt: Date.now() })
+    await applyRebuiltCosts()
   })
 }
 
