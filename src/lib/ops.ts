@@ -1,4 +1,7 @@
-import { db, makeSku, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
+import { db, makeSku, landingUnpaidOf, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
+
+// خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
+export { landingUnpaidOf }
 
 /**
  * پول همیشه به افغانی صحیح — تا در تقسیم و جمع، کسر و «پول گم‌شده» پیدا نشود.
@@ -257,10 +260,7 @@ export async function addLandingCost(
   })
 }
 
-/** مبلغ پرداخت‌نشدهٔ مصارف رسیدن یک خرید */
-export function landingUnpaidOf(p: Purchase): number {
-  return p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
-}
+
 
 /** پرداخت بخشِ «بعداً»ی مصارف رسیدن — نقد از صندوق */
 export async function payLanding(purchaseId: number): Promise<void> {

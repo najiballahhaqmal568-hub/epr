@@ -41,6 +41,7 @@ import { applyDocEffects } from '../src/lib/sync'
 import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
+import { netWorth, computeNetWorth } from '../src/lib/networth'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -149,22 +150,16 @@ async function settlement() {
   const suppliers = await db.suppliers.filter((x) => !x.deleted).toArray()
   const purchases = await db.purchases.filter((p) => !p.deleted).toArray()
 
-  const stockValue = variants.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
-  const cash = movements.reduce((s, m) => s + m.amount, 0)
-  const receivables = customers.reduce((s, c) => s + Math.max(0, c.balance), 0)
-  const customerCredits = customers.reduce((s, c) => s + Math.max(0, -c.balance), 0)
-  const unpaidLanding = purchases.reduce((s, p) => s + landingUnpaidOf(p), 0)
-  const others = suppliers.filter((x) => x.kind !== 'partner')
-  const payables = others.reduce((s, x) => s + Math.max(0, x.balance), 0) + unpaidLanding
-  const supplierCredits = others.reduce((s, x) => s + Math.max(0, -x.balance), 0)
-  const assets = stockValue + cash + receivables + supplierCredits - payables - customerCredits
+  // همان تابعی که خود اپ صدا می‌زند — نه یک کپیِ دستی، وگرنه اختلافشان دیده نمی‌شود
+  const n = computeNetWorth({ variants, movements, customers, suppliers, purchases })
+  const assets = n.assets
 
   const DRAW = ['withdrawal', 'homeExpense', 'personalExpense']
   const draws = movements.filter((m) => DRAW.includes(m.type))
   const wSum = draws.reduce((s, m) => s - m.amount, 0)
   const capSum = suppliers.filter((x) => x.kind === 'partner').reduce((s, p) => s + (p.capital ?? 0), 0)
 
-  return { stockValue, cash, receivables, assets, wSum, capSum, yearProfit: assets + wSum - capSum }
+  return { stockValue: n.stock, cash: n.cash, receivables: n.receivables, assets, wSum, capSum, yearProfit: assets + wSum - capSum }
 }
 
 // ── سناریوها ────────────────────────────────────────────────────
@@ -1533,6 +1528,33 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await db.suppliers.update(sarrafId, { balance: 0 })
       for (const p of purchases) await applyDocEffects('purchases', p as unknown as Record<string, unknown>, false)
       eq('موبایل نو هم همان ۴۰۰ را می‌سازد', (await db.suppliers.get(sarrafId))!.balance, 400)
+    }
+  },
+  {
+    name: 'دارایی خالص — مصارف رسیدنِ پرداخت‌نشده قرض است، نه سود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(50000)
+      // ۱۰ جوړه × ۵۰۰ = ۵٬۰۰۰ نقد پرداخت شد
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+      // ۲٬۰۰۰ مصارف رسیدن که «بعداً» پرداخت می‌شود
+      await addLandingCost([pid], 2000, 'later')
+
+      const n = await netWorth()
+      // ارزش گدام حالا ۵٬۰۰۰ + ۲٬۰۰۰ = ۷٬۰۰۰ است چون مصارف رسیدن در قیمت نشسته
+      eq('ارزش گدام مصارف رسیدن را در خود دارد', n.stock, 7000)
+      eq('پول نقد', n.cash, 45000)
+      eq('مصارف رسیدنِ پرداخت‌نشده قرض است', n.unpaidLanding, 2000)
+      // ۷٬۰۰۰ + ۴۵٬۰۰۰ − ۲٬۰۰۰ = ۵۰٬۰۰۰ — همان که اول داشتیم، نه یک افغانی بیشتر
+      eq('دارایی خالص تغییر نکرده — خرید سود نمی‌سازد', n.assets, 50000)
+
+      // پرداخت قرض، دارایی را کم نمی‌کند: هم پول کم می‌شود هم قرض
+      await payLanding(pid)
+      const after = await netWorth()
+      eq('بعد از پرداخت، قرضی نمانده', after.unpaidLanding, 0)
+      eq('پول به اندازهٔ پرداخت کم شد', after.cash, 43000)
+      eq('دارایی خالص دست‌نخورده — قرض دادن سود و زیان نیست', after.assets, 50000)
     }
   }
 ]

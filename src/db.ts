@@ -151,6 +151,15 @@ export function landingSarrafOwed(p: Purchase): number {
   return p.landingSarrafAmount ?? (p.landingVia === 'sarraf' ? (p.landingCost ?? 0) : 0)
 }
 
+/**
+ * مصارف رسیدنِ هنوز پرداخت‌نشدهٔ یک خرید — قرضِ ما بابت کرایه و حمالی.
+ * چون این مبلغ در قیمت تمام‌شدهٔ جنس نشسته (ارزش گدام آن را دارد)،
+ * هر جا «دارایی خالص» حساب می‌شود باید کم شود، وگرنه دو بار شمرده می‌شود.
+ */
+export function landingUnpaidOf(p: Purchase): number {
+  return p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)
+}
+
 export interface Payment extends Synced {
   id?: number
   date: number

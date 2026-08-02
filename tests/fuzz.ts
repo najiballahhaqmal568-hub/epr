@@ -8,7 +8,8 @@
  *  ۲) پخش دوبارهٔ اسناد (sync.ts) هم همان عدد را بسازد — یعنی هر سه پیاده‌سازی
  *     (ops / sync / integrity) یکی باشند
  *  ۳) موجودی هیچ سایز منفی نشود و پول هیچ صندوق منفی نشود
- *  ۴) هر مبلغ عدد صحیح افغانی باشد
+ *  ۴) «دارایی خالص» از هر دو راه یک جواب بدهد
+ *  ۵) هر مبلغ عدد صحیح افغانی باشد
  *
  * با seed اجرا می‌شود، پس هر شکست دقیقاً قابل تکرار است.
  */
@@ -40,6 +41,7 @@ import {
 import { computeStock, computeCustomerBalances, computeSupplierBalances } from '../src/lib/integrity'
 import { applyDocEffects } from '../src/lib/sync'
 import { mergeProducts } from '../src/lib/merge'
+import { netWorth, computeNetWorth } from '../src/lib/networth'
 
 // ── تصادفِ قابل تکرار ────────────────────────────────────────────
 function rng(seed: number) {
@@ -530,7 +532,21 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
     for (const b of (await boxBalances()).boxes)
       if (b.balance < -0.5) return bad('پول منفی', `${b.name} = ${b.balance}`)
 
-    // ۴) هر مبلغ عدد صحیح باشد
+    // ۴) «دارایی خالص» از هر دو راه یکی باشد — از دیتابیس و از داده‌های خام.
+    // اگر روزی یک صفحه دوباره فورمول خودش را بنویسد، اینجا سرخ می‌شود.
+    const nwDb = await netWorth()
+    const nwPure = computeNetWorth({
+      variants: await db.variants.toArray(),
+      movements: await db.cashMovements.toArray(),
+      customers: await db.customers.toArray(),
+      suppliers: await db.suppliers.toArray(),
+      purchases: await db.purchases.toArray()
+    })
+    if (nwDb.assets !== nwPure.assets)
+      return bad('دارایی خالص دو جواب داد', `${nwDb.assets} ≠ ${nwPure.assets}`)
+    if (!isInt(nwDb.assets)) return bad('دارایی خالص اعشاری', String(nwDb.assets))
+
+    // ۵) هر مبلغ عدد صحیح باشد
     for (const m of await db.cashMovements.toArray())
       if (!m.deleted && !isInt(m.amount)) return bad('پول اعشاری', `حرکت پول ${m.id} = ${m.amount}`)
     for (const c of custs) if (!isInt(c.balance)) return bad('پول اعشاری', `قرض مشتری ${c.id} = ${c.balance}`)

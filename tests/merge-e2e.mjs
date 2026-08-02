@@ -46,7 +46,8 @@ await page.evaluate(async () => {
 })
 await page.reload()
 await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('text=گدام')
+await page.click('nav >> text=گدام')
+await page.waitForTimeout(800)
 
 const banner = page.locator('text=/جنس چند بار ثبت شده/')
 if (!(await banner.count())) fail('بنر «تکراری» نیامد')

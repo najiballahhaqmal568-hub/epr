@@ -4,6 +4,7 @@ import { db } from '../../db'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
 import { addCapital, addPartnerWithdrawal, recordCapitalCash, afn } from '../../lib/ops'
+import { netWorth } from '../../lib/networth'
 import { parseNum } from '../../lib/format'
 import Row from './Row'
 
@@ -28,30 +29,17 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
 
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
-  const allVariants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
-  const allCustomers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
-  const allSuppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
-  const unpaidLanding =
-    useLiveQuery(
-      async () =>
-        (await db.purchases.filter((p) => !p.deleted && Boolean(p.landingCost)).toArray()).reduce(
-          (s, p) => s + (p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)),
-          0
-        ),
-      []
-    ) ?? 0
+  const nw = useLiveQuery(() => netWorth(), [])
   const yearStart = useLiveQuery(async () => Number((await db.settings.get('partnershipStart'))?.value ?? 0), [])
 
-  const stockValue = allVariants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
-  const cash = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
-  const receivables = allCustomers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
-  // پیش‌پرداخت مشتری (بستانکاری) — ما به او مقروض هستیم، از دارایی کم می‌شود
-  const customerCredits = allCustomers?.reduce((s, c) => s + Math.max(0, -c.balance), 0) ?? 0
-  const payables =
-    (allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0) + unpaidLanding
-  // طلب ما از تأمین‌کننده/صراف (پیشکی) — جزو دارایی است
-  const supplierCredits = allSuppliers?.filter((x) => x.kind !== 'partner').reduce((s, x) => s + Math.max(0, -x.balance), 0) ?? 0
-  const assets = stockValue + cash + receivables + supplierCredits - payables - customerCredits
+  const stockValue = nw?.stock ?? 0
+  const cash = nw?.cash ?? 0
+  const receivables = nw?.receivables ?? 0
+  const customerCredits = nw?.customerCredits ?? 0
+  // قرض اشخاص هم مثل قرض تأمین‌کننده از دارایی کم می‌شود
+  const payables = (nw?.payables ?? 0) + (nw?.loans ?? 0) + (nw?.unpaidLanding ?? 0)
+  const supplierCredits = nw?.supplierCredits ?? 0
+  const assets = nw?.assets ?? 0
 
   const start = yearStart ?? 0
   // هر پول که از تجارت بیرون رفته: برداشت، مصرف خانه، مصرف شخصی

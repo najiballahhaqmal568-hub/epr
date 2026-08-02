@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { netWorth } from '../../lib/networth'
 import { db, type Supplier } from '../../db'
 import { addLoan, repayLoan, convertLoanToCapital } from '../../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
@@ -104,22 +105,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
     [lender.id]
   )
   // دارایی خالص امروز — برای پیشنهاد سهم عادلانه
-  const assets = useLiveQuery(async () => {
-    const [variants, movements, customers, suppliers] = await Promise.all([
-      db.variants.filter((v) => !v.deleted).toArray(),
-      db.cashMovements.filter((m) => !m.deleted).toArray(),
-      db.customers.filter((c) => !c.deleted).toArray(),
-      db.suppliers.filter((x) => !x.deleted).toArray()
-    ])
-    const stock = variants.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
-    const cash = movements.reduce((s, m) => s + m.amount, 0)
-    const recv = customers.reduce((s, c) => s + Math.max(0, c.balance), 0)
-    const credits = customers.reduce((s, c) => s + Math.max(0, -c.balance), 0)
-    const others = suppliers.filter((x) => x.kind !== 'partner')
-    const pay = others.reduce((s, x) => s + Math.max(0, x.balance), 0)
-    const supCredit = others.reduce((s, x) => s + Math.max(0, -x.balance), 0)
-    return stock + cash + recv + supCredit - pay - credits
-  }, [])
+  const assets = useLiveQuery(async () => (await netWorth()).assets, [])
 
   const l = live ?? lender
   const owed = l.balance

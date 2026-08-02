@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
+import { netWorth } from '../lib/networth'
 import { db, type Sale, type Variant } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear } from '../lib/format'
 import { useSyncStatus, syncNow } from '../lib/sync'
@@ -35,7 +36,6 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
-  const suppliers = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted).toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
   const returns = useLiveQuery(() => db.returns.where('date').aboveOrEqual(yearStart).filter((r) => !r.deleted).toArray(), [yearStart])
   const unpaidLanding =
@@ -77,7 +77,8 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const monthNet = grossProfit(monthSales) - returnProfit(monthStart) - monthExpenses
   const yearNet = grossProfit(sales ?? []) - returnProfit(yearStart) - yearExpenses
 
-  const cashBalance = movements?.reduce((s, m) => s + m.amount, 0) ?? 0
+  const nw = useLiveQuery(() => netWorth(), [])
+  const cashBalance = nw?.cash ?? 0
   // پول در چند جا نگه داشته می‌شود — تفکیک روی داشبورد
   const boxMap = new Map<string, number>()
   movements?.forEach((m) => {
@@ -85,15 +86,14 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
     boxMap.set(b, (boxMap.get(b) ?? 0) + m.amount)
   })
   const boxRows = [...boxMap.entries()].sort((a, b) => (a[0] === 'دکان' ? -1 : b[0] === 'دکان' ? 1 : b[1] - a[1]))
-  const stockCount = variants?.reduce((s, v) => s + v.stockQty, 0) ?? 0
-  const stockValue = variants?.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0) ?? 0
-  const receivable = customers?.reduce((s, c) => s + Math.max(0, c.balance), 0) ?? 0
-  const payable =
-    suppliers?.filter((x) => x.kind !== 'partner' && x.kind !== 'lender').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
+  // همهٔ اجزای دارایی از یک جا می‌آید تا با ویزارد شروع سال و صفحهٔ شرکا فرق نکند
+  const stockCount = nw?.pairs ?? 0
+  const stockValue = nw?.stock ?? 0
+  const receivable = nw?.receivables ?? 0
+  const payable = nw?.payables ?? 0
   // قرض ما از اشخاص (قرض‌دهنده) — جدا دیده شود، چون سرمایه نیست و باید پس داده شود
-  const loans = suppliers?.filter((x) => x.kind === 'lender').reduce((s, x) => s + Math.max(0, x.balance), 0) ?? 0
-  const suppCredit =
-    suppliers?.filter((x) => x.kind !== 'partner' && x.kind !== 'lender').reduce((s, x) => s + Math.max(0, -x.balance), 0) ?? 0
+  const loans = nw?.loans ?? 0
+  const suppCredit = nw?.supplierCredits ?? 0
 
   const overdue = (customers ?? [])
     .filter((c) => c.balance > 0 && c.promiseDate && c.promiseDate < dayStart)

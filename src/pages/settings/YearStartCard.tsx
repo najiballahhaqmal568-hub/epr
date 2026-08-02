@@ -4,6 +4,7 @@ import { db } from '../../db'
 import { fmtNum, fmtMoney, fmtDateShort, parseNum } from '../../lib/format'
 import { Card, Field, inputCls, PrimaryBtn, Modal } from '../../components/ui'
 import { afn } from '../../lib/ops'
+import { netWorth } from '../../lib/networth'
 
 /**
  * شروع سال مالی: سرمایهٔ مالک را خودش حساب می‌کند تا مفاد روز اول دقیقاً صفر باشد.
@@ -46,30 +47,13 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
   const [pShare, setPShare] = useState('')
 
   const nums = useLiveQuery(async () => {
-    const [variants, movements, customers, suppliers] = await Promise.all([
-      db.variants.filter((v) => !v.deleted).toArray(),
-      db.cashMovements.filter((m) => !m.deleted).toArray(),
-      db.customers.filter((c) => !c.deleted).toArray(),
-      db.suppliers.filter((x) => !x.deleted).toArray()
-    ])
-    const others = suppliers.filter((x) => x.kind !== 'partner')
-    return {
-      stock: variants.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0),
-      pairs: variants.reduce((s, v) => s + v.stockQty, 0),
-      cash: movements.reduce((s, m) => s + m.amount, 0),
-      receivables: customers.reduce((s, c) => s + Math.max(0, c.balance), 0),
-      customerCredits: customers.reduce((s, c) => s + Math.max(0, -c.balance), 0),
-      payables: others.filter((x) => x.kind !== 'lender').reduce((s, x) => s + Math.max(0, x.balance), 0),
-      loans: others.filter((x) => x.kind === 'lender').reduce((s, x) => s + Math.max(0, x.balance), 0),
-      supplierCredits: others.reduce((s, x) => s + Math.max(0, -x.balance), 0),
-      partners: suppliers.filter((x) => x.kind === 'partner')
-    }
+    const [n, suppliers] = await Promise.all([netWorth(), db.suppliers.filter((x) => !x.deleted).toArray()])
+    return { ...n, partners: suppliers.filter((x) => x.kind === 'partner') }
   }, [])
 
   if (!nums) return null
 
-  const assets =
-    nums.stock + nums.cash + nums.receivables + nums.supplierCredits - nums.payables - nums.loans - nums.customerCredits
+  const assets = nums.assets
   const othersCapital = nums.partners.filter((p) => p.name !== ownerName.trim()).reduce((s, p) => s + (p.capital ?? 0), 0)
   const ownerCapital = afn(assets - othersCapital)
   const othersShare = nums.partners.filter((p) => p.name !== ownerName.trim()).reduce((s, p) => s + (p.share ?? 0), 0)
@@ -136,6 +120,9 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
             <Line label="طلب از مشتریان" value={nums.receivables} hint="در «مشتریان ← قرض قبلی»" />
             <Line label="قرض ما به تأمین‌کنندگان" value={nums.payables} red hint="در «خرید ← تأمین‌کنندگان»" />
             <Line label="قرض ما از اشخاص" value={nums.loans} red hint="در «خرید ← قرض‌دهنده‌ها»" />
+            {nums.unpaidLanding > 0 && (
+              <Line label="مصارف رسیدنِ پرداخت‌نشده" value={nums.unpaidLanding} red hint="کرایه و حمالی که هنوز نداده‌اید" />
+            )}
             {nums.customerCredits > 0 && <Line label="پیش‌پرداخت مشتریان" value={nums.customerCredits} red />}
             {nums.supplierCredits > 0 && <Line label="پیشکی ما نزد تأمین‌کننده" value={nums.supplierCredits} />}
           </div>
@@ -322,6 +309,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
             {nums.supplierCredits > 0 && <Line label="پیشکی نزد تأمین‌کننده" value={nums.supplierCredits} />}
             <Line label="قرض ما به تأمین‌کنندگان" value={nums.payables} red />
             <Line label="قرض ما از اشخاص" value={nums.loans} red />
+            {nums.unpaidLanding > 0 && <Line label="مصارف رسیدنِ پرداخت‌نشده" value={nums.unpaidLanding} red />}
             {nums.customerCredits > 0 && <Line label="پیش‌پرداخت مشتریان" value={nums.customerCredits} red />}
           </div>
           <div className="mt-2 flex items-center justify-between rounded-xl bg-teal-50 p-3">
