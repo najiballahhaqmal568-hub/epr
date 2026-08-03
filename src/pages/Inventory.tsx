@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Product, type Variant } from '../db'
-import { fmtNum, ageLabel } from '../lib/format'
+import { fmtNum, fmtMoney, ageLabel } from '../lib/format'
 import { inputCls, Fab, Empty, Card } from '../components/ui'
 import StockCartonWizard from './inventory/StockCartonWizard'
 import StocktakeModal from './inventory/StocktakeModal'
@@ -47,6 +47,10 @@ export default function Inventory() {
   })
 
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
+  // ارزش کل گدام — همان عددی که در راپورها و ویزارد شروع سال می‌آید
+  const valueOf = (list: Variant[]) => list.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
+  const totalValue = valueOf(variants ?? [])
+  const totalPairs = (variants ?? []).reduce((s, v) => s + v.stockQty, 0)
   // یک جنس که چند بار ثبت شده (کارتنی/جوړه‌ای/بوجی) — باید یکجا شود
   const dupGroups = findDuplicateGroups(products ?? [])
   const dupIds = new Set(dupGroups.flatMap((g) => g.products.map((p) => p.id!)))
@@ -87,11 +91,23 @@ export default function Inventory() {
         </button>
       )}
 
+      {totalPairs > 0 && (
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-800 p-3 text-white">
+          <span className="text-sm opacity-80">مجموع گدام</span>
+          <span className="text-left">
+            <span className="text-lg font-bold">{fmtMoney(totalValue)}</span>
+            <span className="block text-xs opacity-80">{fmtNum(totalPairs)} جوړه · به قیمت خرید</span>
+          </span>
+        </div>
+      )}
+
       <div className="mt-3">
         {filtered?.length === 0 && <Empty text="هنوز جنسی ثبت نشده. با دکمه + بوت جدید اضافه کنید." />}
         {filtered?.map((p) => {
           const vs = byProduct.get(p.id!) ?? []
           const totalStock = vs.reduce((s, v) => s + v.stockQty, 0)
+          // ارزش این جنس به قیمت تمام‌شده — همان تعریفی که «ارزش جنس گدام» در راپورها دارد
+          const value = valueOf(vs)
           const low = vs.some((v) => v.stockQty <= v.lowStock)
           return (
             <Card key={p.id}>
@@ -112,6 +128,7 @@ export default function Inventory() {
                 </div>
                 <div className="text-left">
                   <p className={`font-bold ${low ? 'text-red-600' : 'text-teal-700'}`}>{fmtNum(totalStock)} جوړه</p>
+                  {value > 0 && <p className="text-xs font-bold text-slate-600">ارزش: {fmtMoney(value)}</p>}
                   {(() => {
                     const pairs = p.carton?.items.reduce((s, it) => s + it.qty, 0) ?? 0
                     return pairs > 0 ? <p className="text-xs text-slate-400">≈ {fmtNum(Math.floor(totalStock / pairs))} کارتن ({fmtNum(pairs)}تایی)</p> : null
