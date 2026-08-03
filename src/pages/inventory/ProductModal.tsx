@@ -82,6 +82,11 @@ export function ProductModal({
     if (!name.trim()) return setError('نام بوت را بنویسید')
     const valid = forms.filter((f) => f.size.trim())
     if (!valid.length) return setError('حداقل یک سایز اضافه کنید')
+    // جنسی که موجودی دارد باید قیمت خرید داشته باشد — وگرنه در ارزش گدام،
+    // در دارایی خالص و در مفاد صفر حساب می‌شود و کسی خبردار نمی‌شود.
+    const noCost = valid.find((f) => parseNum(f.stockQty) > 0 && parseNum(f.purchasePrice) <= 0)
+    if (noCost)
+      return setError(`سایز ${noCost.size} موجودی دارد ولی قیمت خرید ندارد — بدون آن، ارزش گدام و مفاد غلط می‌شود`)
     try {
       let productId = product?.id
       const cartonItems = valid

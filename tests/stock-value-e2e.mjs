@@ -60,4 +60,49 @@ await page.waitForTimeout(600)
 const body2 = await page.locator('body').innerText()
 if (!/۱۲٬۰۰۰/.test(body2)) fail('ویزارد شروع سال عدد دیگری می‌گوید:\n' + body2.slice(0, 900))
 console.log('✅ همان عدد در ویزارد شروع سال هم می‌آید — ۱۲٬۰۰۰')
+
+// ── جنسی که موجودی دارد ولی قیمت خرید ندارد ──────────────────
+await page.keyboard.press('Escape')
+await page.evaluate(async () => {
+  const open = indexedDB.open('shoeErp')
+  await new Promise((r) => (open.onsuccess = r))
+  const dbx = open.result
+  const put = (store, obj) =>
+    new Promise((res, rej) => {
+      const t = dbx.transaction(store, 'readwrite')
+      const q = t.objectStore(store).add(obj)
+      q.onsuccess = () => res(q.result)
+      q.onerror = () => rej(q.error)
+    })
+  const p3 = await put('products', { name: 'چرمی شهرت', createdAt: Date.now() })
+  await put('variants', {
+    productId: p3, size: '35', color: 'سرخ',
+    stockQty: 42, purchasePrice: 0, retailPrice: 900, wholesalePrice: 800, lowStock: 2
+  })
+})
+await page.reload()
+await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.click('nav >> text=گدام')
+await page.waitForTimeout(700)
+const body3 = await page.locator('body').innerText()
+if (!/قیمت خرید ندارد/.test(body3)) fail('هشدارِ «قیمت خرید ندارد» نیامد:\n' + body3.slice(0, 900))
+if (!/۴۲ جوړه بی‌قیمت شمرده نشده/.test(body3)) fail('نوار مجموع نگفت چند جوړه شمرده نشده:\n' + body3.slice(0, 900))
+// مجموع نباید عوض شده باشد — چون آن ۴۲ جوړه قیمت ندارد
+if (!/۱۲٬۰۰۰/.test(body3)) fail('مجموع باید همان ۱۲٬۰۰۰ بماند')
+console.log('✅ جنس بدون قیمت خرید با هشدار سرخ نشان داده می‌شود، نه پنهان')
+
+// و فورم دیگر اجازه نمی‌دهد جنس نو بدون قیمت خرید ثبت شود
+await page.click('button:has-text("بوت جدید")')
+await page.waitForSelector('text=جنس کارتنی جدید')
+await page.click('text=ثبت عادی بدون کارتن')
+await page.waitForSelector('text=نام بوت', { timeout: 10000 })
+await page.fill('input[placeholder="مثلاً بوت چرمی مردانه"]', 'آزمایشی')
+await page.locator('input[placeholder="۴۲"]').first().fill('39')
+const nums = page.locator('input[inputmode="numeric"]')
+await nums.nth(1).fill('5') // موجودی ۵، ولی قیمت خرید خالی
+await page.click('button:has-text("ذخیره")')
+await page.waitForTimeout(800)
+const body4 = await page.locator('body').innerText()
+if (!/قیمت خرید ندارد/.test(body4)) fail('فورم اجازه داد جنس بدون قیمت خرید ثبت شود:\n' + body4.slice(0, 700))
+console.log('✅ فورم جلوی ثبت جنسِ موجودی‌دار بدون قیمت خرید را می‌گیرد')
 process.exit(0)

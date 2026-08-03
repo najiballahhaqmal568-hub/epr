@@ -51,6 +51,10 @@ export default function Inventory() {
   const valueOf = (list: Variant[]) => list.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
   const totalValue = valueOf(variants ?? [])
   const totalPairs = (variants ?? []).reduce((s, v) => s + v.stockQty, 0)
+  // موجودی دارد ولی قیمت خرید ندارد → در ارزش گدام و در مفاد اصلاً حساب نمی‌شود
+  const noPrice = (variants ?? []).filter((v) => v.stockQty > 0 && v.purchasePrice <= 0)
+  const noPriceIds = new Set(noPrice.map((v) => v.productId))
+  const noPricePairs = noPrice.reduce((s, v) => s + v.stockQty, 0)
   // یک جنس که چند بار ثبت شده (کارتنی/جوړه‌ای/بوجی) — باید یکجا شود
   const dupGroups = findDuplicateGroups(products ?? [])
   const dupIds = new Set(dupGroups.flatMap((g) => g.products.map((p) => p.id!)))
@@ -91,12 +95,31 @@ export default function Inventory() {
         </button>
       )}
 
+      {noPrice.length > 0 && (
+        <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">
+          <p className="mb-1 font-bold">
+            ⚠️ {fmtNum(noPrice.length)} سایز قیمت خرید ندارد ({fmtNum(noPricePairs)} جوړه)
+          </p>
+          <p>
+            این جوړه‌ها در «ارزش گدام»، در «دارایی خالص» و در سرمایهٔ شما <b>هیچ حساب نمی‌شوند</b> — و اگر فروخته شوند،
+            مفاد بیشتر از واقع نشان می‌دهد.
+          </p>
+          <p className="mt-1">
+            روی جنس بزنید و قیمت خرید را بنویسید:{' '}
+            <b>{(products ?? []).filter((p) => noPriceIds.has(p.id!)).slice(0, 4).map((p) => p.name).join('، ')}</b>
+          </p>
+        </div>
+      )}
+
       {totalPairs > 0 && (
         <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-800 p-3 text-white">
           <span className="text-sm opacity-80">مجموع گدام</span>
           <span className="text-left">
             <span className="text-lg font-bold">{fmtMoney(totalValue)}</span>
-            <span className="block text-xs opacity-80">{fmtNum(totalPairs)} جوړه · به قیمت خرید</span>
+            <span className="block text-xs opacity-80">
+              {fmtNum(totalPairs)} جوړه · به قیمت خرید
+              {noPricePairs > 0 && ` (${fmtNum(noPricePairs)} جوړه بی‌قیمت شمرده نشده)`}
+            </span>
           </span>
         </div>
       )}
@@ -128,7 +151,11 @@ export default function Inventory() {
                 </div>
                 <div className="text-left">
                   <p className={`font-bold ${low ? 'text-red-600' : 'text-teal-700'}`}>{fmtNum(totalStock)} جوړه</p>
-                  {value > 0 && <p className="text-xs font-bold text-slate-600">ارزش: {fmtMoney(value)}</p>}
+                  {vs.some((v) => v.stockQty > 0 && v.purchasePrice <= 0) ? (
+                    <p className="text-xs font-bold text-red-600">⚠️ قیمت خرید ندارد</p>
+                  ) : (
+                    value > 0 && <p className="text-xs font-bold text-slate-600">ارزش: {fmtMoney(value)}</p>
+                  )}
                   {(() => {
                     const pairs = p.carton?.items.reduce((s, it) => s + it.qty, 0) ?? 0
                     return pairs > 0 ? <p className="text-xs text-slate-400">≈ {fmtNum(Math.floor(totalStock / pairs))} کارتن ({fmtNum(pairs)}تایی)</p> : null
