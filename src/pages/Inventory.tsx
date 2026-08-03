@@ -49,10 +49,15 @@ export default function Inventory() {
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
   // ارزش کل گدام — همان عددی که در راپورها و ویزارد شروع سال می‌آید
   const valueOf = (list: Variant[]) => list.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
-  const totalValue = valueOf(variants ?? [])
-  const totalPairs = (variants ?? []).reduce((s, v) => s + v.stockQty, 0)
+  // وقتی جستجو فعال است، مجموع همان چیزی است که در فهرست دیده می‌شود —
+  // وگرنه آدم عددِ کلِ گدام را با چند جنسِ فلترشده مقایسه می‌کند و گیج می‌شود
+  const shownIds = new Set((filtered ?? []).map((p) => p.id!))
+  const shownVariants = (variants ?? []).filter((v) => shownIds.has(v.productId))
+  const searching = search.trim().length > 0
+  const totalValue = valueOf(shownVariants)
+  const totalPairs = shownVariants.reduce((s, v) => s + v.stockQty, 0)
   // موجودی دارد ولی قیمت خرید ندارد → در ارزش گدام و در مفاد اصلاً حساب نمی‌شود
-  const noPrice = (variants ?? []).filter((v) => v.stockQty > 0 && v.purchasePrice <= 0)
+  const noPrice = shownVariants.filter((v) => v.stockQty > 0 && v.purchasePrice <= 0)
   const noPriceIds = new Set(noPrice.map((v) => v.productId))
   const noPricePairs = noPrice.reduce((s, v) => s + v.stockQty, 0)
   // یک جنس که چند بار ثبت شده (کارتنی/جوړه‌ای/بوجی) — باید یکجا شود
@@ -113,7 +118,7 @@ export default function Inventory() {
 
       {totalPairs > 0 && (
         <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-800 p-3 text-white">
-          <span className="text-sm opacity-80">مجموع گدام</span>
+          <span className="text-sm opacity-80">{searching ? 'مجموع آنچه پیدا شد' : 'مجموع گدام'}</span>
           <span className="text-left">
             <span className="text-lg font-bold">{fmtMoney(totalValue)}</span>
             <span className="block text-xs opacity-80">

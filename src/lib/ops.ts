@@ -608,6 +608,33 @@ export async function addVariant(
 }
 
 /**
+ * اصلاح قیمت خرید یک سایز — با سند، نه با نوشتنِ مستقیمِ عدد.
+ * قیمت از روی اسناد بازسازی می‌شود، پس تغییری که سند ندارد دفعهٔ بعد پاک می‌شود.
+ */
+export async function setPurchaseCost(variantId: number, cost: number, productName = ''): Promise<void> {
+  if (cost < 0) throw new Error('قیمت خرید منفی نمی‌شود')
+  return db.transaction('rw', [db.variants, db.adjustments, db.products, db.sales, db.purchases, db.returns], async () => {
+    const v = await db.variants.get(variantId)
+    if (!v || v.deleted) throw new Error('جنس یافت نشد')
+    if (Math.abs(v.purchasePrice - cost) < 0.005) return
+    const p = await db.products.get(v.productId)
+    await db.adjustments.add({
+      date: Date.now(),
+      variantId,
+      productName: productName || p?.name || '',
+      size: v.size,
+      color: v.color,
+      // تعداد عوض نمی‌شود — این سند فقط قیمت را می‌گوید
+      qtyChange: 0,
+      reason: 'correction',
+      note: 'اصلاح قیمت خرید',
+      unitCost: cost
+    })
+    await applyRebuiltCosts()
+  })
+}
+
+/**
  * گذاشتن موجودی یک سایز روی عددِ شمرده‌شده — با سند تعدیل، نه با نوشتنِ عدد.
  * همان کاری که «شمارش گدام» می‌کند، ولی برای یک سایز.
  */

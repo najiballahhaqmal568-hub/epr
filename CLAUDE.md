@@ -57,6 +57,12 @@ If an operation moves stock in at a cost that no purchase document explains
 (merging duplicates), the adjustment document must carry `unitCost` so the
 rebuild can reproduce the same average.
 
+A hand-typed cost correction is the same problem: writing `purchasePrice`
+straight from a form is silently reverted by the next rebuild. Use
+`ops.setPurchaseCost()`, which writes an adjustment with `qtyChange: 0` and
+`unitCost` — a document that says "from here on, this size costs X" without
+touching the quantity.
+
 ### Derived values are never synced as absolutes
 
 `variant.stockQty`, `customer.balance`, `supplier.balance` are **rebuilt from
@@ -111,7 +117,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 364 checks in 51 scenarios
+npm test          # tests/checks.ts — currently 371 checks in 52 scenarios
 ```
 
 ```bash

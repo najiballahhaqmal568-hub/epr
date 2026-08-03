@@ -1,7 +1,7 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
 import { useState } from 'react'
 import { db, type Product, type Variant } from '../../db'
-import { addVariant, setOpeningStock } from '../../lib/ops'
+import { addVariant, setOpeningStock, setPurchaseCost } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { emptyVariant, downscalePhoto, type VariantForm } from './helpers'
@@ -114,10 +114,12 @@ export function ProductModal({
           lowStock: parseNum(f.lowStock)
         }
         if (f.id) {
-          const { stockQty, ...rest } = data
+          const { stockQty, purchasePrice, ...rest } = data
           await db.variants.update(f.id, rest)
-          // موجودی همیشه با سند تعدیل عوض می‌شود، نه با نوشتنِ مستقیمِ عدد
+          // موجودی و قیمت خرید هر دو با سند عوض می‌شوند، نه با نوشتنِ مستقیمِ عدد —
+          // وگرنه دفعهٔ بعد که قیمت از روی اسناد بازسازی شود، تغییر پاک می‌گردد
           await setOpeningStock(f.id, stockQty, name.trim())
+          await setPurchaseCost(f.id, purchasePrice, name.trim())
         } else {
           await addVariant(data, name.trim())
         }

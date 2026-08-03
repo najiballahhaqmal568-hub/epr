@@ -23,6 +23,7 @@ import {
   addAdjustment,
   addVariant,
   setOpeningStock,
+  setPurchaseCost,
   addCapital,
   addPartnerWithdrawal,
   reconcile,
@@ -1766,6 +1767,39 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await db.variants.update(vId, { stockQty: 0 })
       for (const a of adjustments) await applyDocEffects('adjustments', a as unknown as Record<string, unknown>, false)
       eq('موبایل نو همان ۲۰ را می‌سازد', (await db.variants.get(vId))!.stockQty, 20)
+    }
+  },
+  {
+    name: 'اصلاح قیمت خرید با سند می‌ماند و پاک نمی‌شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(100000)
+      await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+      eq('قیمت از خرید', (await db.variants.get(vId))!.purchasePrice, 500)
+
+      // مالک قیمت را اصلاح می‌کند — مثلاً ۵۰۰ اشتباه بود و ۹۰۰ درست است
+      await setPurchaseCost(vId, 900, 'اسپرتکس')
+      eq('قیمت اصلاح شد', (await db.variants.get(vId))!.purchasePrice, 900)
+
+      // حالا کارهایی که بازسازی قیمت را صدا می‌زنند — نباید اصلاح را پاک کنند
+      const p2 = (await db.products.add({ name: 'دیگر', createdAt: Date.now() })) as number
+      await addVariant(
+        { productId: p2, size: '41', color: 'سیاه', purchasePrice: 300, retailPrice: 600, wholesalePrice: 500, stockQty: 5, lowStock: 2 },
+        'دیگر'
+      )
+      eq('بعد از افزودن جنس نو', (await db.variants.get(vId))!.purchasePrice, 900)
+
+      await addPurchase(buy(supId, vId, 10, 900, { paid: 9000 }))
+      eq('خرید نو با همان قیمت، میانگین را عوض نمی‌کند', (await db.variants.get(vId))!.purchasePrice, 900)
+
+      // و موبایل دوم هم به همان ۹۰۰ می‌رسد
+      eq('موبایل نو همان قیمت را می‌سازد', (await rebuildCosts()).get(vId)!, 900)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // سند اصلاح، تعداد را دست نزده
+      const stock = (await db.variants.get(vId))!.stockQty
+      eq('موجودی دست‌نخورده', stock, 20)
     }
   },
   {

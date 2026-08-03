@@ -32,8 +32,8 @@ export function weightedCost(oldQty: number, oldCost: number, addQty: number, ad
 }
 
 type Event =
-  | { date: number; seq: number; variantId: number; qty: number; unitCost: number }
-  | { date: number; seq: number; variantId: number; qty: number; unitCost?: undefined }
+  | { date: number; seq: number; variantId: number; qty: number; unitCost: number; setCost?: boolean }
+  | { date: number; seq: number; variantId: number; qty: number; unitCost?: undefined; setCost?: undefined }
 
 /**
  * قیمت تمام‌شدهٔ مورد انتظار هر سایز، از روی اسناد.
@@ -63,6 +63,9 @@ export function computeCosts(
     // سندی که قیمت با خود دارد (یکجا کردن دو جنس) مثل خرید در میانگین می‌نشیند
     if (a.unitCost !== undefined && a.qtyChange > 0)
       ev.push({ date: a.date, seq: seq++, variantId: a.variantId, qty: a.qtyChange, unitCost: a.unitCost })
+    // سندِ «اصلاح قیمت خرید» — تعداد را عوض نمی‌کند، فقط قیمت را از همان لحظه می‌گذارد
+    else if (a.unitCost !== undefined && a.qtyChange === 0)
+      ev.push({ date: a.date, seq: seq++, variantId: a.variantId, qty: 0, unitCost: a.unitCost, setCost: true })
     else ev.push({ date: a.date, seq: seq++, variantId: a.variantId, qty: a.qtyChange })
   }
   for (const r of returns) {
@@ -80,7 +83,11 @@ export function computeCosts(
   for (const e of ev) {
     const q = qty.get(e.variantId) ?? 0
     if (e.unitCost !== undefined) {
-      cost.set(e.variantId, weightedCost(q, cost.get(e.variantId) ?? fallback.get(e.variantId) ?? 0, e.qty, e.unitCost))
+      // اصلاح دستی، قیمت را مستقیم می‌گذارد؛ ورود جنس، میانگین وزنی می‌سازد
+      cost.set(
+        e.variantId,
+        e.setCost ? e.unitCost : weightedCost(q, cost.get(e.variantId) ?? fallback.get(e.variantId) ?? 0, e.qty, e.unitCost)
+      )
     }
     qty.set(e.variantId, q + e.qty)
   }
