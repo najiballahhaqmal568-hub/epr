@@ -16,6 +16,7 @@ export default function Sales({ isStaff }: { isStaff?: boolean }) {
   const [returning, setReturning] = useState<Sale | null>(null)
   const [exchanging, setExchanging] = useState<Sale | null>(null)
   const [receiptFor, setReceiptFor] = useState<Sale | null>(null)
+  const [justSaved, setJustSaved] = useState<Sale | null>(null)
   const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().filter((s) => !s.deleted).limit(100).toArray(), [])
 
   const tabCls = (v: string) =>
@@ -35,6 +36,41 @@ export default function Sales({ isStaff }: { isStaff?: boolean }) {
       {view === 'stats' && <SalesStats isStaff={isStaff} />}
       {view === 'list' && (
         <>
+      {justSaved && (
+        <div className="mb-3 rounded-xl bg-teal-50 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-bold text-teal-800">✅ فروش ثبت شد — {fmtMoney(justSaved.total)}</p>
+              <p className="truncate text-xs text-teal-700">
+                {justSaved.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
+              </p>
+            </div>
+            <button onClick={() => setJustSaved(null)} className="shrink-0 text-teal-700">
+              ✕
+            </button>
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => {
+                setReceiptFor(justSaved)
+                setJustSaved(null)
+              }}
+              className="flex-1 rounded-lg bg-white py-2 text-sm font-bold text-teal-800"
+            >
+              🧾 رسید
+            </button>
+            <button
+              onClick={() => {
+                setJustSaved(null)
+                setShowNew(true)
+              }}
+              className="flex-1 rounded-lg bg-teal-700 py-2 text-sm font-bold text-white"
+            >
+              ＋ فروش بعدی
+            </button>
+          </div>
+        </div>
+      )}
       {sales?.length === 0 && <Empty text="هنوز فروشی ثبت نشده." />}
       {sales?.map((s) => {
         const remainder = s.total - s.paid
@@ -96,19 +132,14 @@ export default function Sales({ isStaff }: { isStaff?: boolean }) {
           onClose={() => setShowNew(false)}
           onSaved={(sale) => {
             setShowNew(false)
-            setReceiptFor(sale)
+            // رسید خودبه‌خود باز نمی‌شود — در وقت شلوغی یک قدم اضافی بود.
+            // فقط یک تأیید کوتاه، و اگر رسید خواستند از همان‌جا باز می‌شود.
+            setJustSaved(sale)
           }}
         />
       )}
       {receiptFor && (
-        <ReceiptModal
-          sale={receiptFor}
-          onClose={() => setReceiptFor(null)}
-          onNext={() => {
-            setReceiptFor(null)
-            setShowNew(true)
-          }}
-        />
+        <ReceiptModal sale={receiptFor} onClose={() => setReceiptFor(null)} />
       )}
       {returning && <ReturnModal sale={returning} onClose={() => setReturning(null)} />}
       {exchanging && <ExchangeModal sale={exchanging} onClose={() => setExchanging(null)} />}
