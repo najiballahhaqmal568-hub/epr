@@ -10,6 +10,7 @@ import ReorderModal from './inventory/ReorderModal'
 import ProductModal from './inventory/ProductModal'
 import MergeProductsModal from './inventory/MergeProductsModal'
 import { findDuplicateGroups } from '../lib/merge'
+import type { ProductDraft } from './inventory/helpers'
 
 /** عکس را کوچک می‌کند تا دیتابیس و بکاپ سنگین نشود */
 
@@ -21,6 +22,7 @@ export default function Inventory() {
   const [showReorder, setShowReorder] = useState(false)
   const [showStocktake, setShowStocktake] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
+  const [draft, setDraft] = useState<ProductDraft | null>(null)
 
   const products = useLiveQuery(() => db.products.orderBy('name').filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
@@ -200,8 +202,9 @@ export default function Inventory() {
       <Fab onClick={() => setShowWizard(true)} label="بوت جدید" />
       {showWizard && (
         <StockCartonWizard
-          onClassic={() => {
+          onClassic={(d) => {
             setShowWizard(false)
+            setDraft(d)
             setEditing('new')
           }}
           onClose={() => setShowWizard(false)}
@@ -212,7 +215,11 @@ export default function Inventory() {
           product={editing === 'new' ? null : editing}
           variants={editing === 'new' ? [] : (byProduct.get(editing.id!) ?? [])}
           allProducts={products ?? []}
-          onClose={() => setEditing(null)}
+          draft={editing === 'new' ? draft : null}
+          onClose={() => {
+            setEditing(null)
+            setDraft(null)
+          }}
         />
       )}
       {adjusting && <AdjustModal variant={adjusting.v} product={adjusting.p} onClose={() => setAdjusting(null)} />}

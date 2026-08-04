@@ -10,6 +10,17 @@ export interface VariantForm {
   cartonQty: string
 }
 
+/** آنچه در قدم اول ویزارد کارتنی نوشته شده — تا با رفتن به فورم کامل گم نشود */
+export interface ProductDraft {
+  name: string
+  brand: string
+  color: string
+  photo?: string
+  purchasePrice: string
+  retailPrice: string
+  wholesalePrice: string
+}
+
 export const emptyVariant = (): VariantForm => ({
   size: '',
   color: '',

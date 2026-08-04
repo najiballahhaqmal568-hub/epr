@@ -4,14 +4,20 @@ import { db } from '../../db'
 import { addVariant } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls } from '../../components/ui'
-import { downscalePhoto } from './helpers'
+import { downscalePhoto, type ProductDraft } from './helpers'
 
 /**
  * ثبت جنس کارتنی در گدام — همان ترتیب ویزارد خرید:
  * ۱) مشخصات و عکس  ۲) تعداد کارتن  ۳) ظرفیت کارتن  ۴) شماره‌بندی تا پوره شدن
  * ۵) حساب خودکار. موجودی اولیه سایز به سایز با سند «موجودی اولیه» ثبت می‌شود.
  */
-export function StockCartonWizard({ onClassic, onClose }: { onClassic: () => void; onClose: () => void }) {
+export function StockCartonWizard({
+  onClassic,
+  onClose
+}: {
+  onClassic: (draft: ProductDraft) => void
+  onClose: () => void
+}) {
   const [step, setStep] = useState(1)
   const [name, setName] = useState('')
   const [brand, setBrand] = useState('')
@@ -137,7 +143,21 @@ export function StockCartonWizard({ onClassic, onClose }: { onClassic: () => voi
               <input className={inputCls} inputMode="numeric" value={wholesale} onChange={(e) => setWholesale(e.target.value)} />
             </Field>
           </div>
-          <button onClick={onClassic} className="mb-2 text-sm text-teal-700">
+          <button
+            onClick={() =>
+              // آنچه تا حالا نوشته شده با خود می‌رود — دوباره نوشتن لازم نیست
+              onClassic({
+                name,
+                brand,
+                color,
+                photo,
+                purchasePrice: cost,
+                retailPrice: retail,
+                wholesalePrice: wholesale
+              })
+            }
+            className="mb-2 text-sm text-teal-700"
+          >
             ثبت عادی بدون کارتن (فورم کامل) ←
           </button>
         </>

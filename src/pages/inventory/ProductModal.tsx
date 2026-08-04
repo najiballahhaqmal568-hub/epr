@@ -4,23 +4,26 @@ import { db, type Product, type Variant } from '../../db'
 import { addVariant, setOpeningStock, setPurchaseCost } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
-import { emptyVariant, downscalePhoto, type VariantForm } from './helpers'
+import { emptyVariant, downscalePhoto, type VariantForm, type ProductDraft } from './helpers'
 
 export function ProductModal({
   product,
   variants,
   allProducts,
+  draft,
   onClose
 }: {
   product: Product | null
   variants: Variant[]
   allProducts: Product[]
+  /** آنچه در ویزارد کارتنی نوشته شده بود — تا دوباره نوشتن لازم نباشد */
+  draft?: ProductDraft | null
   onClose: () => void
 }) {
-  const [name, setName] = useState(product?.name ?? '')
-  const [brand, setBrand] = useState(product?.brand ?? '')
+  const [name, setName] = useState(product?.name ?? draft?.name ?? '')
+  const [brand, setBrand] = useState(product?.brand ?? draft?.brand ?? '')
   const [category, setCategory] = useState(product?.category ?? '')
-  const [photo, setPhoto] = useState<string | undefined>(product?.photo)
+  const [photo, setPhoto] = useState<string | undefined>(product?.photo ?? draft?.photo)
   const [forms, setForms] = useState<VariantForm[]>(
     variants.length
       ? variants.map((v) => ({
@@ -36,7 +39,15 @@ export function ProductModal({
             product?.carton?.items.find((it) => it.size === v.size && it.color === v.color)?.qty ?? ''
           )
         }))
-      : [emptyVariant()]
+      : [
+          {
+            ...emptyVariant(),
+            color: draft?.color ?? '',
+            purchasePrice: draft?.purchasePrice ?? '',
+            retailPrice: draft?.retailPrice ?? '',
+            wholesalePrice: draft?.wholesalePrice ?? ''
+          }
+        ]
   )
   const [cartonPrice, setCartonPrice] = useState(product?.carton?.price ? String(product.carton.price) : '')
   const [showBulk, setShowBulk] = useState(false)
