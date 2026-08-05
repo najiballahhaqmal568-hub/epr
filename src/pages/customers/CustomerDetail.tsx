@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../../db'
-import { addPayment, addOpeningDebt } from '../../lib/ops'
+import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger } from '../../lib/ledger'
@@ -14,6 +14,10 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   const [amount, setAmount] = useState('')
   const [debtStr, setDebtStr] = useState('')
   const [debtNote, setDebtNote] = useState('')
+  // سند اشتباهی که مالک می‌خواهد پاک کند — اول اثرش نشان داده می‌شود
+  const [toDelete, setToDelete] = useState<
+    { id: number; label: string; partyName: string; before: number; after: number; cash: number } | null
+  >(null)
 
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
   const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
@@ -134,11 +138,61 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                 {fmtMoney(Math.abs(r.delta))}
               </p>
               <p className="text-xs text-slate-500">قرض شد: {fmtMoney(r.balance)}</p>
+              {/* فقط سندهای دستی (دریافت پول و قرض قبلی) — فروش و مرجوعی از راه خودشان پاک می‌شوند */}
+              {r.source?.table === 'payments' && (
+                <button
+                  className="mt-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700"
+                  onClick={async () => {
+                    const im = await deletePaymentImpact(r.source!.id)
+                    if (im) setToDelete({ id: r.source!.id, ...im })
+                  }}
+                >
+                  اشتباه بود — پاک کن
+                </button>
+              )}
             </div>
           </div>
         </div>
       ))}
       {ledger.length === 0 && <p className="text-sm text-slate-400">هنوز سندی نیست.</p>}
+
+      {toDelete && (
+        <Modal title="پاک کردن سند اشتباهی" onClose={() => setToDelete(null)}>
+          <p className="mb-3 text-sm text-slate-700">
+            «{toDelete.label}» در حساب {toDelete.partyName} پاک می‌شود. اثرش این است:
+          </p>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+            <p className="flex justify-between">
+              <span className="text-slate-500">قرض حالا</span>
+              <span className="font-bold">{fmtMoney(toDelete.before)}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-slate-500">قرض بعد از پاک کردن</span>
+              <span className="font-bold text-teal-700">{fmtMoney(toDelete.after)}</span>
+            </p>
+            {toDelete.cash !== 0 && (
+              <p className="mt-1 flex justify-between border-t border-slate-200 pt-1">
+                <span className="text-slate-500">صندوق</span>
+                <span className="font-bold">
+                  {toDelete.cash > 0 ? '+' : '−'}
+                  {fmtMoney(Math.abs(toDelete.cash))}
+                </span>
+              </p>
+            )}
+          </div>
+          <p className="mb-3 text-xs text-slate-500">
+            سند پاک می‌شود ولی نشانش در پشتیبان می‌ماند — هیچ عددی بی‌سند تغییر نمی‌کند.
+          </p>
+          <PrimaryBtn
+            onClick={async () => {
+              await deletePayment(toDelete.id)
+              setToDelete(null)
+            }}
+          >
+            بلی، پاک کن
+          </PrimaryBtn>
+        </Modal>
+      )}
 
       {showEdit && <CustomerModal customer={c} onClose={() => setShowEdit(false)} />}
     </Modal>

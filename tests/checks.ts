@@ -35,6 +35,8 @@ import {
   boxBalances,
   deleteSale,
   deleteSaleImpact,
+  deletePayment,
+  deletePaymentImpact,
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
@@ -1241,6 +1243,50 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('پول تغییر نمی‌کند', im3.after, im3.before)
 
       is('فروش حذف‌شده اثری ندارد', await deleteSaleImpact(saleId), null)
+    }
+  },
+  {
+    name: 'قرض اشتباهی — پاک شود و حساب به تصفیه برگردد',
+    run: async () => {
+      const cId = await newCustomer()
+      await seedCash(10000)
+
+      // مشتری حسابش را خلاص کرده بود؛ حالا به اشتباه ۳٬۰۰۰ قرض قبلی به نامش خورد
+      await addOpeningDebt('customer', cId, 'مشتری', 3000)
+      eq('قرض اشتباهی نشست', (await db.customers.get(cId))!.balance, 3000)
+      const wrong = (await db.payments.where('[partyType+partyId]').equals(['customer', cId]).toArray())[0]
+
+      const im = (await deletePaymentImpact(wrong.id!))!
+      eq('قرض حالا', im.before, 3000)
+      eq('قرض بعد از پاک کردن', im.after, 0)
+      eq('قرض قبلی پولی جابه‌جا نکرده بود', im.cash, 0)
+
+      await deletePayment(wrong.id!)
+      eq('حساب تصفیه شد', (await db.customers.get(cId))!.balance, 0)
+      eq('صندوق دست نخورد', await cashBalance(SHOP_BOX), 10000)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      is('دوباره پاک کردن اثری ندارد', await deletePaymentImpact(wrong.id!), null)
+
+      // دریافت پول اشتباهی: هم قرض و هم صندوق باید برگردند
+      await addOpeningDebt('customer', cId, 'مشتری', 5000)
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 2000 })
+      eq('قرض بعد از دریافت', (await db.customers.get(cId))!.balance, 3000)
+      eq('صندوق بعد از دریافت', await cashBalance(SHOP_BOX), 12000)
+
+      const recv = (await db.payments.where('[partyType+partyId]').equals(['customer', cId]).filter((p) => p.amount > 0).toArray())[0]
+      const im2 = (await deletePaymentImpact(recv.id!))!
+      eq('پولی که از صندوق پس می‌رود', im2.cash, -2000)
+      await deletePayment(recv.id!)
+      eq('قرض دوباره ۵٬۰۰۰ شد', (await db.customers.get(cId))!.balance, 5000)
+      eq('صندوق هم برگشت', await cashBalance(SHOP_BOX), 10000)
+      eq('دفتر پول با صندوق برابر ماند', await cashLedgerEnd(), await cashBalance())
+      is('کنترل حساب‌ها باز هم سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // موبایل دیگر با پخش سندها باید به همین عدد برسد
+      const live = await db.payments.filter((p) => !p.deleted).toArray()
+      await db.customers.update(cId, { balance: 0 })
+      for (const p of live) await applyDocEffects('payments', p as unknown as Record<string, unknown>, false)
+      eq('موبایل نو هم ۵٬۰۰۰ می‌سازد', (await db.customers.get(cId))!.balance, 5000)
     }
   },
   {

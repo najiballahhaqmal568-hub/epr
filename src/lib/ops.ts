@@ -1,4 +1,5 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
+import { effectsOf } from './effects'
 import { db, makeSku, landingUnpaidOf, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
@@ -326,6 +327,64 @@ export async function addPayment(payment: Payment): Promise<number> {
  * سند پرداخت با مبلغ منفی ثبت می‌شود تا بین دستگاه‌ها همگام شود؛
  * نه فروش است، نه در مفاد می‌آید و نه صندوق را تغییر می‌دهد.
  */
+/**
+ * حذف یک سند پرداخت یا «قرض قبلی» که اشتباه ثبت شده.
+ *
+ * اثرش از روی همان تعریف مشترک (effectsOf) برعکس می‌شود، پس با «کنترل
+ * حساب‌ها» و با موبایل دوم می‌خواند. اگر پولی جابه‌جا شده بود، سندِ برگشت
+ * نوشته می‌شود — سند قدیم پاک نمی‌شود تا رد کار بماند.
+ */
+export async function deletePayment(paymentId: number): Promise<void> {
+  return db.transaction('rw', [db.payments, db.customers, db.suppliers, db.cashMovements], async () => {
+    const p = await db.payments.get(paymentId)
+    if (!p || p.deleted) return
+    for (const e of effectsOf('payments', p)) {
+      const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
+      if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
+    }
+    // «قرض قبلی» (مبلغ منفی) و حوالهٔ صراف پولی جابه‌جا نکرده‌اند
+    const hadCash = p.amount > 0 && !(p.partyType === 'supplier' && p.via === 'sarraf')
+    if (hadCash) {
+      await movement(
+        {
+          date: Date.now(),
+          type: p.partyType === 'customer' ? 'customerPayment' : 'supplierPayment',
+          refId: paymentId,
+          amount: p.partyType === 'customer' ? -p.amount : p.amount,
+          note: `حذف — ${p.partyName}`
+        },
+        // اصلاح اشتباه است؛ حتی اگر پول کم شود باید ثبت گردد
+        { allowNegative: true }
+      )
+    }
+    await db.payments.update(paymentId, { deleted: true })
+  })
+}
+
+/**
+ * اثر حذف یک سند بر حساب — پیش از تأیید نشان داده می‌شود تا مالک بداند
+ * چه عددی چطور عوض می‌شود.
+ */
+export async function deletePaymentImpact(
+  paymentId: number
+): Promise<{ label: string; partyName: string; before: number; after: number; cash: number } | null> {
+  const p = await db.payments.get(paymentId)
+  if (!p || p.deleted) return null
+  const table = p.partyType === 'customer' ? db.customers : db.suppliers
+  const row = await table.get(p.partyId)
+  const before = row?.balance ?? 0
+  // اثر پرداخت بر بیلانس «منهای مبلغ» است، پس حذفش «به‌علاوهٔ مبلغ»
+  const after = before + p.amount
+  const hadCash = p.amount > 0 && !(p.partyType === 'supplier' && p.via === 'sarraf')
+  return {
+    label: p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت/پرداخت پول',
+    partyName: p.partyName,
+    before,
+    after,
+    cash: hadCash ? (p.partyType === 'customer' ? -p.amount : p.amount) : 0
+  }
+}
+
 export async function addOpeningDebt(
   partyType: 'customer' | 'supplier',
   partyId: number,

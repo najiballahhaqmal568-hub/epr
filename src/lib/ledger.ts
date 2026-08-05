@@ -14,6 +14,8 @@ export interface LedgerRow {
   note?: string
   /** کدام بوت — «کوهستان ۴۲ سیاه ×۲» */
   items?: string
+  /** سندی که این سطر از آن آمده — برای حذف اشتباه */
+  source?: { table: 'sales' | 'payments' | 'returns'; id: number }
   /** اثر این سند بر عدد نهایی */
   delta: number
   /** عدد بعد از این سند */
@@ -55,7 +57,7 @@ export function itemsLabel(lines: { productName: string; size: string; color: st
  * مثبت = مشتری به ما قرضدار است.
  */
 export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns: ReturnDoc[]): LedgerRow[] {
-  type Ev = { key: string; date: number; label: string; note?: string; items?: string; delta: number }
+  type Ev = LedgerRow extends never ? never : Omit<LedgerRow, 'balance'>
   const events: Ev[] = []
 
   for (const s of sales) {
@@ -67,6 +69,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       label: credit > 0 ? 'فروش قرضی' : 'پرداخت اضافی در فروش',
       note: `فاکتور ${fmtNum(s.total)} — نقد ${fmtNum(s.paid)}`,
       items: itemsLabel(s.lines),
+      source: { table: 'sales', id: s.id! },
       delta: credit
     })
   }
@@ -78,6 +81,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       date: p.date,
       label: p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
       note: p.amount < 0 ? undefined : p.note,
+      source: { table: 'payments', id: p.id! },
       // دریافت پول قرض را کم می‌کند، قرض قبلی (مبلغ منفی) آن را زیاد
       delta: -p.amount
     })
@@ -91,6 +95,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       label: 'مرجوعی — کم شدن از قرض',
       note: r.reason,
       items: itemsLabel(r.lines),
+      source: { table: 'returns', id: r.id! },
       delta: -r.amount
     })
   }
