@@ -12,6 +12,15 @@ import MergeProductsModal from './inventory/MergeProductsModal'
 import { findDuplicateGroups } from '../lib/merge'
 import type { ProductDraft } from './inventory/helpers'
 
+type SortKey = 'name' | 'newest' | 'oldest' | 'value'
+
+const SORTS: { id: SortKey; label: string }[] = [
+  { id: 'name', label: 'حرف (الف–ی)' },
+  { id: 'newest', label: 'تازه‌ترین' },
+  { id: 'oldest', label: 'کهنه‌ترین در گدام' },
+  { id: 'value', label: 'ارزش' }
+]
+
 /** عکس را کوچک می‌کند تا دیتابیس و بکاپ سنگین نشود */
 
 export default function Inventory() {
@@ -23,6 +32,12 @@ export default function Inventory() {
   const [showStocktake, setShowStocktake] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [draft, setDraft] = useState<ProductDraft | null>(null)
+  // چیدمان انتخابی یادش می‌ماند تا هر بار دوباره انتخاب نشود
+  const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('stockSort') as SortKey) || 'name')
+  const chooseSort = (k: SortKey) => {
+    setSort(k)
+    localStorage.setItem('stockSort', k)
+  }
 
   const products = useLiveQuery(() => db.products.orderBy('name').filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
@@ -46,6 +61,27 @@ export default function Inventory() {
       }) ||
       (vs.length === 0 && words.every((w) => `${p.name} ${p.brand ?? ''}`.toLowerCase().includes(w.toLowerCase())))
     )
+  })
+
+  // تاریخِ هر جنس: تازه‌ترین ورود، و کهنه‌ترین جوړهٔ موجود (همان «در گدام: …»)
+  const newestOf = (p: Product) => {
+    const vs = byProduct.get(p.id!) ?? []
+    return Math.max(p.createdAt ?? 0, ...vs.map((v) => v.lastPurchaseAt ?? 0))
+  }
+  const oldestOf = (p: Product) => {
+    const dates = (byProduct.get(p.id!) ?? []).filter((v) => v.stockQty > 0).map((v) => v.lastPurchaseAt ?? 0)
+    const live = dates.filter((d) => d > 0)
+    // جنسی که تاریخ ندارد آخر فهرست بماند، نه اول
+    return live.length ? Math.min(...live) : Number.MAX_SAFE_INTEGER
+  }
+  const valueOfProduct = (p: Product) =>
+    (byProduct.get(p.id!) ?? []).reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
+
+  const sorted = [...(filtered ?? [])].sort((a, b) => {
+    if (sort === 'newest') return newestOf(b) - newestOf(a)
+    if (sort === 'oldest') return oldestOf(a) - oldestOf(b)
+    if (sort === 'value') return valueOfProduct(b) - valueOfProduct(a)
+    return a.name.localeCompare(b.name, 'fa')
   })
 
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
@@ -90,6 +126,21 @@ export default function Inventory() {
         onChange={(e) => setSearch(e.target.value)}
       />
 
+      <div className="mt-2 flex gap-1 overflow-x-auto pb-1">
+        <span className="shrink-0 self-center text-xs text-slate-400">چیدمان:</span>
+        {SORTS.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => chooseSort(o.id)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+              sort === o.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
       {dupGroups.length > 0 && (
         <button
           onClick={() => setShowMerge(true)}
@@ -132,8 +183,8 @@ export default function Inventory() {
       )}
 
       <div className="mt-3">
-        {filtered?.length === 0 && <Empty text="هنوز جنسی ثبت نشده. با دکمه + بوت جدید اضافه کنید." />}
-        {filtered?.map((p) => {
+        {sorted.length === 0 && <Empty text="هنوز جنسی ثبت نشده. با دکمه + بوت جدید اضافه کنید." />}
+        {sorted.map((p) => {
           const vs = byProduct.get(p.id!) ?? []
           const totalStock = vs.reduce((s, v) => s + v.stockQty, 0)
           // ارزش این جنس به قیمت تمام‌شده — همان تعریفی که «ارزش جنس گدام» در راپورها دارد
