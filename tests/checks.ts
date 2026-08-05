@@ -48,7 +48,7 @@ import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
-import { pageOrder } from '../src/lib/format'
+import { pageOrder, familyPages } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
 
@@ -1275,6 +1275,17 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('قرض مثل همیشه', (await db.customers.get(cId))!.balance, 1000)
       is('صفحه سر جایش', (await db.customers.get(cId))!.bookPage, '۷')
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // خانواده: بعضی اعضا صفحه دارند، بعضی نه
+      const f1 = familyPages([{ bookPage: '۷' }, { bookPage: '۳' }, {}, { bookPage: '  ' }])
+      is('صفحه‌های خانواده به ترتیب', f1.pages.join(','), '۳,۷')
+      eq('بی‌صفحه‌ها شمرده می‌شوند', f1.missing, 2)
+      // همه در یک صفحه — یک بار گفته شود، نه چند بار
+      const f2 = familyPages([{ bookPage: '۵' }, { bookPage: '۵' }])
+      is('صفحهٔ تکراری یک بار', f2.pages.join(','), '۵')
+      eq('هیچ‌کس بی‌صفحه نیست', f2.missing, 0)
+      // ۱۰ نباید پیش از ۲ بیاید اینجا هم
+      is('ترتیب عددی در خانواده هم', familyPages([{ bookPage: '۱۰' }, { bookPage: '۲' }]).pages.join(','), '۲,۱۰')
     }
   },
   {

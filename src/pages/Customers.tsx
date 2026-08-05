@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../db'
-import { fmtNum, fmtMoney, fmtDateShort, startOfDay, toLatinDigits, pageOrder } from '../lib/format'
+import { fmtNum, fmtMoney, fmtDateShort, startOfDay, toLatinDigits, pageOrder, familyPages } from '../lib/format'
 import { inputCls, Fab, Empty, Card } from '../components/ui'
 import FamilyDetail from './customers/FamilyDetail'
 import CustomerModal from './customers/CustomerModal'
@@ -191,6 +191,22 @@ export default function Customers() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-bold text-slate-800">👨‍👩‍👦 خانوادهٔ {r.fam}</p>
+                  {(() => {
+                    // بعضی اعضا صفحه دارند و بعضی نه — هر دو باید دیده شوند
+                    const { pages, missing } = familyPages(r.members)
+                    if (!pages.length && !missing) return null
+                    return (
+                      <p className="text-xs font-bold text-slate-500">
+                        {pages.length > 0 && `📖 صفحهٔ ${pages.join('، ')}`}
+                        {pages.length > 0 && missing > 0 && ' · '}
+                        {missing > 0 && (
+                          <span className="text-amber-700">
+                            {fmtNum(missing)} نفر بی‌صفحه
+                          </span>
+                        )}
+                      </p>
+                    )
+                  })()}
                   <p className="text-xs text-slate-500">{r.members.map((m) => m.name).join('، ')}</p>
                 </div>
                 <div className="text-left">

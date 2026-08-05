@@ -64,7 +64,13 @@ export function FamilyDetail({
             onClick={() => onMember(m)}
             className="mb-1 flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-right active:bg-teal-50"
           >
-            <span className="font-bold text-slate-800">{m.name}</span>
+            <span className="min-w-0">
+              <span className="block font-bold text-slate-800">{m.name}</span>
+              {/* کدام عضو در کدام صفحهٔ دفتر است — و کدام هنوز صفحه ندارد */}
+              <span className={`block text-xs font-bold ${m.bookPage?.trim() ? 'text-slate-500' : 'text-amber-700'}`}>
+                {m.bookPage?.trim() ? `📖 صفحهٔ ${m.bookPage.trim()}` : 'بی‌صفحه — در ویرایش بنویسید'}
+              </span>
+            </span>
             <span className={`text-sm font-bold ${m.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.max(0, m.balance))}</span>
           </button>
         ))}

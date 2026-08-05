@@ -67,6 +67,27 @@ export function pageOrder(page?: string): { num: number; rest: string } {
   return { num: m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER, rest: s }
 }
 
+/**
+ * صفحه‌های دفترِ یک خانواده — اعضای یک خانواده گاهی هر کدام صفحهٔ خود را دارند،
+ * گاهی همه در یک صفحه‌اند و گاهی بعضی هیچ صفحه‌ای ندارند.
+ * پس هم صفحه‌های موجود را می‌گوید و هم اینکه چند نفر هنوز بی‌صفحه‌اند.
+ */
+export function familyPages(members: { bookPage?: string }[]): { pages: string[]; missing: number } {
+  const pages: string[] = []
+  let missing = 0
+  for (const m of members) {
+    const p = m.bookPage?.trim()
+    if (!p) missing++
+    else if (!pages.includes(p)) pages.push(p)
+  }
+  pages.sort((a, b) => {
+    const x = pageOrder(a)
+    const y = pageOrder(b)
+    return x.num - y.num || x.rest.localeCompare(y.rest)
+  })
+  return { pages, missing }
+}
+
 export function startOfDay(ts = Date.now()): number {
   return new Date(ts).setHours(0, 0, 0, 0)
 }

@@ -29,6 +29,9 @@ await page.evaluate(async () => {
   await put('customers', { name: 'الف', type: 'retail', balance: 0, bookPage: '۱۰', createdAt: Date.now() })
   await put('customers', { name: 'ب', type: 'retail', balance: 0, bookPage: '۲', createdAt: Date.now() })
   await put('customers', { name: 'پ', type: 'retail', balance: 0, createdAt: Date.now() })
+  // خانواده: یکی صفحه دارد، یکی ندارد — همان چیزی که مالک دید
+  await put('customers', { name: 'کریم', type: 'retail', balance: 0, family: 'کریمی', bookPage: '۴', createdAt: Date.now() })
+  await put('customers', { name: 'رحیم', type: 'retail', balance: 0, family: 'کریمی', createdAt: Date.now() })
 })
 await page.reload()
 await page.waitForSelector('text=داشبورد', { timeout: 30000 })
@@ -43,6 +46,20 @@ const order = async () => {
 // نشانِ صفحه روی کارت
 if (!(await page.locator('text=📖 صفحهٔ ۱۰').count())) fail('نشان صفحهٔ دفتر روی کارت نیامد')
 console.log('✅ صفحهٔ دفتر روی کارت مشتری دیده می‌شود')
+
+// خانواده: هم صفحهٔ موجود، هم هشدارِ بی‌صفحه
+if (!(await page.locator('text=📖 صفحهٔ ۴').count())) fail('صفحهٔ عضو خانواده روی کارت خانواده نیامد')
+if (!(await page.locator('text=۱ نفر بی‌صفحه').count())) fail('هشدار «بی‌صفحه» در خانواده نیامد')
+console.log('✅ کارت خانواده: صفحهٔ ۴ و ۱ نفر بی‌صفحه')
+
+// داخل خانواده هم معلوم باشد کدام عضو صفحه ندارد
+await page.click('text=خانوادهٔ کریمی')
+await page.waitForTimeout(600)
+if (!(await page.locator('text=بی‌صفحه — در ویرایش بنویسید').count())) fail('عضو بی‌صفحه داخل خانواده نشان داده نشد')
+console.log('✅ داخل خانواده معلوم است کدام عضو بی‌صفحه است')
+await page.locator('button:has-text("✕"), button:has-text("×")').first().click().catch(() => {})
+await page.keyboard.press('Escape')
+await page.waitForTimeout(500)
 
 // چیدمان «صفحهٔ دفتر»: ب (۲) ← الف (۱۰) ← پ (بی‌صفحه)
 await page.click('button:has-text("صفحهٔ دفتر")')
