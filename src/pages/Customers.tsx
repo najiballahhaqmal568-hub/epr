@@ -7,12 +7,27 @@ import FamilyDetail from './customers/FamilyDetail'
 import CustomerModal from './customers/CustomerModal'
 import CustomerDetail from './customers/CustomerDetail'
 
+type SortKey = 'name' | 'debt' | 'promise' | 'quiet'
+
+const SORTS: { id: SortKey; label: string }[] = [
+  { id: 'name', label: 'حرف (الف–ی)' },
+  { id: 'debt', label: 'بیشترین قرض' },
+  { id: 'promise', label: 'وعدهٔ نزدیک' },
+  { id: 'quiet', label: 'دیر آمده' }
+]
+
 export default function Customers() {
   const [view, setView] = useState<'retail' | 'wholesale'>('retail')
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Customer | null>(null)
   const [familySel, setFamilySel] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // چیدمان انتخابی یادش می‌ماند
+  const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('custSort') as SortKey) || 'name')
+  const chooseSort = (k: SortKey) => {
+    setSort(k)
+    localStorage.setItem('custSort', k)
+  }
 
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const inView = customers?.filter((c) => (c.type ?? 'retail') === view) ?? []
@@ -20,6 +35,32 @@ export default function Customers() {
     (c) => !search || c.name.includes(search) || (c.phone ?? '').includes(search) || (c.family ?? '').includes(search)
   )
   const viewDebt = inView.reduce((s, c) => s + Math.max(0, c.balance), 0)
+
+  // آخرین معاملهٔ هر مشتری — برای «دیر آمده»
+  const lastSeen = useLiveQuery(async () => {
+    const [sales, payments] = await Promise.all([
+      db.sales.filter((x) => !x.deleted && typeof x.customerId === 'number').toArray(),
+      db.payments.filter((x) => !x.deleted && x.partyType === 'customer').toArray()
+    ])
+    const m = new Map<number, number>()
+    const put = (id: number, d: number) => m.set(id, Math.max(m.get(id) ?? 0, d))
+    for (const x of sales) put(x.customerId!, x.date)
+    for (const x of payments) put(x.partyId, x.date)
+    return m
+  }, [])
+
+  const seenOf = (c: Customer) => lastSeen?.get(c.id!) ?? 0
+  // وعده‌ای که نزدیک‌تر است اول؛ کسی که وعده ندارد آخر
+  const promiseOf = (c: Customer) => (c.balance > 0 && c.promiseDate ? c.promiseDate : Number.MAX_SAFE_INTEGER)
+
+  const byName = (a: string, b: string) => a.localeCompare(b, 'fa')
+  const sortCustomers = (list: Customer[]) =>
+    [...list].sort((a, b) => {
+      if (sort === 'debt') return Math.max(0, b.balance) - Math.max(0, a.balance)
+      if (sort === 'promise') return promiseOf(a) - promiseOf(b)
+      if (sort === 'quiet') return seenOf(a) - seenOf(b)
+      return byName(a.name, b.name)
+    })
 
   // در دفتر پرچون، اعضای یک خانواده یکجا دیده می‌شوند
   const families = new Map<string, Customer[]>()
@@ -32,6 +73,15 @@ export default function Customers() {
       singles.push(c)
     }
   }
+
+  // خانواده‌ها هم با همان قاعده چیده می‌شوند
+  const famDebtOf = (ms: Customer[]) => ms.reduce((s, m) => s + Math.max(0, m.balance), 0)
+  const famRows = [...families.entries()].sort(([fa, ma], [fb, mb]) => {
+    if (sort === 'debt') return famDebtOf(mb) - famDebtOf(ma)
+    if (sort === 'promise') return Math.min(...ma.map(promiseOf)) - Math.min(...mb.map(promiseOf))
+    if (sort === 'quiet') return Math.max(...ma.map(seenOf)) - Math.max(...mb.map(seenOf))
+    return byName(fa, fb)
+  })
 
   const tabCls = (v: string) =>
     `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
@@ -81,9 +131,24 @@ export default function Customers() {
         </div>
       </div>
       <input className={inputCls} placeholder="جستجو نام، تلفن یا خانواده..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="mt-2 flex gap-1 overflow-x-auto pb-1">
+        <span className="shrink-0 self-center text-xs text-slate-400">چیدمان:</span>
+        {SORTS.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => chooseSort(o.id)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+              sort === o.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
       <div className="mt-3">
         {filtered.length === 0 && <Empty text="مشتری‌ای در این دفتر ثبت نشده." />}
-        {[...families.entries()].map(([fam, members]) => {
+        {famRows.map(([fam, members]) => {
           const famDebt = members.reduce((s, m) => s + Math.max(0, m.balance), 0)
           return (
             <Card key={`f-${fam}`} onClick={() => setFamilySel(fam)}>
@@ -100,7 +165,7 @@ export default function Customers() {
             </Card>
           )
         })}
-        {singles.map(customerRow)}
+        {sortCustomers(singles).map(customerRow)}
       </div>
       <Fab onClick={() => setShowNew(true)} label="مشتری جدید" />
       {showNew && <CustomerModal customer={null} defaultType={view} onClose={() => setShowNew(false)} />}
