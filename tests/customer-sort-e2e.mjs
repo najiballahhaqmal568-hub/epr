@@ -30,18 +30,19 @@ await page.evaluate(async () => {
       q.onerror = () => rej(q.error)
     })
   const day = 86400000
-  const mk = async (name, balance, promise, seenAgo) => {
+  const mk = async (name, balance, promise, seenAgo, addedAgo) => {
     const id = await put('customers', {
-      name, type: 'retail', balance,
+      name, type: 'retail', balance, createdAt: Date.now() - addedAgo,
       ...(promise !== null ? { promiseDate: promise } : {})
     })
     await put('payments', {
       date: Date.now() - seenAgo, partyType: 'customer', partyId: id, partyName: name, amount: 1
     })
   }
-  await mk('الف', 1000, Date.now() + 30 * day, 0)
-  await mk('ب', 9000, Date.now() - day, 10 * day)
-  await mk('پ', 5000, null, 100 * day)
+  // تاریخ ثبت هم عمداً مخالف بقیه: پ تازه‌ترین، الف کهنه‌ترین
+  await mk('الف', 1000, Date.now() + 30 * day, 0, 90 * day)
+  await mk('ب', 9000, Date.now() - day, 10 * day, 30 * day)
+  await mk('پ', 5000, null, 100 * day, 0)
 })
 await page.reload()
 await page.waitForSelector('text=داشبورد', { timeout: 30000 })
@@ -60,6 +61,13 @@ await page.waitForTimeout(400)
 let o = await order()
 if (o.join(',') !== 'الف,ب,پ') fail('چیدمان حرفی درست نیست: ' + o.join(','))
 console.log('✅ حرف: ' + o.join(' ← '))
+
+// «تازه ثبت‌شده» — بر اساس تاریخِ ثبت مشتری
+await page.click('button:has-text("تازه ثبت‌شده")')
+await page.waitForTimeout(400)
+o = await order()
+if (o.join(',') !== 'پ,ب,الف') fail('چیدمان «تازه ثبت‌شده» درست نیست: ' + o.join(','))
+console.log('✅ تازه ثبت‌شده: ' + o.join(' ← '))
 
 await page.click('button:has-text("بیشترین قرض")')
 await page.waitForTimeout(400)

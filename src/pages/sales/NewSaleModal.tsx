@@ -123,7 +123,7 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
   async function quickAddCustomer() {
     const name = custSearch.trim()
     if (!name) return
-    const id = (await db.customers.add({ name, type: saleType, balance: 0 })) as number
+    const id = (await db.customers.add({ name, type: saleType, balance: 0, createdAt: Date.now() })) as number
     setCustomerId(id)
     setCustSearch('')
   }

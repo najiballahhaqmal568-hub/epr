@@ -90,7 +90,7 @@ export function CustomerModal({
           }
           if (customer?.id) await db.customers.update(customer.id, data)
           else {
-            const id = (await db.customers.add({ ...data, balance: 0 })) as number
+            const id = (await db.customers.add({ ...data, balance: 0, createdAt: Date.now() })) as number
             const debt = parseNum(openingDebt)
             if (debt > 0) await addOpeningDebt('customer', id, data.name, debt)
           }

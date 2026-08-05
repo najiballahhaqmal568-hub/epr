@@ -61,11 +61,18 @@ let o = await order()
 if (o.join(',') !== 'الف,ب,پ') fail('چیدمان حرفی درست نیست: ' + o.join(','))
 console.log('✅ حرف: ' + o.join(' ← '))
 
-await page.click('button:has-text("تازه‌ترین")')
+await page.click('button:has-text("تازه آمده به گدام")')
 await page.waitForTimeout(400)
 o = await order()
-if (o.join(',') !== 'ب,پ,الف') fail('چیدمان تازه‌ترین درست نیست: ' + o.join(','))
-console.log('✅ تازه‌ترین: ' + o.join(' ← '))
+if (o.join(',') !== 'ب,پ,الف') fail('چیدمان «تازه آمده» درست نیست: ' + o.join(','))
+console.log('✅ تازه آمده به گدام: ' + o.join(' ← '))
+
+// «تازه ثبت‌شده» — بر اساس تاریخِ ثبت جنس در اپ
+await page.click('button:has-text("تازه ثبت‌شده")')
+await page.waitForTimeout(400)
+o = await order()
+if (o.join(',') !== 'ب,پ,الف') fail('چیدمان «تازه ثبت‌شده» درست نیست: ' + o.join(','))
+console.log('✅ تازه ثبت‌شده: ' + o.join(' ← '))
 
 await page.click('button:has-text("کهنه‌ترین در گدام")')
 await page.waitForTimeout(400)

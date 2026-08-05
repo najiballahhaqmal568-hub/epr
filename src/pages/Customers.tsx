@@ -7,10 +7,11 @@ import FamilyDetail from './customers/FamilyDetail'
 import CustomerModal from './customers/CustomerModal'
 import CustomerDetail from './customers/CustomerDetail'
 
-type SortKey = 'name' | 'debt' | 'promise' | 'quiet'
+type SortKey = 'name' | 'added' | 'debt' | 'promise' | 'quiet'
 
 const SORTS: { id: SortKey; label: string }[] = [
   { id: 'name', label: 'حرف (الف–ی)' },
+  { id: 'added', label: 'تازه ثبت‌شده' },
   { id: 'debt', label: 'بیشترین قرض' },
   { id: 'promise', label: 'وعدهٔ نزدیک' },
   { id: 'quiet', label: 'دیر آمده' }
@@ -50,12 +51,15 @@ export default function Customers() {
   }, [])
 
   const seenOf = (c: Customer) => lastSeen?.get(c.id!) ?? 0
+  // مشتریان قدیمی تاریخ ثبت ندارند — شمارهٔ ردیف همان ترتیب ثبت است
+  const addedOf = (c: Customer) => c.createdAt ?? (c.id ?? 0)
   // وعده‌ای که نزدیک‌تر است اول؛ کسی که وعده ندارد آخر
   const promiseOf = (c: Customer) => (c.balance > 0 && c.promiseDate ? c.promiseDate : Number.MAX_SAFE_INTEGER)
 
   const byName = (a: string, b: string) => a.localeCompare(b, 'fa')
   const sortCustomers = (list: Customer[]) =>
     [...list].sort((a, b) => {
+      if (sort === 'added') return addedOf(b) - addedOf(a)
       if (sort === 'debt') return Math.max(0, b.balance) - Math.max(0, a.balance)
       if (sort === 'promise') return promiseOf(a) - promiseOf(b)
       if (sort === 'quiet') return seenOf(a) - seenOf(b)
@@ -77,6 +81,7 @@ export default function Customers() {
   // خانواده‌ها هم با همان قاعده چیده می‌شوند
   const famDebtOf = (ms: Customer[]) => ms.reduce((s, m) => s + Math.max(0, m.balance), 0)
   const famRows = [...families.entries()].sort(([fa, ma], [fb, mb]) => {
+    if (sort === 'added') return Math.max(...mb.map(addedOf)) - Math.max(...ma.map(addedOf))
     if (sort === 'debt') return famDebtOf(mb) - famDebtOf(ma)
     if (sort === 'promise') return Math.min(...ma.map(promiseOf)) - Math.min(...mb.map(promiseOf))
     if (sort === 'quiet') return Math.max(...ma.map(seenOf)) - Math.max(...mb.map(seenOf))

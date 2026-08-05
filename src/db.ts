@@ -58,6 +58,8 @@ export interface Customer extends Synced {
   flag?: 'good' | 'bad' | null
   /** وعدهٔ بعدی پرداخت */
   promiseDate?: number
+  /** تاریخ ثبت مشتری — برای چیدمان «تازه ثبت‌شده» */
+  createdAt?: number
 }
 
 export interface Supplier extends Synced {

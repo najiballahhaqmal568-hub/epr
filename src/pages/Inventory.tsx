@@ -12,11 +12,12 @@ import MergeProductsModal from './inventory/MergeProductsModal'
 import { findDuplicateGroups } from '../lib/merge'
 import type { ProductDraft } from './inventory/helpers'
 
-type SortKey = 'name' | 'newest' | 'oldest' | 'value'
+type SortKey = 'name' | 'added' | 'newest' | 'oldest' | 'value'
 
 const SORTS: { id: SortKey; label: string }[] = [
   { id: 'name', label: 'حرف (الف–ی)' },
-  { id: 'newest', label: 'تازه‌ترین' },
+  { id: 'added', label: 'تازه ثبت‌شده' },
+  { id: 'newest', label: 'تازه آمده به گدام' },
   { id: 'oldest', label: 'کهنه‌ترین در گدام' },
   { id: 'value', label: 'ارزش' }
 ]
@@ -63,10 +64,11 @@ export default function Inventory() {
     )
   })
 
-  // تاریخِ هر جنس: تازه‌ترین ورود، و کهنه‌ترین جوړهٔ موجود (همان «در گدام: …»)
+  // دو تاریخِ جدا: کِی جنس در اپ ثبت شد، و کِی آخرین بار جوړه وارد گدام شد
+  const addedOf = (p: Product) => p.createdAt ?? 0
   const newestOf = (p: Product) => {
     const vs = byProduct.get(p.id!) ?? []
-    return Math.max(p.createdAt ?? 0, ...vs.map((v) => v.lastPurchaseAt ?? 0))
+    return Math.max(0, ...vs.map((v) => v.lastPurchaseAt ?? 0))
   }
   const oldestOf = (p: Product) => {
     const dates = (byProduct.get(p.id!) ?? []).filter((v) => v.stockQty > 0).map((v) => v.lastPurchaseAt ?? 0)
@@ -78,6 +80,7 @@ export default function Inventory() {
     (byProduct.get(p.id!) ?? []).reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
 
   const sorted = [...(filtered ?? [])].sort((a, b) => {
+    if (sort === 'added') return addedOf(b) - addedOf(a)
     if (sort === 'newest') return newestOf(b) - newestOf(a)
     if (sort === 'oldest') return oldestOf(a) - oldestOf(b)
     if (sort === 'value') return valueOfProduct(b) - valueOfProduct(a)
