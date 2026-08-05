@@ -60,6 +60,12 @@ export interface Customer extends Synced {
   promiseDate?: number
   /** تاریخ ثبت مشتری — برای چیدمان «تازه ثبت‌شده» */
   createdAt?: number
+  /**
+   * صفحهٔ دفترِ فزیکی — «۱۲» یا «۱۲/الف».
+   * کدام دفتر را خودِ `type` می‌گوید: پرچون یا عمده.
+   * فقط یادداشت است؛ به هیچ عددی (قرض، صندوق، مفاد) کاری ندارد.
+   */
+  bookPage?: string
 }
 
 export interface Supplier extends Synced {

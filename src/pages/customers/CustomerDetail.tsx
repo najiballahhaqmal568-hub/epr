@@ -41,6 +41,11 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
         <p className="text-sm text-slate-500">{c.balance > 0 ? 'قرض مشتری' : c.balance < 0 ? 'بستانکاری مشتری' : 'حساب تصفیه است'}</p>
         <p className={`text-2xl font-bold ${c.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(c.balance))}</p>
+        {c.bookPage?.trim() && (
+          <p className="mt-1 text-xs font-bold text-slate-500">
+            📖 دفتر {(c.type ?? 'retail') === 'retail' ? 'پرچون' : 'عمده'} — صفحهٔ {c.bookPage.trim()}
+          </p>
+        )}
       </div>
 
       <div className="mb-4 flex gap-2">

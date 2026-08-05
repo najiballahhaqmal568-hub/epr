@@ -22,6 +22,7 @@ export function CustomerModal({
     async () => [...new Set((await db.customers.filter((c) => !c.deleted && Boolean(c.family?.trim())).toArray()).map((c) => c.family!.trim()))],
     []
   )
+  const [bookPage, setBookPage] = useState(customer?.bookPage ?? '')
   const [flag, setFlag] = useState<'good' | 'bad' | ''>(customer?.flag ?? '')
   const [promise, setPromise] = useState(customer?.promiseDate ? toDateInput(customer.promiseDate) : '')
   const [openingDebt, setOpeningDebt] = useState('')
@@ -50,6 +51,12 @@ export function CustomerModal({
           </datalist>
         </Field>
       )}
+      <Field label={`صفحهٔ دفتر ${type === 'retail' ? 'پرچون' : 'عمده'} (اختیاری)`}>
+        <input className={inputCls} value={bookPage} onChange={(e) => setBookPage(e.target.value)} placeholder="مثلاً ۱۲ یا ۱۲/الف" />
+      </Field>
+      <p className="-mt-2 mb-3 text-xs text-slate-400">
+        تا دفتر فزیکی را بی‌ورق زدن پیدا کنید. فقط یادداشت است — به قرض و صندوق کاری ندارد.
+      </p>
       <Field label="نشان مشتری">
         <select className={inputCls} value={flag} onChange={(e) => setFlag(e.target.value as 'good' | 'bad' | '')}>
           <option value="">عادی</option>
@@ -85,6 +92,7 @@ export function CustomerModal({
             phone: phone.trim(),
             type,
             family: type === 'retail' && family.trim() ? family.trim() : undefined,
+            bookPage: bookPage.trim() || undefined,
             flag: (flag || null) as 'good' | 'bad' | null,
             promiseDate: promise ? fromDateInput(promise) : undefined
           }

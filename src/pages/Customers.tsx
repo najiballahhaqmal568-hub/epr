@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../db'
-import { fmtNum, fmtMoney, fmtDateShort, startOfDay } from '../lib/format'
+import { fmtNum, fmtMoney, fmtDateShort, startOfDay, toLatinDigits, pageOrder } from '../lib/format'
 import { inputCls, Fab, Empty, Card } from '../components/ui'
 import FamilyDetail from './customers/FamilyDetail'
 import CustomerModal from './customers/CustomerModal'
 import CustomerDetail from './customers/CustomerDetail'
 
-type SortKey = 'name' | 'added' | 'debt' | 'promise' | 'quiet'
+type SortKey = 'name' | 'page' | 'added' | 'debt' | 'promise' | 'quiet'
 
 const SORTS: { id: SortKey; label: string }[] = [
   { id: 'name', label: 'حرف (الف–ی)' },
+  { id: 'page', label: 'صفحهٔ دفتر' },
   { id: 'added', label: 'تازه ثبت‌شده' },
   { id: 'debt', label: 'بیشترین قرض' },
   { id: 'promise', label: 'وعدهٔ نزدیک' },
@@ -33,7 +34,13 @@ export default function Customers() {
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const inView = customers?.filter((c) => (c.type ?? 'retail') === view) ?? []
   const filtered = inView.filter(
-    (c) => !search || c.name.includes(search) || (c.phone ?? '').includes(search) || (c.family ?? '').includes(search)
+    (c) =>
+      !search ||
+      c.name.includes(search) ||
+      (c.phone ?? '').includes(search) ||
+      (c.family ?? '').includes(search) ||
+      // «۱۲» بنویسید تا ببینید کدام مشتری‌ها در آن صفحهٔ دفتر اند
+      (Boolean(c.bookPage?.trim()) && toLatinDigits(c.bookPage!).includes(toLatinDigits(search)))
   )
   const viewDebt = inView.reduce((s, c) => s + Math.max(0, c.balance), 0)
 
@@ -89,6 +96,11 @@ export default function Customers() {
   const rowDebt = (r: Row) => (r.kind === 'family' ? famDebtOf(r.members) : Math.max(0, r.c.balance))
   const rowPromise = (r: Row) => (r.kind === 'family' ? Math.min(...r.members.map(promiseOf)) : promiseOf(r.c))
   const rowSeen = (r: Row) => (r.kind === 'family' ? Math.max(...r.members.map(seenOf)) : seenOf(r.c))
+  // خانواده با کوچک‌ترین صفحهٔ اعضایش می‌آید — همان جایی که در دفتر اول به چشم می‌خورد
+  const rowPage = (r: Row) =>
+    r.kind === 'family'
+      ? r.members.map((m) => pageOrder(m.bookPage)).sort((x, y) => x.num - y.num || x.rest.localeCompare(y.rest))[0]
+      : pageOrder(r.c.bookPage)
 
   const sortedRows = [...rows].sort((a, b) => {
     // برابر که شدند، نام تصمیم می‌گیرد — تا ترتیب همیشه یکسان و قابل پیش‌بینی بماند
@@ -97,6 +109,11 @@ export default function Customers() {
     if (sort === 'debt') return rowDebt(b) - rowDebt(a) || tie
     if (sort === 'promise') return rowPromise(a) - rowPromise(b) || tie
     if (sort === 'quiet') return rowSeen(a) - rowSeen(b) || tie
+    if (sort === 'page') {
+      const pa = rowPage(a)
+      const pb = rowPage(b)
+      return pa.num - pb.num || pa.rest.localeCompare(pb.rest) || tie
+    }
     return tie
   })
 
@@ -115,6 +132,7 @@ export default function Customers() {
               {c.name}
               {c.family?.trim() && <span className="mr-1 text-xs font-normal text-slate-400">({c.family.trim()})</span>}
             </p>
+            {c.bookPage?.trim() && <p className="text-xs font-bold text-slate-500">📖 صفحهٔ {c.bookPage.trim()}</p>}
             {c.phone && <p className="text-sm text-slate-500" dir="ltr">{c.phone}</p>}
             {overdue && <p className="text-xs font-bold text-red-600">وعده گذشته: {fmtDateShort(c.promiseDate!)}</p>}
             {!overdue && c.balance > 0 && c.promiseDate && (
@@ -147,7 +165,7 @@ export default function Customers() {
           <span className="font-bold text-red-600">{fmtMoney(viewDebt)}</span>
         </div>
       </div>
-      <input className={inputCls} placeholder="جستجو نام، تلفن یا خانواده..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      <input className={inputCls} placeholder="جستجو نام، تلفن، خانواده یا صفحهٔ دفتر..." value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="mt-2 flex gap-1 overflow-x-auto pb-1">
         <span className="shrink-0 self-center text-xs text-slate-400">چیدمان:</span>
         {SORTS.map((o) => (

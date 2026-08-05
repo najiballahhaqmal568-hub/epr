@@ -56,6 +56,17 @@ export function parseNum(s: string): number {
   return isNaN(n) ? 0 : n
 }
 
+/**
+ * ترتیبِ صفحهٔ دفترِ فزیکی — «۱۲» و «۱۲/الف» و «۲» باید مثل ورق زدنِ دفتر بیایند.
+ * پس اول عددِ صفحه می‌سنجد (نه حرف‌به‌حرف، وگرنه «۱۰» پیش از «۲» می‌آمد)،
+ * و بی‌صفحه‌ها آخر می‌مانند.
+ */
+export function pageOrder(page?: string): { num: number; rest: string } {
+  const s = toLatinDigits((page ?? '').trim())
+  const m = s.match(/\d+/)
+  return { num: m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER, rest: s }
+}
+
 export function startOfDay(ts = Date.now()): number {
   return new Date(ts).setHours(0, 0, 0, 0)
 }

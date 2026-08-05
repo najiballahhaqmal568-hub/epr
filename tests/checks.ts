@@ -48,6 +48,7 @@ import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
+import { pageOrder } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
 
@@ -1243,6 +1244,37 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('پول تغییر نمی‌کند', im3.after, im3.before)
 
       is('فروش حذف‌شده اثری ندارد', await deleteSaleImpact(saleId), null)
+    }
+  },
+  {
+    name: 'صفحهٔ دفتر فزیکی — ترتیبش مثل ورق زدن دفتر باشد',
+    run: async () => {
+      const order = (ps: (string | undefined)[]) =>
+        [...ps]
+          .sort((a, b) => {
+            const x = pageOrder(a)
+            const y = pageOrder(b)
+            return x.num - y.num || x.rest.localeCompare(y.rest)
+          })
+          .map((p) => p ?? '—')
+          .join(',')
+
+      // ۱۰ نباید پیش از ۲ بیاید (اشتباهِ چیدمانِ حرف‌به‌حرف)
+      is('عدد صفحه سنجیده می‌شود، نه حرف', order(['۱۰', '۲', '۱']), '۱,۲,۱۰')
+      // ارقام فارسی و لاتین یک چیز اند
+      is('رقم فارسی و لاتین یکی', pageOrder('۱۲').num, pageOrder('12').num)
+      // «۱۲/الف» بعد از «۱۲» می‌آید
+      is('صفحهٔ فرعی بعد از اصلی', order(['۱۲/الف', '۱۲']), '۱۲,۱۲/الف')
+      // بی‌صفحه‌ها آخر می‌مانند — (undefined را خودِ sort آخر می‌برد، پس اینجا با '' می‌سنجیم)
+      is('بی‌صفحه آخر می‌ماند', order(['', '۳']), '۳,')
+      is('بی‌صفحه عدد ندارد', pageOrder(undefined).num, pageOrder('').num)
+
+      // ساحه فقط یادداشت است — به هیچ عددی دست نمی‌زند
+      const cId = (await db.customers.add({ name: 'قندی', type: 'retail', balance: 0, bookPage: '۷' })) as number
+      await addOpeningDebt('customer', cId, 'قندی', 1000)
+      eq('قرض مثل همیشه', (await db.customers.get(cId))!.balance, 1000)
+      is('صفحه سر جایش', (await db.customers.get(cId))!.bookPage, '۷')
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {
