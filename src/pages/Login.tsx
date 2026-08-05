@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { login, registerOwner } from '../lib/supa'
 import { Field, inputCls, PrimaryBtn } from '../components/ui'
 
-export default function Login({ onDone }: { onDone: () => void }) {
+export default function Login({ onDone, onSkip }: { onDone: () => void; onSkip?: () => void }) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -58,6 +58,11 @@ export default function Login({ onDone }: { onDone: () => void }) {
       <button className="mt-4 text-center text-sm text-teal-700" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
         {mode === 'login' ? 'حساب ندارید؟ ثبت‌نام مالک (فقط بار اول)' : 'حساب دارید؟ ورود'}
       </button>
+      {onSkip && (
+        <button className="mt-3 text-center text-sm font-bold text-slate-500" onClick={onSkip}>
+          فعلاً بدون همگام‌سازی کار می‌کنم — برگشت به اپ
+        </button>
+      )}
       <p className="mt-6 text-center text-xs text-slate-400">کارمندان: حساب شما را مالک می‌سازد؛ با ایمیل و رمز خود وارد شوید.</p>
     </div>
   )

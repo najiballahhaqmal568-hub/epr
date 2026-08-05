@@ -35,6 +35,8 @@ export default function App() {
   const [pinError, setPinError] = useState('')
   // auth: 'none' = بدون سرور، 'anon' = سرور هست ولی وارد نشده
   const [auth, setAuth] = useState<'loading' | 'none' | 'anon' | Profile>('loading')
+  // سشن سرور تمام شده ولی اپ باید باز بماند — دکان با انترنت کار نمی‌کند
+  const [relogin, setRelogin] = useState(false)
   const reminder = useExpenseReminder()
   const debtReminder = useDebtReminder()
   const integrity = useIntegrityCheck()
@@ -65,11 +67,18 @@ export default function App() {
         const { data } = await supa!.auth.getSession()
         if (cancelled) return
         if (!data.session) {
-          // سشن یافت نشد: آفلاین با پروفایل ذخیره‌شده ادامه می‌دهیم، آنلاین یعنی واقعاً خارج شده
-          if (cached && !navigator.onLine) return
+          // سشن سرور تمام شده (توکن کهنه شده یا انترنت مدتی نبوده).
+          // معلومات دکان در خودِ گوشی است، پس اپ نباید بسته شود و کار نو ایستاد —
+          // فقط همگام‌سازی متوقف می‌شود و یک نوار می‌گوید دوباره وارد شوید.
+          // «خروج» واقعی cachedProfile را پاک می‌کند، پس آن راه بسته نمی‌شود.
+          if (cached) {
+            setRelogin(true)
+            return
+          }
           setAuth('anon')
           return
         }
+        setRelogin(false)
         const profile = await getProfile().catch(() => null)
         if (cancelled) return
         if (profile) {
@@ -90,6 +99,11 @@ export default function App() {
       cancelled = true
     }
   }, [serverCfg])
+
+  const cachedProfile = useLiveQuery(
+    async () => ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null,
+    []
+  )
 
   const pinHash = useLiveQuery(async () => {
     const s = await db.settings.get('pinHash')
@@ -114,6 +128,15 @@ export default function App() {
   if (auth === 'anon') {
     return (
       <Login
+        // اگر پروفایل ذخیره‌شده داریم، راه برگشت باز است — دکان نباید پشت صفحهٔ ورود بماند
+        onSkip={
+          cachedProfile
+            ? () => {
+                setAuth(cachedProfile)
+                setRelogin(true)
+              }
+            : undefined
+        }
         onDone={async () => {
           setTab('dashboard')
           const profile = await getProfile().catch(() => null)
@@ -152,6 +175,22 @@ export default function App() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-lg pb-20">
+      {relogin && (
+        <div className="flex items-center gap-2 bg-amber-500 p-2.5 text-white">
+          <span className="flex-1 text-sm font-bold">
+            🔄 همگام‌سازی متوقف است — کار شما ثبت می‌شود، ولی به موبایل دیگر نمی‌رود.
+          </span>
+          <button
+            className="rounded-lg bg-white/25 px-3 py-1 text-sm font-bold"
+            onClick={() => {
+              setRelogin(false)
+              setAuth('anon')
+            }}
+          >
+            ورود دوباره
+          </button>
+        </div>
+      )}
       {(reminder.show || debtReminder.show || integrity.show) && (
         <div className="pointer-events-none fixed right-0 left-0 bottom-36 z-50 mx-auto flex max-w-lg flex-col gap-2 px-3">
           {integrity.show && (
