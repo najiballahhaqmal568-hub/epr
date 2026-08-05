@@ -4,7 +4,7 @@ import { db, type Customer } from '../../db'
 import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
-import { buildCustomerLedger } from '../../lib/ledger'
+import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
 
 export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
@@ -14,6 +14,8 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   const [amount, setAmount] = useState('')
   const [debtStr, setDebtStr] = useState('')
   const [debtNote, setDebtNote] = useState('')
+  const [payPage, setPayPage] = useState('')
+  const [debtPage, setDebtPage] = useState('')
   // سند اشتباهی که مالک می‌خواهد پاک کند — اول اثرش نشان داده می‌شود
   const [toDelete, setToDelete] = useState<
     { id: number; label: string; partyName: string; before: number; after: number; cash: number } | null
@@ -34,6 +36,8 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   // دفتر حساب: هر سند با قرض بعد از آن — تا معلوم شود این عدد از کجا آمد
   const ledger = buildCustomerLedger(sales ?? [], payments ?? [], returns ?? [])
   const ledgerEnd = ledger.length ? ledger[ledger.length - 1].balance : 0
+  // «کدام صفحه چقدر است» — از روی همان سندها، پس جمعش همیشه با عدد بالا برابر است
+  const pages = pageTotals(ledger)
   const mismatch = Math.abs(ledgerEnd - c.balance) > 0.5
 
   return (
@@ -47,6 +51,24 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
           </p>
         )}
       </div>
+
+      {pages.length > 1 && (
+        <div className="mb-3 rounded-xl border border-slate-200 p-3">
+          <p className="mb-2 text-sm font-bold text-slate-700">📖 قرض هر صفحهٔ دفتر</p>
+          {pages.map((p) => (
+            <div key={p.page ?? '—'} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
+              <span className={p.page ? 'text-slate-700' : 'text-amber-700'}>
+                {p.page ? `صفحهٔ ${p.page}` : 'بی‌صفحه'}
+              </span>
+              <span className={`font-bold ${p.total > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(p.total)}</span>
+            </div>
+          ))}
+          <div className="mt-1 flex justify-between border-t border-slate-200 pt-1 text-sm">
+            <span className="font-bold text-slate-500">مجموع</span>
+            <span className="font-bold text-slate-800">{fmtMoney(pages.reduce((s, p) => s + p.total, 0))}</span>
+          </div>
+        </div>
+      )}
 
       <div className="mb-4 flex gap-2">
         <button className="flex-1 rounded-xl bg-teal-700 py-2 font-bold text-white" onClick={() => setShowPay(true)}>
@@ -69,12 +91,16 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
           <Field label="یادداشت (اختیاری)">
             <input className={inputCls} value={debtNote} onChange={(e) => setDebtNote(e.target.value)} placeholder="مثلاً بابت خریدهای سال گذشته" />
           </Field>
+          <Field label="صفحهٔ دفتر (اختیاری)">
+            <input className={inputCls} value={debtPage} onChange={(e) => setDebtPage(e.target.value)} placeholder={c.bookPage?.trim() || 'مثلاً ۱۲'} />
+          </Field>
           <PrimaryBtn
             disabled={parseNum(debtStr) <= 0}
             onClick={async () => {
-              await addOpeningDebt('customer', c.id!, c.name, parseNum(debtStr), debtNote)
+              await addOpeningDebt('customer', c.id!, c.name, parseNum(debtStr), debtNote, debtPage.trim() || c.bookPage?.trim())
               setDebtStr('')
               setDebtNote('')
+              setDebtPage('')
               setShowDebt(false)
             }}
           >
@@ -88,6 +114,9 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
           <Field label="مبلغ دریافتی">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
+          <Field label="صفحهٔ دفتر (پول بابت کدام ورق گرفته شد)">
+            <input className={inputCls} value={payPage} onChange={(e) => setPayPage(e.target.value)} placeholder={c.bookPage?.trim() || 'مثلاً ۱۲'} />
+          </Field>
           <PrimaryBtn
             disabled={parseNum(amount) <= 0}
             onClick={async () => {
@@ -96,9 +125,11 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                 partyType: 'customer',
                 partyId: c.id!,
                 partyName: c.name,
-                amount: parseNum(amount)
+                amount: parseNum(amount),
+                bookPage: payPage.trim() || c.bookPage?.trim()
               })
               setAmount('')
+              setPayPage('')
               setShowPay(false)
             }}
           >
@@ -135,7 +166,10 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                   {r.note && <p className="truncate text-xs text-slate-500">{r.note}</p>}
                 </>
               )}
-              <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
+              <p className="text-xs text-slate-400">
+                {fmtDate(r.date)}
+                {r.page && <span className="mr-2 font-bold text-slate-500">📖 صفحهٔ {r.page}</span>}
+              </p>
             </div>
             <div className="shrink-0 text-left">
               <p className={`font-bold ${r.delta > 0 ? 'text-red-600' : 'text-teal-700'}`}>

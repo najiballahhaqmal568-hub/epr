@@ -5,7 +5,7 @@
  * تا بشود دقیقاً همان را آزمایش کرد که کاربر در صفحه می‌بیند.
  */
 import type { CashMovement, Payment, ReturnDoc, Sale } from '../db'
-import { fmtNum } from './format'
+import { fmtNum, pageOrder } from './format'
 
 export interface LedgerRow {
   key: string
@@ -14,6 +14,8 @@ export interface LedgerRow {
   note?: string
   /** کدام بوت — «کوهستان ۴۲ سیاه ×۲» */
   items?: string
+  /** صفحهٔ دفترِ فزیکی که این سند در آن نوشته شد */
+  page?: string
   /** سندی که این سطر از آن آمده — برای حذف اشتباه */
   source?: { table: 'sales' | 'payments' | 'returns'; id: number }
   /** اثر این سند بر عدد نهایی */
@@ -69,6 +71,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       label: credit > 0 ? 'فروش قرضی' : 'پرداخت اضافی در فروش',
       note: `فاکتور ${fmtNum(s.total)} — نقد ${fmtNum(s.paid)}`,
       items: itemsLabel(s.lines),
+      page: s.bookPage?.trim() || undefined,
       source: { table: 'sales', id: s.id! },
       delta: credit
     })
@@ -81,6 +84,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       date: p.date,
       label: p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
       note: p.amount < 0 ? undefined : p.note,
+      page: p.bookPage?.trim() || undefined,
       source: { table: 'payments', id: p.id! },
       // دریافت پول قرض را کم می‌کند، قرض قبلی (مبلغ منفی) آن را زیاد
       delta: -p.amount
@@ -95,6 +99,8 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
       label: 'مرجوعی — کم شدن از قرض',
       note: r.reason,
       items: itemsLabel(r.lines),
+      // مرجوعی صفحهٔ خودش را ندارد — به همان صفحه‌ای می‌نشیند که فروشش نوشته شده بود
+      page: sales.find((s) => s.id === r.refId)?.bookPage?.trim() || undefined,
       source: { table: 'returns', id: r.id! },
       delta: -r.amount
     })
@@ -106,4 +112,25 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
     bal += e.delta
     return { ...e, balance: bal }
   })
+}
+
+/**
+ * قرضِ هر صفحهٔ دفتر — «صفحهٔ ۱۲ چقدر است».
+ *
+ * از روی همان سندهای دفتر حساب می‌شود، نه از عددی که جایی ذخیره شده باشد.
+ * برای همین جمعِ صفحه‌ها همیشه دقیقاً برابر قرض کل همان مشتری است.
+ * سندهایی که صفحه ندارند در یک قطیِ «بی‌صفحه» جمع می‌شوند و آخر می‌آیند.
+ */
+export function pageTotals(rows: LedgerRow[]): { page?: string; total: number }[] {
+  const m = new Map<string, number>()
+  for (const r of rows) m.set(r.page ?? '', (m.get(r.page ?? '') ?? 0) + r.delta)
+  return [...m.entries()]
+    .map(([page, total]) => ({ page: page || undefined, total }))
+    .sort((a, b) => {
+      if (!a.page) return 1
+      if (!b.page) return -1
+      const x = pageOrder(a.page)
+      const y = pageOrder(b.page)
+      return x.num - y.num || x.rest.localeCompare(y.rest)
+    })
 }

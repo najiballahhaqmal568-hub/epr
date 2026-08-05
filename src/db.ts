@@ -108,6 +108,13 @@ export interface Sale extends Synced {
   paid: number
   discount?: number
   promiseDate?: number
+  /**
+   * صفحهٔ دفترِ فزیکی که این فروش در آن نوشته شد.
+   * روی خودِ سند می‌ماند، نه روی مشتری — چون مشتری عمده چند صفحه دارد و
+   * صفحهٔ فعلی‌اش عوض می‌شود؛ اگر از مشتری خوانده می‌شد، قرضِ صفحه‌های
+   * گذشته هم به صفحهٔ نو می‌پرید.
+   */
+  bookPage?: string
 }
 
 export interface PurchaseLine {
@@ -182,6 +189,8 @@ export interface Payment extends Synced {
   via?: 'cash' | 'sarraf'
   sarrafId?: number
   sarrafName?: string
+  /** صفحهٔ دفترِ فزیکی که این سند در آن نوشته شد — مثل Sale.bookPage */
+  bookPage?: string
 }
 
 export interface ExpenseCategory extends Synced {

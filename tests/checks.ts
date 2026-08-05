@@ -40,7 +40,7 @@ import {
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
-import { buildCashLedger, buildCustomerLedger } from '../src/lib/ledger'
+import { buildCashLedger, buildCustomerLedger, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects } from '../src/lib/sync'
@@ -1286,6 +1286,76 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('هیچ‌کس بی‌صفحه نیست', f2.missing, 0)
       // ۱۰ نباید پیش از ۲ بیاید اینجا هم
       is('ترتیب عددی در خانواده هم', familyPages([{ bookPage: '۱۰' }, { bookPage: '۲' }]).pages.join(','), '۲,۱۰')
+    }
+  },
+  {
+    name: 'مشتری عمده با چند صفحهٔ دفتر — کدام صفحه چقدر است',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await addPurchase(buy(supId, vId, 100, 500, { paid: 0 }))
+      const cId = (await db.customers.add({ name: 'حاجی', type: 'wholesale', balance: 0, bookPage: '۱۲' })) as number
+
+      // صفحهٔ ۱۲: قرض قبلی ۵٬۰۰۰ + فروش قرضی ۲×۹۰۰ = ۱٬۸۰۰ → ۶٬۸۰۰
+      await addOpeningDebt('customer', cId, 'حاجی', 5000, '', '۱۲')
+      await addSale({ ...sell(vId, 2, 900, { customerId: cId, customerName: 'حاجی', paid: 0 }), bookPage: '۱۲' } as Sale)
+      // صفحهٔ ۱۳: فروش قرضی ۳×۹۰۰ = ۲٬۷۰۰
+      await addSale({ ...sell(vId, 3, 900, { customerId: cId, customerName: 'حاجی', paid: 0 }), bookPage: '۱۳' } as Sale)
+      // دریافت ۲٬۰۰۰ بابت صفحهٔ ۱۲ → ۴٬۸۰۰
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'حاجی', amount: 2000, bookPage: '۱۲' })
+      // یک سند بی‌صفحه — نباید در هیچ صفحه‌ای گم شود
+      await addOpeningDebt('customer', cId, 'حاجی', 700)
+
+      const ledgerOf = async () => {
+        const [sl, pm, rt] = await Promise.all([
+          db.sales.filter((x) => !x.deleted && x.customerId === cId).toArray(),
+          db.payments.filter((x) => !x.deleted && x.partyType === 'customer' && x.partyId === cId).toArray(),
+          db.returns.filter((x) => !x.deleted && x.kind === 'customer' && x.partyId === cId).toArray()
+        ])
+        return buildCustomerLedger(sl, pm, rt)
+      }
+      let pages = pageTotals(await ledgerOf())
+      const of = (p?: string) => pages.find((x) => x.page === p)?.total ?? 0
+
+      is('صفحه‌ها به ترتیب و بی‌صفحه آخر', pages.map((p) => p.page ?? '—').join(','), '۱۲,۱۳,—')
+      eq('صفحهٔ ۱۲', of('۱۲'), 4800)
+      eq('صفحهٔ ۱۳', of('۱۳'), 2700)
+      eq('بی‌صفحه', of(undefined), 700)
+
+      // قانون آهنین: جمع صفحه‌ها = قرض کل مشتری
+      const bal = (await db.customers.get(cId))!.balance
+      eq('جمع صفحه‌ها با قرض کل برابر است', pages.reduce((s, p) => s + p.total, 0), bal)
+      eq('قرض کل', bal, 8200)
+
+      // مرجوعی به همان صفحه‌ای می‌نشیند که فروشش نوشته شده بود
+      const s13 = (await db.sales.filter((x) => !x.deleted && x.bookPage === '۱۳').toArray())[0]
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: cId,
+        partyName: 'حاجی',
+        refId: s13.id,
+        lines: [{ variantId: vId, productName: 'بوت', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+        reason: 'خراب بود',
+        settlement: 'reduceDebt',
+        amount: 900
+      } as ReturnDoc)
+      pages = pageTotals(await ledgerOf())
+      eq('مرجوعی از صفحهٔ ۱۳ کم شد', of('۱۳'), 1800)
+      eq('صفحهٔ ۱۲ دست نخورد', of('۱۲'), 4800)
+      eq('جمع باز هم با قرض کل برابر', pages.reduce((s, p) => s + p.total, 0), (await db.customers.get(cId))!.balance)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // صفحه فقط یادداشت است — پخش سندها روی موبایل دوم همان قرض را می‌سازد
+      const live = await db.payments.filter((p) => !p.deleted && p.partyId === cId).toArray()
+      const liveSales = await db.sales.filter((x) => !x.deleted && x.customerId === cId).toArray()
+      const liveRet = await db.returns.filter((x) => !x.deleted && x.partyId === cId).toArray()
+      const before = (await db.customers.get(cId))!.balance
+      await db.customers.update(cId, { balance: 0 })
+      for (const d of liveSales) await applyDocEffects('sales', d as unknown as Record<string, unknown>, false)
+      for (const d of live) await applyDocEffects('payments', d as unknown as Record<string, unknown>, false)
+      for (const d of liveRet) await applyDocEffects('returns', d as unknown as Record<string, unknown>, false)
+      eq('موبایل نو همان قرض را می‌سازد', (await db.customers.get(cId))!.balance, before)
     }
   },
   {

@@ -15,6 +15,9 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
   const [paidTouched, setPaidTouched] = useState(false)
   const [discountStr, setDiscountStr] = useState('')
   const [promise, setPromise] = useState('')
+  // صفحهٔ دفتر فزیکی — با انتخاب مشتری، صفحهٔ فعلی خودش پیشنهاد می‌شود
+  const [bookPage, setBookPage] = useState('')
+  const [pageTouched, setPageTouched] = useState(false)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [pickerFor, setPickerFor] = useState<number | null>(null)
@@ -161,10 +164,17 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
       total,
       paid,
       discount: discount > 0 ? discount : undefined,
-      promiseDate: remainder > 0 && promise ? fromDateInput(promise) : undefined
+      promiseDate: remainder > 0 && promise ? fromDateInput(promise) : undefined,
+      // صفحه فقط برای فروش قرضی معنا دارد — فروش نقدی در دفتر قرض نمی‌نشیند
+      bookPage: remainder > 0 && bookPage.trim() ? bookPage.trim() : undefined
     }
     try {
       await addSale(sale)
+      // صفحهٔ فعلیِ مشتری همان صفحه‌ای می‌شود که تازه در آن نوشتیم،
+      // تا فروش بعدی خودش همان را پیشنهاد کند
+      if (sale.bookPage && customer?.id && customer.bookPage?.trim() !== sale.bookPage) {
+        await db.customers.update(customer.id, { bookPage: sale.bookPage })
+      }
       if (onSaved) onSaved(sale)
       else onClose()
     } catch (e) {
@@ -243,6 +253,7 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
               onClick={() => {
                 setCustomerId(c.id!)
                 setCustSearch('')
+                if (!pageTouched) setBookPage(c.bookPage?.trim() ?? '')
               }}
               className="flex w-full items-center justify-between border-b border-slate-100 bg-white px-3 py-2 text-right last:border-0 active:bg-teal-50"
             >
@@ -417,6 +428,19 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
           />
         </Field>
         {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض مشتری): {fmtMoney(remainder)}</p>}
+        {remainder > 0 && customerId !== '' && (
+          <Field label="صفحهٔ دفتر (این قرض در کدام ورق نوشته شد)">
+            <input
+              className={inputCls}
+              value={bookPage}
+              onChange={(e) => {
+                setPageTouched(true)
+                setBookPage(e.target.value)
+              }}
+              placeholder={selectedCustomer?.bookPage?.trim() ? `صفحهٔ فعلی: ${selectedCustomer.bookPage.trim()}` : 'مثلاً ۱۲'}
+            />
+          </Field>
+        )}
         {remainder > 0 && (
           <Field label="وعدهٔ پرداخت (اختیاری)">
             <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />

@@ -390,7 +390,8 @@ export async function addOpeningDebt(
   partyId: number,
   partyName: string,
   amount: number,
-  note?: string
+  note?: string,
+  bookPage?: string
 ): Promise<void> {
   amount = afn(amount)
   if (amount <= 0) return
@@ -405,7 +406,8 @@ export async function addOpeningDebt(
       partyId,
       partyName,
       amount: -amount,
-      note: note?.trim() ? `قرض قبلی — ${note.trim()}` : 'قرض قبلی'
+      note: note?.trim() ? `قرض قبلی — ${note.trim()}` : 'قرض قبلی',
+      bookPage: bookPage?.trim() || undefined
     })
   })
 }
