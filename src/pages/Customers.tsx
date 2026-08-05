@@ -193,19 +193,9 @@ export default function Customers() {
                   <p className="font-bold text-slate-800">👨‍👩‍👦 خانوادهٔ {r.fam}</p>
                   {(() => {
                     // بعضی اعضا صفحه دارند و بعضی نه — هر دو باید دیده شوند
-                    const { pages, missing } = familyPages(r.members)
-                    if (!pages.length && !missing) return null
-                    return (
-                      <p className="text-xs font-bold text-slate-500">
-                        {pages.length > 0 && `📖 صفحهٔ ${pages.join('، ')}`}
-                        {pages.length > 0 && missing > 0 && ' · '}
-                        {missing > 0 && (
-                          <span className="text-amber-700">
-                            {fmtNum(missing)} نفر بی‌صفحه
-                          </span>
-                        )}
-                      </p>
-                    )
+                    const { pages } = familyPages(r.members)
+                    if (!pages.length) return null
+                    return <p className="text-xs font-bold text-slate-500">📖 صفحهٔ {pages.join('، ')}</p>
                   })()}
                   <p className="text-xs text-slate-500">{r.members.map((m) => m.name).join('، ')}</p>
                 </div>
@@ -221,7 +211,14 @@ export default function Customers() {
         )}
       </div>
       <Fab onClick={() => setShowNew(true)} label="مشتری جدید" />
-      {showNew && <CustomerModal customer={null} defaultType={view} onClose={() => setShowNew(false)} />}
+      {showNew && (
+        <CustomerModal
+          customer={null}
+          defaultType={view}
+          onCreated={(c) => setSelected(c)}
+          onClose={() => setShowNew(false)}
+        />
+      )}
       {selected && <CustomerDetail customer={selected} onClose={() => setSelected(null)} />}
       {familySel && (
         <FamilyDetail

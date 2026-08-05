@@ -47,12 +47,12 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         <p className={`text-2xl font-bold ${c.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(c.balance))}</p>
         {c.bookPage?.trim() && (
           <p className="mt-1 text-xs font-bold text-slate-500">
-            📖 دفتر {(c.type ?? 'retail') === 'retail' ? 'پرچون' : 'عمده'} — صفحهٔ {c.bookPage.trim()}
+            📖 دفتر {(c.type ?? 'retail') === 'retail' ? 'پرچون' : 'عمده'} — آخرین صفحه: {c.bookPage.trim()}
           </p>
         )}
       </div>
 
-      {pages.length > 1 && (
+      {pages.some((p) => p.page) && (
         <div className="mb-3 rounded-xl border border-slate-200 p-3">
           <p className="mb-2 text-sm font-bold text-slate-700">📖 قرض هر صفحهٔ دفتر</p>
           {pages.map((p) => (

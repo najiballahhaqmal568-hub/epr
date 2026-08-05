@@ -67,9 +67,9 @@ export function FamilyDetail({
             <span className="min-w-0">
               <span className="block font-bold text-slate-800">{m.name}</span>
               {/* کدام عضو در کدام صفحهٔ دفتر است — و کدام هنوز صفحه ندارد */}
-              <span className={`block text-xs font-bold ${m.bookPage?.trim() ? 'text-slate-500' : 'text-amber-700'}`}>
-                {m.bookPage?.trim() ? `📖 صفحهٔ ${m.bookPage.trim()}` : 'بی‌صفحه — در ویرایش بنویسید'}
-              </span>
+              {m.bookPage?.trim() && (
+                <span className="block text-xs font-bold text-slate-500">📖 صفحهٔ {m.bookPage.trim()}</span>
+              )}
             </span>
             <span className={`text-sm font-bold ${m.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.max(0, m.balance))}</span>
           </button>

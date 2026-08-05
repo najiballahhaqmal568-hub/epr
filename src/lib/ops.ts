@@ -399,7 +399,12 @@ export async function addOpeningDebt(
     const table = partyType === 'customer' ? db.customers : db.suppliers
     const row = await table.get(partyId)
     if (!row) throw new Error('طرف حساب یافت نشد')
-    await table.update(partyId, { balance: row.balance + amount })
+    // صفحهٔ همین قرض، «آخرین صفحهٔ» مشتری می‌شود تا قرض بعدی خودش همان را پیشنهاد کند
+    const page = bookPage?.trim()
+    await table.update(partyId, {
+      balance: row.balance + amount,
+      ...(page && partyType === 'customer' ? { bookPage: page } : {})
+    })
     await db.payments.add({
       date: Date.now(),
       partyType,
@@ -407,7 +412,7 @@ export async function addOpeningDebt(
       partyName,
       amount: -amount,
       note: note?.trim() ? `قرض قبلی — ${note.trim()}` : 'قرض قبلی',
-      bookPage: bookPage?.trim() || undefined
+      bookPage: page || undefined
     })
   })
 }

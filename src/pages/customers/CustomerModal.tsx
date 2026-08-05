@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../../db'
-import { addOpeningDebt } from '../../lib/ops'
-import { parseNum, toDateInput, fromDateInput } from '../../lib/format'
+import { toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
 export function CustomerModal({
   customer,
   defaultType,
-  onClose
+  onClose,
+  onCreated
 }: {
   customer: Customer | null
   defaultType?: 'retail' | 'wholesale'
   onClose: () => void
+  /** مشتری تازه ساخته شد — تا حسابش باز شود و قرض قبلی‌اش نوشته شود */
+  onCreated?: (c: Customer) => void
 }) {
   const [name, setName] = useState(customer?.name ?? '')
   const [phone, setPhone] = useState(customer?.phone ?? '')
@@ -22,10 +24,8 @@ export function CustomerModal({
     async () => [...new Set((await db.customers.filter((c) => !c.deleted && Boolean(c.family?.trim())).toArray()).map((c) => c.family!.trim()))],
     []
   )
-  const [bookPage, setBookPage] = useState(customer?.bookPage ?? '')
   const [flag, setFlag] = useState<'good' | 'bad' | ''>(customer?.flag ?? '')
   const [promise, setPromise] = useState(customer?.promiseDate ? toDateInput(customer.promiseDate) : '')
-  const [openingDebt, setOpeningDebt] = useState('')
 
   return (
     <Modal title={customer ? 'ویرایش مشتری' : 'مشتری جدید'} onClose={onClose}>
@@ -51,12 +51,6 @@ export function CustomerModal({
           </datalist>
         </Field>
       )}
-      <Field label={`صفحهٔ دفتر ${type === 'retail' ? 'پرچون' : 'عمده'} (اختیاری)`}>
-        <input className={inputCls} value={bookPage} onChange={(e) => setBookPage(e.target.value)} placeholder="مثلاً ۱۲ یا ۱۲/الف" />
-      </Field>
-      <p className="-mt-2 mb-3 text-xs text-slate-400">
-        تا دفتر فزیکی را بی‌ورق زدن پیدا کنید. فقط یادداشت است — به قرض و صندوق کاری ندارد.
-      </p>
       <Field label="نشان مشتری">
         <select className={inputCls} value={flag} onChange={(e) => setFlag(e.target.value as 'good' | 'bad' | '')}>
           <option value="">عادی</option>
@@ -65,16 +59,12 @@ export function CustomerModal({
         </select>
       </Field>
       {!customer && (
-        <>
-          <Field label="قرض قبلی (اختیاری)">
-            <input className={inputCls} inputMode="numeric" value={openingDebt} onChange={(e) => setOpeningDebt(e.target.value)} placeholder="۰" />
-          </Field>
-          {parseNum(openingDebt) > 0 && (
-            <p className="-mt-2 mb-3 text-xs text-slate-400">قرض فروش‌های گذشته — در فروش، مفاد و صندوق حساب نمی‌شود.</p>
-          )}
-        </>
+        <p className="mb-3 rounded-xl bg-slate-50 p-2.5 text-xs text-slate-500">
+          قرض قبلی اینجا نوشته نمی‌شود — بعد از ذخیره، حساب همین شخص باز می‌شود و
+          با دکمهٔ «قرض قبلی» مبلغ و صفحهٔ دفترش را می‌نویسید.
+        </p>
       )}
-      {((customer && customer.balance > 0) || parseNum(openingDebt) > 0) && (
+      {customer && customer.balance > 0 && (
         <>
           <Field label="وعدهٔ پرداخت قرض">
             <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
@@ -92,15 +82,14 @@ export function CustomerModal({
             phone: phone.trim(),
             type,
             family: type === 'retail' && family.trim() ? family.trim() : undefined,
-            bookPage: bookPage.trim() || undefined,
             flag: (flag || null) as 'good' | 'bad' | null,
             promiseDate: promise ? fromDateInput(promise) : undefined
           }
           if (customer?.id) await db.customers.update(customer.id, data)
           else {
             const id = (await db.customers.add({ ...data, balance: 0, createdAt: Date.now() })) as number
-            const debt = parseNum(openingDebt)
-            if (debt > 0) await addOpeningDebt('customer', id, data.name, debt)
+            // قدم بعدی خودش باز می‌شود: قرض قبلی با صفحهٔ دفترش
+            onCreated?.({ ...data, id, balance: 0 } as Customer)
           }
           onClose()
         }}

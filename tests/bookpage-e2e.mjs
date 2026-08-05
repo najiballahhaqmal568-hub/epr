@@ -49,14 +49,12 @@ console.log('✅ صفحهٔ دفتر روی کارت مشتری دیده می‌
 
 // خانواده: هم صفحهٔ موجود، هم هشدارِ بی‌صفحه
 if (!(await page.locator('text=📖 صفحهٔ ۴').count())) fail('صفحهٔ عضو خانواده روی کارت خانواده نیامد')
-if (!(await page.locator('text=۱ نفر بی‌صفحه').count())) fail('هشدار «بی‌صفحه» در خانواده نیامد')
-console.log('✅ کارت خانواده: صفحهٔ ۴ و ۱ نفر بی‌صفحه')
+// صفحه اختیاری است — عضو بی‌صفحه نباید هیچ هشداری بگیرد
+if (await page.locator('text=بی‌صفحه').count()) fail('برای عضو بی‌صفحه هشدار داده شد — صفحه اختیاری است')
+console.log('✅ کارت خانواده صفحهٔ ۴ را نشان داد و عضو بی‌صفحه را سرزنش نکرد')
 
-// داخل خانواده هم معلوم باشد کدام عضو صفحه ندارد
 await page.click('text=خانوادهٔ کریمی')
 await page.waitForTimeout(600)
-if (!(await page.locator('text=بی‌صفحه — در ویرایش بنویسید').count())) fail('عضو بی‌صفحه داخل خانواده نشان داده نشد')
-console.log('✅ داخل خانواده معلوم است کدام عضو بی‌صفحه است')
 await page.locator('button:has-text("✕"), button:has-text("×")').first().click().catch(() => {})
 await page.keyboard.press('Escape')
 await page.waitForTimeout(500)
@@ -77,17 +75,26 @@ console.log('✅ جستجو با شمارهٔ صفحه فقط همان مشتر�
 await page.fill('input[placeholder*="جستجو"]', '')
 await page.waitForTimeout(400)
 
-// نوشتن صفحه از داخل اپ — برای «پ» که صفحه نداشت
+// صفحه در فرم «ثبت مشتری» نیست — با خودِ قرض نوشته می‌شود
+await page.click('button:has-text("مشتری جدید")')
+await page.waitForTimeout(600)
+if (await page.locator('input[placeholder="مثلاً ۱۲ یا ۱۲/الف"]').count()) fail('خانهٔ صفحه هنوز در فرم ثبت مشتری است')
+if (await page.locator('text=قرض قبلی (اختیاری)').count()) fail('قرض قبلی هنوز در فرم ثبت مشتری است')
+console.log('✅ در فرم ثبت مشتری نه خانهٔ صفحه است نه قرض قبلی')
+await page.locator('button:has-text("✕")').last().click()
+await page.waitForTimeout(500)
+
 // «پ» تنها حرف است و در «پرچون» هم می‌آید — پس دقیقاً همان کارت را می‌گیریم
 await page.locator('.mt-3 p.font-bold.text-slate-800', { hasText: /^پ$/ }).click()
 await page.waitForTimeout(500)
-await page.click('button:has-text("ویرایش")')
+await page.click('button:has-text("قرض قبلی")')
 await page.waitForTimeout(400)
-await page.fill('input[placeholder="مثلاً ۱۲ یا ۱۲/الف"]', '۵')
-await page.click('button:has-text("ذخیره")')
-await page.waitForTimeout(700)
-if (!(await page.locator('text=صفحهٔ ۵').count())) fail('صفحهٔ نو بعد از ذخیره دیده نشد')
-console.log('✅ صفحهٔ دفتر از داخل اپ نوشته و ذخیره شد')
+await page.locator('text=مبلغ قرض قبلی').locator('..').locator('input').fill('۲۰۰۰')
+await page.locator('text=صفحهٔ دفتر (اختیاری)').locator('..').locator('input').fill('۵')
+await page.click('button:has-text("ثبت قرض قبلی")')
+await page.waitForTimeout(900)
+if (!(await page.locator('text=صفحهٔ ۵').count())) fail('صفحهٔ قرض قبلی دیده نشد')
+console.log('✅ صفحهٔ دفتر همراه خودِ قرض قبلی نوشته شد')
 
 const saved = await page.evaluate(async () => {
   const open = indexedDB.open('shoeErp')
@@ -98,7 +105,7 @@ const saved = await page.evaluate(async () => {
     q.onsuccess = () => res(q.result.find((c) => c.name === 'پ'))
   })
 })
-if (saved.bookPage !== '۵') fail('صفحه در دیتابیس ذخیره نشد: ' + saved.bookPage)
-if (saved.balance !== 0) fail('بیلانس نباید تغییر می‌کرد: ' + saved.balance)
-console.log('✅ در دیتابیس ذخیره شد و بیلانس دست نخورد')
+if (saved.bookPage !== '۵') fail('آخرین صفحهٔ مشتری ۵ نشد: ' + saved.bookPage)
+if (saved.balance !== 2000) fail('قرض قبلی درست ننشست: ' + saved.balance)
+console.log('✅ قرض ۲٬۰۰۰ در صفحهٔ ۵ نشست و آخرین صفحهٔ مشتری هم ۵ شد')
 process.exit(0)
