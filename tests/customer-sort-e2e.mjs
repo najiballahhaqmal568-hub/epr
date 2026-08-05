@@ -43,15 +43,30 @@ await page.evaluate(async () => {
   await mk('الف', 1000, Date.now() + 30 * day, 0, 90 * day)
   await mk('ب', 9000, Date.now() - day, 10 * day, 30 * day)
   await mk('پ', 5000, null, 100 * day, 0)
+  // یک خانواده که کهنه‌تر از «پ» ثبت شده — نباید بالای او بیاید
+  const fam = async (name, addedAgo) => {
+    const id = await put('customers', {
+      name, type: 'retail', balance: 2000, family: 'کریمی', createdAt: Date.now() - addedAgo
+    })
+    await put('payments', { date: Date.now() - 50 * day, partyType: 'customer', partyId: id, partyName: name, amount: 1 })
+  }
+  await fam('ت', 60 * day)
 })
 await page.reload()
 await page.waitForSelector('text=داشبورد', { timeout: 30000 })
 await page.click('nav >> text=مشتریان')
 await page.waitForTimeout(800)
 
+// ترتیب سطرها — خانواده با «خانوادهٔ …» شناخته می‌شود
 const order = async () => {
   const names = await page.locator('.mt-3 p.font-bold.text-slate-800').allInnerTexts()
-  return names.map((n) => n.trim().split(/\s/)[0]).filter((n) => ['الف', 'ب', 'پ'].includes(n))
+  return names
+    .map((n) => {
+      const t = n.trim()
+      if (t.includes('خانوادهٔ')) return 'خانواده'
+      return t.split(/\s/)[0]
+    })
+    .filter((n) => ['الف', 'ب', 'پ', 'خانواده'].includes(n))
 }
 
 if (!(await page.locator('text=چیدمان:').count())) fail('گزینهٔ چیدمان در مشتریان نیامد')
@@ -59,33 +74,36 @@ if (!(await page.locator('text=چیدمان:').count())) fail('گزینهٔ چی
 await page.click('button:has-text("حرف (الف–ی)")')
 await page.waitForTimeout(400)
 let o = await order()
-if (o.join(',') !== 'الف,ب,پ') fail('چیدمان حرفی درست نیست: ' + o.join(','))
+if (o.join(',') !== 'الف,ب,پ,خانواده') fail('چیدمان حرفی درست نیست: ' + o.join(','))
 console.log('✅ حرف: ' + o.join(' ← '))
 
 // «تازه ثبت‌شده» — بر اساس تاریخِ ثبت مشتری
 await page.click('button:has-text("تازه ثبت‌شده")')
 await page.waitForTimeout(400)
 o = await order()
-if (o.join(',') !== 'پ,ب,الف') fail('چیدمان «تازه ثبت‌شده» درست نیست: ' + o.join(','))
-console.log('✅ تازه ثبت‌شده: ' + o.join(' ← '))
+// «پ» تازه‌ترین است و باید بالای خانواده بیاید — این همان اشکالی بود که مالک دید
+if (o[0] !== 'پ') fail('تک‌نفرهٔ تازه‌ثبت‌شده بالای خانواده نیامد: ' + o.join(','))
+// پ (امروز) ← ب (۳۰ روز) ← خانواده (۶۰ روز) ← الف (۹۰ روز)
+if (o.join(',') !== 'پ,ب,خانواده,الف') fail('چیدمان «تازه ثبت‌شده» درست نیست: ' + o.join(','))
+console.log('✅ تازه ثبت‌شده: ' + o.join(' ← ') + ' — خانواده هم در جای خودش')
 
 await page.click('button:has-text("بیشترین قرض")')
 await page.waitForTimeout(400)
 o = await order()
-if (o.join(',') !== 'ب,پ,الف') fail('چیدمان قرض درست نیست: ' + o.join(','))
+if (o.join(',') !== 'ب,پ,خانواده,الف') fail('چیدمان قرض درست نیست: ' + o.join(','))
 console.log('✅ بیشترین قرض: ' + o.join(' ← '))
 
 await page.click('button:has-text("وعدهٔ نزدیک")')
 await page.waitForTimeout(400)
 o = await order()
 // «ب» وعده‌اش گذشته پس اول، بعد «الف»، و «پ» که وعده ندارد آخر
-if (o.join(',') !== 'ب,الف,پ') fail('چیدمان وعده درست نیست: ' + o.join(','))
+if (o.join(',') !== 'ب,الف,پ,خانواده') fail('چیدمان وعده درست نیست: ' + o.join(','))
 console.log('✅ وعدهٔ نزدیک: ' + o.join(' ← '))
 
 await page.click('button:has-text("دیر آمده")')
 await page.waitForTimeout(400)
 o = await order()
-if (o.join(',') !== 'پ,ب,الف') fail('چیدمان «دیر آمده» درست نیست: ' + o.join(','))
+if (o.join(',') !== 'پ,خانواده,ب,الف') fail('چیدمان «دیر آمده» درست نیست: ' + o.join(','))
 console.log('✅ دیر آمده: ' + o.join(' ← '))
 
 // یادش بماند
@@ -94,6 +112,6 @@ await page.waitForSelector('text=داشبورد', { timeout: 30000 })
 await page.click('nav >> text=مشتریان')
 await page.waitForTimeout(800)
 o = await order()
-if (o.join(',') !== 'پ,ب,الف') fail('چیدمان یادش نماند: ' + o.join(','))
+if (o.join(',') !== 'پ,خانواده,ب,الف') fail('چیدمان یادش نماند: ' + o.join(','))
 console.log('✅ چیدمان انتخابی یادش ماند')
 process.exit(0)

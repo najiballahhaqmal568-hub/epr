@@ -57,14 +57,6 @@ export default function Customers() {
   const promiseOf = (c: Customer) => (c.balance > 0 && c.promiseDate ? c.promiseDate : Number.MAX_SAFE_INTEGER)
 
   const byName = (a: string, b: string) => a.localeCompare(b, 'fa')
-  const sortCustomers = (list: Customer[]) =>
-    [...list].sort((a, b) => {
-      if (sort === 'added') return addedOf(b) - addedOf(a)
-      if (sort === 'debt') return Math.max(0, b.balance) - Math.max(0, a.balance)
-      if (sort === 'promise') return promiseOf(a) - promiseOf(b)
-      if (sort === 'quiet') return seenOf(a) - seenOf(b)
-      return byName(a.name, b.name)
-    })
 
   // در دفتر پرچون، اعضای یک خانواده یکجا دیده می‌شوند
   const families = new Map<string, Customer[]>()
@@ -78,14 +70,34 @@ export default function Customers() {
     }
   }
 
-  // خانواده‌ها هم با همان قاعده چیده می‌شوند
+  // خانواده و تک‌نفره در یک فهرست چیده می‌شوند — وگرنه چیدمان فقط داخل هر
+  // گروه کار می‌کرد و خانواده‌ها همیشه اول می‌آمدند
   const famDebtOf = (ms: Customer[]) => ms.reduce((s, m) => s + Math.max(0, m.balance), 0)
-  const famRows = [...families.entries()].sort(([fa, ma], [fb, mb]) => {
-    if (sort === 'added') return Math.max(...mb.map(addedOf)) - Math.max(...ma.map(addedOf))
-    if (sort === 'debt') return famDebtOf(mb) - famDebtOf(ma)
-    if (sort === 'promise') return Math.min(...ma.map(promiseOf)) - Math.min(...mb.map(promiseOf))
-    if (sort === 'quiet') return Math.max(...ma.map(seenOf)) - Math.max(...mb.map(seenOf))
-    return byName(fa, fb)
+
+  type Row =
+    | { kind: 'family'; key: string; fam: string; members: Customer[] }
+    | { kind: 'single'; key: string; c: Customer }
+
+  const rows: Row[] = [
+    ...[...families.entries()].map(([fam, members]) => ({ kind: 'family' as const, key: `f-${fam}`, fam, members })),
+    ...singles.map((c) => ({ kind: 'single' as const, key: `c-${c.id}`, c }))
+  ]
+
+  // هر سطر — چه خانواده و چه یک نفر — با همین چهار عدد سنجیده می‌شود
+  const rowName = (r: Row) => (r.kind === 'family' ? r.fam : r.c.name)
+  const rowAdded = (r: Row) => (r.kind === 'family' ? Math.max(...r.members.map(addedOf)) : addedOf(r.c))
+  const rowDebt = (r: Row) => (r.kind === 'family' ? famDebtOf(r.members) : Math.max(0, r.c.balance))
+  const rowPromise = (r: Row) => (r.kind === 'family' ? Math.min(...r.members.map(promiseOf)) : promiseOf(r.c))
+  const rowSeen = (r: Row) => (r.kind === 'family' ? Math.max(...r.members.map(seenOf)) : seenOf(r.c))
+
+  const sortedRows = [...rows].sort((a, b) => {
+    // برابر که شدند، نام تصمیم می‌گیرد — تا ترتیب همیشه یکسان و قابل پیش‌بینی بماند
+    const tie = byName(rowName(a), rowName(b))
+    if (sort === 'added') return rowAdded(b) - rowAdded(a) || tie
+    if (sort === 'debt') return rowDebt(b) - rowDebt(a) || tie
+    if (sort === 'promise') return rowPromise(a) - rowPromise(b) || tie
+    if (sort === 'quiet') return rowSeen(a) - rowSeen(b) || tie
+    return tie
   })
 
   const tabCls = (v: string) =>
@@ -153,24 +165,26 @@ export default function Customers() {
 
       <div className="mt-3">
         {filtered.length === 0 && <Empty text="مشتری‌ای در این دفتر ثبت نشده." />}
-        {famRows.map(([fam, members]) => {
-          const famDebt = members.reduce((s, m) => s + Math.max(0, m.balance), 0)
-          return (
-            <Card key={`f-${fam}`} onClick={() => setFamilySel(fam)}>
+        {sortedRows.map((r) =>
+          r.kind === 'single' ? (
+            customerRow(r.c)
+          ) : (
+            <Card key={r.key} onClick={() => setFamilySel(r.fam)}>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-bold text-slate-800">👨‍👩‍👦 خانوادهٔ {fam}</p>
-                  <p className="text-xs text-slate-500">{members.map((m) => m.name).join('، ')}</p>
+                  <p className="font-bold text-slate-800">👨‍👩‍👦 خانوادهٔ {r.fam}</p>
+                  <p className="text-xs text-slate-500">{r.members.map((m) => m.name).join('، ')}</p>
                 </div>
                 <div className="text-left">
-                  <p className={`font-bold ${famDebt > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(famDebt)}</p>
-                  <p className="text-xs text-slate-400">قرض خانواده · {fmtNum(members.length)} نفر</p>
+                  <p className={`font-bold ${famDebtOf(r.members) > 0 ? 'text-red-600' : 'text-teal-700'}`}>
+                    {fmtMoney(famDebtOf(r.members))}
+                  </p>
+                  <p className="text-xs text-slate-400">قرض خانواده · {fmtNum(r.members.length)} نفر</p>
                 </div>
               </div>
             </Card>
           )
-        })}
-        {sortCustomers(singles).map(customerRow)}
+        )}
       </div>
       <Fab onClick={() => setShowNew(true)} label="مشتری جدید" />
       {showNew && <CustomerModal customer={null} defaultType={view} onClose={() => setShowNew(false)} />}

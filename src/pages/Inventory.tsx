@@ -80,11 +80,13 @@ export default function Inventory() {
     (byProduct.get(p.id!) ?? []).reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
 
   const sorted = [...(filtered ?? [])].sort((a, b) => {
-    if (sort === 'added') return addedOf(b) - addedOf(a)
-    if (sort === 'newest') return newestOf(b) - newestOf(a)
-    if (sort === 'oldest') return oldestOf(a) - oldestOf(b)
-    if (sort === 'value') return valueOfProduct(b) - valueOfProduct(a)
-    return a.name.localeCompare(b.name, 'fa')
+    // برابر که شدند، نام تصمیم می‌گیرد — تا ترتیب همیشه یکسان بماند
+    const tie = a.name.localeCompare(b.name, 'fa')
+    if (sort === 'added') return addedOf(b) - addedOf(a) || tie
+    if (sort === 'newest') return newestOf(b) - newestOf(a) || tie
+    if (sort === 'oldest') return oldestOf(a) - oldestOf(b) || tie
+    if (sort === 'value') return valueOfProduct(b) - valueOfProduct(a) || tie
+    return tie
   })
 
   const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
