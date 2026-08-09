@@ -14,7 +14,10 @@ function SyncChip() {
     s.state === 'syncing' ? '⏳ همگام‌سازی...' : s.state === 'offline' ? '📴 آفلاین' : s.state === 'error' ? '⚠️ خطای سرور' : '☁️ همگام'
   return (
     <button
-      onClick={() => void syncNow()}
+      onClick={() => {
+        if (s.state === 'error' && s.message) window.alert(`خطای همگام‌سازی:\n${s.message}`)
+        void syncNow()
+      }}
       aria-label="sync"
       title={s.message}
       className={`rounded-full px-2 py-1 text-xs font-bold ${

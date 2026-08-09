@@ -43,9 +43,11 @@ export interface Profile {
 export async function getProfile(): Promise<Profile | null> {
   const supa = await getSupa()
   if (!supa) return null
-  const { data: auth } = await supa.auth.getUser()
+  const { data: auth, error: authError } = await supa.auth.getUser()
+  if (authError) throw authError
   if (!auth.user) return null
-  const { data } = await supa.from('profiles').select('*').eq('user_id', auth.user.id).maybeSingle()
+  const { data, error } = await supa.from('profiles').select('*').eq('user_id', auth.user.id).maybeSingle()
+  if (error) throw error
   return (data as Profile) ?? null
 }
 
