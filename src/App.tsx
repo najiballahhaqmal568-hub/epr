@@ -79,13 +79,28 @@ export default function App() {
           return
         }
         setRelogin(false)
-        const profile = await getProfile().catch(() => null)
+        let profile: Profile | null
+        try {
+          profile = await getProfile()
+        } catch (e) {
+          if (cancelled) return
+          const message =
+            typeof e === 'object' && e !== null && 'message' in e
+              ? String((e as { message?: unknown }).message)
+              : String(e)
+          const authFailed = /(jwt|token|session|unauthori[sz]ed|not authenticated|401)/i.test(message)
+          if (cached && authFailed) setRelogin(true)
+          else if (!cached) setAuth('anon')
+          return
+        }
         if (cancelled) return
         if (profile) {
           await db.settings.put({ key: 'cachedProfile', value: profile })
           setAuth(profile)
           startSync()
-        } else if (!cached) {
+        } else if (cached) {
+          setRelogin(true)
+        } else {
           setAuth('anon')
         }
       } catch {
