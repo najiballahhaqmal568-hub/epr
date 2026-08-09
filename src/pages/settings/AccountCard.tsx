@@ -14,10 +14,18 @@ export function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    getServerConfig().then(async (cfg) => {
-      if (!cfg) return setProfile(null)
-      setProfile(await getProfile())
-    })
+    getServerConfig()
+      .then(async (cfg) => {
+        if (!cfg) return setProfile(null)
+        const cached = ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null
+        try {
+          setProfile((await getProfile()) ?? cached)
+        } catch {
+          // Keep account controls available while the server/session is unhealthy.
+          setProfile(cached)
+        }
+      })
+      .catch(() => setProfile(null))
   }, [])
 
   if (profile === 'loading' || profile === null) return null
