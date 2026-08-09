@@ -45,7 +45,8 @@ export async function getProfile(): Promise<Profile | null> {
   if (!supa) return null
   const { data: auth } = await supa.auth.getUser()
   if (!auth.user) return null
-  const { data } = await supa.from('profiles').select('*').eq('user_id', auth.user.id).maybeSingle()
+  const { data, error } = await supa.from('profiles').select('*').eq('user_id', auth.user.id).maybeSingle()
+  if (error) throw error
   return (data as Profile) ?? null
 }
 
