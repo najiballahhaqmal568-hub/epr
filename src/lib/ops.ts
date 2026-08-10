@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, landingUnpaidOf, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
+import { db, makeSku, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -832,23 +832,51 @@ const TABLES = [
   'settings'
 ] as const
 
+// Cloud identity belongs to the account currently signed in on this device.
+// A backup may come from another owner/shop, so these rows must never replace it.
+const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
+
 export async function exportBackup(): Promise<string> {
   const data: Record<string, unknown[]> = {}
-  for (const t of TABLES) data[t] = await db.table(t).toArray()
-  return JSON.stringify({ app: 'shoeErp', version: 2, exportedAt: Date.now(), data })
+  for (const t of TABLES) {
+    const rows = await db.table(t).toArray()
+    data[t] =
+      t === 'settings'
+        ? rows.filter((row) => !CLOUD_IDENTITY_SETTINGS.has(String((row as { key?: unknown }).key)))
+        : rows
+  }
+  return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data })
 }
 
 export async function importBackup(json: string): Promise<void> {
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
-  await db.transaction('rw', TABLES.map((t) => db.table(t)), async () => {
+
+  // Keep the new owner's current Supabase project/profile even when importing
+  // an older backup that contains the previous owner's settings.
+  const currentCloudIdentity = (
+    await Promise.all([...CLOUD_IDENTITY_SETTINGS].map((key) => db.settings.get(key)))
+  ).filter((row): row is { key: string; value: unknown } => Boolean(row))
+
+  await db.transaction('rw', [...TABLES.map((t) => db.table(t)), db.syncState], async () => {
     for (const t of TABLES) {
       await db.table(t).clear()
-      if (Array.isArray(parsed.data[t])) await db.table(t).bulkAdd(parsed.data[t])
+      const rows = Array.isArray(parsed.data[t]) ? parsed.data[t] : []
+      const restorableRows =
+        t === 'settings'
+          ? rows.filter((row: { key?: unknown }) => !CLOUD_IDENTITY_SETTINGS.has(String(row.key)))
+          : rows
+      if (restorableRows.length) await db.table(t).bulkAdd(restorableRows)
     }
+    if (currentCloudIdentity.length) await db.settings.bulkPut(currentCloudIdentity)
+
+    // Old push/pull cursors belong to the previous local/account state. Clearing
+    // them makes every restored document upload to the current owner's shop and
+    // makes this device pull that shop again from the beginning.
+    await db.syncState.clear()
+
     // بکاپ نسخهٔ ۱: کتگوری‌های پیش‌فرض و SKU را بساز
     if (!parsed.data.expenseCategories?.length) {
-      const { DEFAULT_EXPENSE_CATEGORIES } = await import('../db')
       for (const name of DEFAULT_EXPENSE_CATEGORIES) {
         await db.expenseCategories.add({ name, isDefault: true })
       }
@@ -858,6 +886,10 @@ export async function importBackup(json: string): Promise<void> {
       if (!v.sku) await db.variants.update(v.id!, { sku: makeSku(v.id!, v.size) })
     }
   })
+
+  // Do not wait for the 30-second timer after a restore.
+  const { syncNow } = await import('./sync')
+  await syncNow()
 }
 
 /** ریست کامل: همهٔ اسناد و اجناس در همه‌جا حذف (نرم) می‌شوند و به دستگاه‌های دیگر هم می‌رسد */
