@@ -74,6 +74,38 @@ export async function login(email: string, password: string): Promise<void> {
   if (error) throw error
 }
 
+/** The recovery email must return to this deployed app, never to localhost. */
+export function passwordRecoveryRedirectUrl(currentHref = window.location.href): string {
+  return new URL('.', currentHref).toString()
+}
+
+export function isPasswordRecoveryUrl(url = window.location.href): boolean {
+  const parsed = new URL(url)
+  return parsed.hash.includes('type=recovery') || parsed.searchParams.get('type') === 'recovery'
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  const supa = await getSupa()
+  if (!supa) throw new Error('سرور تنظیم نشده')
+  const { error } = await supa.auth.resetPasswordForEmail(email, {
+    redirectTo: passwordRecoveryRedirectUrl()
+  })
+  if (error) throw error
+}
+
+export async function finishPasswordRecovery(password: string): Promise<void> {
+  const supa = await getSupa()
+  if (!supa) throw new Error('سرور تنظیم نشده')
+  const { data: session, error: sessionError } = await supa.auth.getSession()
+  if (sessionError) throw sessionError
+  if (!session.session) throw new Error('لینک بازیابی تمام شده است؛ یک لینک نو درخواست کنید')
+  const { error } = await supa.auth.updateUser({ password })
+  if (error) throw error
+  // Do not start syncing this phone's current local data under a different owner.
+  // The owner signs in normally after the password has been changed.
+  await supa.auth.signOut()
+}
+
 export async function logout(): Promise<void> {
   const supa = await getSupa()
   await supa?.auth.signOut()
