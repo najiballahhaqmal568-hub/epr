@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -853,6 +853,7 @@ export type BackupImportMode = 'merge' | 'replace'
 export async function importBackup(json: string, mode: BackupImportMode = 'merge'): Promise<void> {
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
+  const restoreTimestamp = Date.now()
 
   const sync = await import('./sync')
   await sync.pauseSyncForRestore()
@@ -880,6 +881,17 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
       // Keep replace restores non-destructive until the whole local backup has
       // been validated by Dexie and committed successfully.
       await db.syncState.put({ key: 'restorePushMode', value: 'merge' })
+
+      // Backups made before cloud sync may not contain UUID/timestamp fields.
+      // Without these fields the records appear locally but pushTable skips
+      // them, which makes other devices receive only part (or none) of the
+      // restored backup. Normalize every synced row before the first push.
+      for (const t of SYNC_TABLES) {
+        await db.table(t).toCollection().modify((row) => {
+          if (!row.uuid) row.uuid = newUuid()
+          row.localUpdatedAt = restoreTimestamp
+        })
+      }
 
       // بکاپ نسخهٔ ۱: کتگوری‌های پیش‌فرض و SKU را بساز
       if (!parsed.data.expenseCategories?.length) {
