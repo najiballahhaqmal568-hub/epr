@@ -11,11 +11,12 @@ import Customers from './pages/Customers'
 import Expenses from './pages/Expenses'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
+import ResetPassword from './pages/ResetPassword'
 import { useExpenseReminder } from './lib/useExpenseReminder'
 import { useDebtReminder } from './lib/useDebtReminder'
 import { useIntegrityCheck } from './lib/useIntegrityCheck'
 import { fmtNum, fmtMoney } from './lib/format'
-import { getSupa, getProfile, type Profile } from './lib/supa'
+import { getSupa, getProfile, isPasswordRecoveryUrl, type Profile } from './lib/supa'
 import { startSync, syncNow } from './lib/sync'
 
 const tabs = [
@@ -37,6 +38,7 @@ export default function App() {
   const [auth, setAuth] = useState<'loading' | 'none' | 'anon' | Profile>('loading')
   // سشن سرور تمام شده ولی اپ باید باز بماند — دکان با انترنت کار نمی‌کند
   const [relogin, setRelogin] = useState(false)
+  const [passwordRecovery, setPasswordRecovery] = useState(isPasswordRecoveryUrl)
   const reminder = useExpenseReminder()
   const debtReminder = useDebtReminder()
   const integrity = useIntegrityCheck()
@@ -48,9 +50,22 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!serverCfg) return
+    let unsubscribe: (() => void) | undefined
+    void getSupa().then((supa) => {
+      if (!supa) return
+      const { data } = supa.auth.onAuthStateChange((event) => {
+        if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
+      })
+      unsubscribe = () => data.subscription.unsubscribe()
+    })
+    return () => unsubscribe?.()
+  }, [serverCfg])
+
+  useEffect(() => {
     let cancelled = false
     async function check() {
-      if (serverCfg === undefined) return
+      if (serverCfg === undefined || passwordRecovery) return
       if (!serverCfg) {
         setAuth('none')
         return
@@ -113,7 +128,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [serverCfg])
+  }, [serverCfg, passwordRecovery])
 
   const cachedProfile = useLiveQuery(
     async () => ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null,
@@ -129,6 +144,18 @@ export default function App() {
   useEffect(() => {
     if (pinHash === null) setUnlocked(true)
   }, [pinHash])
+
+  if (passwordRecovery) {
+    return (
+      <ResetPassword
+        onDone={() => {
+          setPasswordRecovery(false)
+          setRelogin(false)
+          setAuth('anon')
+        }}
+      />
+    )
+  }
 
   if (pinHash === undefined || auth === 'loading') {
     return (
