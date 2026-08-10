@@ -37,6 +37,8 @@ import {
   deleteSaleImpact,
   deletePayment,
   deletePaymentImpact,
+  exportBackup,
+  importBackup,
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
@@ -173,6 +175,59 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'برگرداندن بکاپ مالک قبلی — حساب نو بماند و همهٔ دیتا دوباره همگام شود',
+    run: async () => {
+      const currentProfile = { user_id: 'new-owner', shop_id: 'new-shop', role: 'owner', name: 'مالک نو' }
+      await db.settings.bulkPut([
+        { key: 'supaUrl', value: 'https://new-project.supabase.co' },
+        { key: 'supaKey', value: 'new-current-anon-key-1234567890' },
+        { key: 'cachedProfile', value: currentProfile }
+      ])
+      await db.syncState.bulkPut([
+        { key: 'deviceId', value: 'new-device' },
+        { key: 'push:products', value: Date.now() + 100000 },
+        { key: 'pull:products', value: '2099-01-01T00:00:00Z' }
+      ])
+
+      const oldBackup = JSON.stringify({
+        app: 'shoeErp',
+        version: 2,
+        exportedAt: Date.now(),
+        data: {
+          products: [{ id: 1, name: 'جنس بکاپ', uuid: '11111111-1111-4111-8111-111111111111', localUpdatedAt: 1 }],
+          settings: [
+            { key: 'supaUrl', value: 'https://old-project.supabase.co' },
+            { key: 'supaKey', value: 'old-anon-key' },
+            { key: 'cachedProfile', value: { user_id: 'old-owner', shop_id: 'old-shop', role: 'owner', name: 'مالک قبلی' } },
+            { key: 'pinHash', value: 'old-pin-that-should-restore' }
+          ]
+        }
+      })
+
+      await importBackup(oldBackup)
+
+      is('آدرس سرور حساب نو ماند', (await db.settings.get('supaUrl'))?.value, 'https://new-project.supabase.co')
+      is('کلید سرور حساب نو ماند', (await db.settings.get('supaKey'))?.value, 'new-current-anon-key-1234567890')
+      is(
+        'پروفایل مالک نو ماند',
+        ((await db.settings.get('cachedProfile'))?.value as { shop_id?: string } | undefined)?.shop_id,
+        currentProfile.shop_id
+      )
+      is('تنظیم غیرحسابی بکاپ برگشت', (await db.settings.get('pinHash'))?.value, 'old-pin-that-should-restore')
+      is('نشانگر ارسال قبلی پاک شد', await db.syncState.get('push:products'), undefined)
+      is('نشانگر دریافت قبلی پاک شد', await db.syncState.get('pull:products'), undefined)
+      is('شناسهٔ دستگاه قبلی پاک شد', await db.syncState.get('deviceId'), undefined)
+      is('جنس بکاپ برگشت', (await db.products.get(1))?.name, 'جنس بکاپ')
+
+      const exported = JSON.parse(await exportBackup())
+      const exportedKeys = (exported.data.settings as Array<{ key: string }>).map((row) => row.key)
+      is('بکاپ نو آدرس سرور را نمی‌برد', exportedKeys.includes('supaUrl'), false)
+      is('بکاپ نو کلید سرور را نمی‌برد', exportedKeys.includes('supaKey'), false)
+      is('بکاپ نو پروفایل مالک را نمی‌برد', exportedKeys.includes('cachedProfile'), false)
+      is('نسخهٔ بکاپ نو است', exported.version, 3)
+    }
+  },
   {
     name: 'سال کامل دکان — دارایی = سرمایه + مفاد − برداشت',
     run: async () => {
