@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { exportBackup, importBackup } from '../lib/ops'
+import { exportBackup, importBackup, type BackupImportMode } from '../lib/ops'
+import { syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
 import DangerCard from './settings/DangerCard'
 import ServerCard from './settings/ServerCard'
@@ -19,28 +20,59 @@ export default function Settings({
   isStaff?: boolean
   onLogout?: () => void
 }) {
-  const fileRef = useRef<HTMLInputElement>(null)
+  const mergeFileRef = useRef<HTMLInputElement>(null)
+  const replaceFileRef = useRef<HTMLInputElement>(null)
   const [msg, setMsg] = useState('')
+  const [restoreBusy, setRestoreBusy] = useState(false)
 
-  async function backup() {
-    const json = await exportBackup()
+  function downloadJson(json: string, filename: string) {
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `shoe-erp-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = filename
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  async function backup() {
+    const json = await exportBackup()
+    downloadJson(json, `shoe-erp-backup-${new Date().toISOString().slice(0, 10)}.json`)
     setMsg('✅ فایل بکاپ آماده دانلود شد. آن را در جای امن (گوگل درایو، واتساپ خودتان...) نگه دارید.')
   }
 
-  async function restore(file: File) {
-    if (!confirm('هوشدار: همه اطلاعات فعلی با اطلاعات فایل بکاپ عوض می‌شود. ادامه می‌دهید؟')) return
+  async function restore(file: File, mode: BackupImportMode) {
+    if (mode === 'merge') {
+      if (!confirm('ادغام امن: معلومات فعلی سرور پاک نمی‌شود؛ فقط موارد گمشدهٔ بکاپ اضافه می‌شود. ادامه می‌دهید؟')) return
+    } else {
+      const word = prompt(
+        'خطر: این بکاپ جای تمام معلومات فعلی سرور و همهٔ موبایل‌ها را می‌گیرد. برای تأیید کلمهٔ «جایگزین» را بنویسید.'
+      )
+      if (word?.trim() !== 'جایگزین') return
+    }
+    setRestoreBusy(true)
+    setMsg('⏳ در حال برگرداندن بکاپ...')
     try {
-      await importBackup(await file.text())
-      setMsg('✅ اطلاعات با موفقیت برگردانده شد.')
+      const json = await file.text()
+      if (mode === 'replace') {
+        // Pull once before the destructive restore so the emergency download
+        // contains the latest cloud copy visible to this device.
+        await syncNow(true)
+        downloadJson(
+          await exportBackup(),
+          `atel-emergency-before-cloud-restore-${new Date().toISOString().slice(0, 10)}.json`
+        )
+      }
+      await importBackup(json, mode)
+      setMsg(
+        mode === 'merge'
+          ? '✅ بکاپ به شکل امن ادغام شد؛ معلومات فعلی سرور نگه داشته شد.'
+          : '✅ بکاپ جای معلومات سرور را گرفت. موبایل‌های دیگر در همگام‌سازی بعدی خودکار تازه می‌شوند.'
+      )
     } catch (e) {
       setMsg(`❌ خطا: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRestoreBusy(false)
     }
   }
 
@@ -77,18 +109,46 @@ export default function Settings({
 
           <Card>
             <p className="mb-1 font-bold text-slate-800">برگرداندن بکاپ</p>
-            <p className="mb-3 text-sm text-slate-500">فایل بکاپ قبلی را انتخاب کنید تا اطلاعات برگردد.</p>
-            <button onClick={() => fileRef.current?.click()} className="w-full rounded-xl bg-slate-100 py-3 font-bold text-slate-700">
-              انتخاب فایل بکاپ
+            <p className="mb-3 text-sm text-slate-500">
+              حالت امن معلومات فعلی سرور را نگه می‌دارد و فقط موارد گمشدهٔ بکاپ را اضافه می‌کند.
+            </p>
+            <button
+              disabled={restoreBusy}
+              onClick={() => mergeFileRef.current?.click()}
+              className="w-full rounded-xl bg-teal-50 py-3 font-bold text-teal-700 disabled:opacity-40"
+            >
+              ادغام امن بکاپ (پیشنهادی)
             </button>
             <input
-              ref={fileRef}
+              ref={mergeFileRef}
               type="file"
               accept="application/json,.json"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0]
-                if (f) restore(f)
+                if (f) void restore(f, 'merge')
+                e.target.value = ''
+              }}
+            />
+            <div className="my-3 border-t border-slate-200" />
+            <p className="mb-3 text-sm text-red-600">
+              فقط وقتی بکاپ باید نسخهٔ رسمی همهٔ موبایل‌ها شود: معلومات فعلی سرور پاک و با بکاپ عوض می‌شود.
+            </p>
+            <button
+              disabled={restoreBusy}
+              onClick={() => replaceFileRef.current?.click()}
+              className="w-full rounded-xl bg-red-50 py-3 font-bold text-red-700 disabled:opacity-40"
+            >
+              جایگزینی سرور و همهٔ موبایل‌ها
+            </button>
+            <input
+              ref={replaceFileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void restore(f, 'replace')
                 e.target.value = ''
               }}
             />
