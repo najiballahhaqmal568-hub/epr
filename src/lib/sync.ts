@@ -345,14 +345,124 @@ export async function pauseSyncForRestore(): Promise<void> {
   if (syncing) throw new Error('همگام‌سازی هنوز روان است؛ چند لحظه بعد دوباره کوشش کنید')
 }
 
-export async function beginCloudRestore(): Promise<{ shopId: string; generation: number }> {
+export async function hasPendingCloudRestore(): Promise<boolean> {
+  return Boolean(await getState('restorePending'))
+}
+
+interface RestoreStageRow {
+  batch_id: string
+  shop_id: string
+  table_name: string
+  uuid: string
+  device_id: string
+  deleted: boolean
+  data: Record<string, unknown>
+}
+
+/**
+ * Keep PostgREST requests small enough for backups that contain product photos.
+ * A single large row is still sent by itself so the server can return a useful
+ * size error instead of silently omitting it.
+ */
+function restoreChunks(rows: RestoreStageRow[], maxBytes = 400_000, maxRows = 100): RestoreStageRow[][] {
+  const chunks: RestoreStageRow[][] = []
+  let chunk: RestoreStageRow[] = []
+  let bytes = 2
+  for (const row of rows) {
+    const rowBytes = JSON.stringify(row).length + 1
+    if (chunk.length && (chunk.length >= maxRows || bytes + rowBytes > maxBytes)) {
+      chunks.push(chunk)
+      chunk = []
+      bytes = 2
+    }
+    chunk.push(row)
+    bytes += rowBytes
+  }
+  if (chunk.length) chunks.push(chunk)
+  return chunks
+}
+
+/**
+ * Upload the complete local backup into an isolated staging area, then ask
+ * PostgreSQL to verify and activate it in one transaction. Until commit, the
+ * live cloud generation is untouched and other devices continue seeing the
+ * previous complete snapshot.
+ */
+export async function replaceCloudWithLocalSnapshot(): Promise<{ shopId: string; generation: number }> {
   const supa = await getSupa()
   if (!supa) throw new Error('سرور تنظیم نشده')
   const profile = await getProfile()
   if (!profile || profile.role !== 'owner') throw new Error('فقط مالک می‌تواند همهٔ موبایل‌ها را با بکاپ عوض کند')
-  const { data, error } = await supa.rpc('begin_shop_restore')
-  if (error) throw new Error(`begin_shop_restore: ${error.message}`)
-  return { shopId: profile.shop_id, generation: Number(data) }
+  const deviceId = await getDeviceId()
+  const snapshotStartedAt = Date.now()
+  const expectedCounts: Record<string, number> = {}
+  const stagedByTable = new Map<SyncTable, RestoreStageRow[]>()
+
+  // Build and encode the entire snapshot before creating a server batch. This
+  // catches malformed local records while the old cloud copy is still live.
+  for (const table of SYNC_TABLES) {
+    const staged: RestoreStageRow[] = []
+    for (const row of await db.table(table).toArray()) {
+      if (!row.uuid) throw new Error(`بکاپ ناقص است: شناسهٔ ${table} یافت نشد`)
+      staged.push({
+        batch_id: '',
+        shop_id: profile.shop_id,
+        table_name: REMOTE[table],
+        uuid: row.uuid,
+        device_id: deviceId,
+        deleted: Boolean(row.deleted),
+        data: await encodeRefs(table, row)
+      })
+    }
+    expectedCounts[REMOTE[table]] = staged.length
+    stagedByTable.set(table, staged)
+  }
+
+  let batchId: string | null = null
+  try {
+    const { data: begun, error: beginError } = await supa.rpc('begin_shop_restore_batch', {
+      requested_counts: expectedCounts
+    })
+    if (beginError) throw new Error(`آماده‌سازی سرور: ${beginError.message}`)
+    batchId = String(begun ?? '')
+    if (!batchId) throw new Error('سرور شمارهٔ جایگزینی را نداد')
+
+    for (const table of SYNC_TABLES) {
+      const rows = (stagedByTable.get(table) ?? []).map((row) => ({ ...row, batch_id: batchId! }))
+      for (const chunk of restoreChunks(rows)) {
+        const { error } = await supa.from('restore_staging').insert(chunk)
+        if (error) throw new Error(`فرستادن ${REMOTE[table]}: ${error.message}`)
+      }
+    }
+
+    const { data: committed, error: commitError } = await supa.rpc('commit_shop_restore_batch', {
+      target_batch: batchId
+    })
+    if (commitError) throw new Error(`فعال‌سازی بکاپ: ${commitError.message}`)
+    const generation = Number(committed)
+    if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('نسخهٔ تازهٔ سرور معتبر نیست')
+
+    const stateRows = [
+      { key: 'cloudShopId', value: profile.shop_id },
+      { key: 'restoreGeneration', value: generation },
+      // Rows modified after snapshotStartedAt must still be sent normally.
+      ...SYNC_TABLES.map((table) => ({ key: `push:${table}`, value: snapshotStartedAt - 1 }))
+    ]
+    await db.syncState.bulkPut(stateRows)
+    await db.syncState.delete('restorePending')
+    return { shopId: profile.shop_id, generation }
+  } catch (error) {
+    if (batchId) {
+      // Abort only removes isolated staging rows; the previous live cloud copy
+      // remains untouched even if this cleanup request itself cannot connect.
+      try {
+        await supa.rpc('abort_shop_restore_batch', { target_batch: batchId })
+      } catch {
+        // The next begin call also removes abandoned pending batches.
+      }
+    }
+    throw error
+  }
 }
 
 export async function syncNow(throwOnError = false): Promise<void> {
@@ -374,6 +484,9 @@ export async function syncNow(throwOnError = false): Promise<void> {
   syncing = true
   setStatus({ state: 'syncing' })
   try {
+    if (await hasPendingCloudRestore()) {
+      throw new Error('جایگزینی بکاپ نیمه‌تمام است؛ همان فایل بکاپ را دوباره جایگزین کنید')
+    }
     const profile = await getProfile()
     if (!profile) throw new Error('پروفایل یافت نشد')
     const generation = await ensureGeneration(profile.shop_id)

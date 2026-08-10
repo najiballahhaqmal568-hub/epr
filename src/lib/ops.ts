@@ -878,9 +878,13 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
       if (currentCloudIdentity.length) await db.settings.bulkPut(currentCloudIdentity)
 
       await db.syncState.clear()
-      // Keep replace restores non-destructive until the whole local backup has
-      // been validated by Dexie and committed successfully.
-      await db.syncState.put({ key: 'restorePushMode', value: 'merge' })
+      if (mode === 'merge') {
+        await db.syncState.put({ key: 'restorePushMode', value: 'merge' })
+      } else {
+        // Ordinary sync must not upload this locally imported snapshot until
+        // the staging batch has been verified and atomically activated.
+        await db.syncState.put({ key: 'restorePending', value: true })
+      }
 
       // Backups made before cloud sync may not contain UUID/timestamp fields.
       // Without these fields the records appear locally but pushTable skips
@@ -906,15 +910,10 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
     })
 
     if (mode === 'replace') {
-      // Only clear the cloud after the local import is known to be valid. If
-      // this RPC fails, the merge marker above prevents the backup from
-      // overwriting existing server rows when periodic sync resumes.
-      const cloudRestore = await sync.beginCloudRestore()
-      await db.syncState.bulkPut([
-        { key: 'cloudShopId', value: cloudRestore.shopId },
-        { key: 'restoreGeneration', value: cloudRestore.generation }
-      ])
-      await db.syncState.delete('restorePushMode')
+      // The cloud keeps serving its previous complete copy while every table
+      // is uploaded into staging. One database transaction verifies the row
+      // counts, swaps all tables, and advances the generation.
+      await sync.replaceCloudWithLocalSnapshot()
     }
 
     // Safe merge uses insert-only upserts; replace uses the fresh generation.
