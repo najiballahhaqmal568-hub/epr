@@ -45,7 +45,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
-import { applyDocEffects } from '../src/lib/sync'
+import { applyDocEffects, shouldResetForGeneration } from '../src/lib/sync'
 import { buildForecast, dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
@@ -193,6 +193,16 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'نسخهٔ بازگردانی سرور — دستگاه کهنه پیش از ارسال پاک شود',
+    run: async () => {
+      is('همان دکان و همان نسخه پاک نمی‌شود', shouldResetForGeneration('shop-a', 2, 'shop-a', 2, true), false)
+      is('نسخهٔ تازهٔ سرور دستگاه را پاک می‌کند', shouldResetForGeneration('shop-a', 1, 'shop-a', 2, true), true)
+      is('تعویض دکان دستگاه را پاک می‌کند', shouldResetForGeneration('shop-a', 2, 'shop-b', 2, true), true)
+      is('دستگاه قدیمی با سابقهٔ همگام‌سازی پاک می‌شود', shouldResetForGeneration(undefined, undefined, 'shop-a', 1, true), true)
+      is('دستگاه تازه و خالی پاک‌سازی اضافی نمی‌شود', shouldResetForGeneration(undefined, undefined, 'shop-a', 1, false), false)
+    }
+  },
+  {
     name: 'برگرداندن بکاپ مالک قبلی — حساب نو بماند و همهٔ دیتا دوباره همگام شود',
     run: async () => {
       const currentProfile = { user_id: 'new-owner', shop_id: 'new-shop', role: 'owner', name: 'مالک نو' }
@@ -235,6 +245,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('نشانگر ارسال قبلی پاک شد', await db.syncState.get('push:products'), undefined)
       is('نشانگر دریافت قبلی پاک شد', await db.syncState.get('pull:products'), undefined)
       is('شناسهٔ دستگاه قبلی پاک شد', await db.syncState.get('deviceId'), undefined)
+      is('بکاپ عادی برای ادغام امن نشانه‌گذاری شد', (await db.syncState.get('restorePushMode'))?.value, 'merge')
       is('جنس بکاپ برگشت', (await db.products.get(1))?.name, 'جنس بکاپ')
 
       const exported = JSON.parse(await exportBackup())
