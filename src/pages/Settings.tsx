@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { exportBackup, importBackup, type BackupImportMode } from '../lib/ops'
-import { syncNow } from '../lib/sync'
+import { hasPendingCloudRestore, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
 import DangerCard from './settings/DangerCard'
 import ServerCard from './settings/ServerCard'
@@ -59,8 +59,10 @@ export default function Settings({
       const json = await file.text()
       if (mode === 'replace') {
         // Pull once before the destructive restore so the emergency download
-        // contains the latest cloud copy visible to this device.
-        await syncNow(true)
+        // contains the latest cloud copy visible to this device. After a
+        // failed attempt, ordinary sync is intentionally blocked; the local
+        // copy is already the selected backup and can be retried safely.
+        if (!(await hasPendingCloudRestore())) await syncNow(true)
         downloadJson(
           await exportBackup(),
           `atel-emergency-before-cloud-restore-${new Date().toISOString().slice(0, 10)}.json`
