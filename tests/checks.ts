@@ -223,6 +223,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
         exportedAt: Date.now(),
         data: {
           products: [{ id: 1, name: 'جنس بکاپ', uuid: '11111111-1111-4111-8111-111111111111', localUpdatedAt: 1 }],
+          customers: [{ id: 1, name: 'مشتری بکاپ قدیمی', type: 'retail', balance: 0 }],
           settings: [
             { key: 'supaUrl', value: 'https://old-project.supabase.co' },
             { key: 'supaKey', value: 'old-anon-key' },
@@ -247,6 +248,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('شناسهٔ دستگاه قبلی پاک شد', await db.syncState.get('deviceId'), undefined)
       is('بکاپ عادی برای ادغام امن نشانه‌گذاری شد', (await db.syncState.get('restorePushMode'))?.value, 'merge')
       is('جنس بکاپ برگشت', (await db.products.get(1))?.name, 'جنس بکاپ')
+      const legacyCustomer = await db.customers.get(1)
+      is('مشتری بکاپ قدیمی برگشت', legacyCustomer?.name, 'مشتری بکاپ قدیمی')
+      is('برای ردیف قدیمی شناسهٔ همگام‌سازی ساخته شد', Boolean(legacyCustomer?.uuid), true)
+      is('برای ردیف قدیمی زمان همگام‌سازی ساخته شد', Number(legacyCustomer?.localUpdatedAt) > 0, true)
 
       const exported = JSON.parse(await exportBackup())
       const exportedKeys = (exported.data.settings as Array<{ key: string }>).map((row) => row.key)

@@ -99,7 +99,13 @@ try {
     })
   }, { email, password })
   await sync(a.page)
-  const backup = await a.page.evaluate(async () => (await import('/src/lib/ops.ts')).exportBackup())
+  const exportedBackup = await a.page.evaluate(async () => (await import('/src/lib/ops.ts')).exportBackup())
+  const legacyBackup = JSON.parse(exportedBackup)
+  for (const customer of legacyBackup.data.customers) {
+    delete customer.uuid
+    delete customer.localUpdatedAt
+  }
+  const backup = JSON.stringify(legacyBackup)
 
   const b = await newDevice()
   await configure(b.page)
