@@ -53,6 +53,7 @@ import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { pageOrder, familyPages } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
+import { isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -175,6 +176,22 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازیابی رمز — لینک به نسخهٔ زنده برگردد، نه localhost',
+    run: async () => {
+      is(
+        'آدرس برگشت ریشهٔ همان اپ است',
+        passwordRecoveryRedirectUrl('https://najiballahhaqmal568-hub.github.io/epr/?from=login#old'),
+        'https://najiballahhaqmal568-hub.github.io/epr/'
+      )
+      is(
+        'لینک بازیابی شناخته می‌شود',
+        isPasswordRecoveryUrl('https://najiballahhaqmal568-hub.github.io/epr/#access_token=test&type=recovery'),
+        true
+      )
+      is('لینک عادی بازیابی نیست', isPasswordRecoveryUrl('https://najiballahhaqmal568-hub.github.io/epr/'), false)
+    }
+  },
   {
     name: 'برگرداندن بکاپ مالک قبلی — حساب نو بماند و همهٔ دیتا دوباره همگام شود',
     run: async () => {
