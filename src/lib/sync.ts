@@ -159,7 +159,13 @@ export async function applyDocEffects(table: SyncTable, rec: Record<string, unkn
   }
 }
 
-async function pushTable(table: SyncTable, shopId: string, deviceId: string): Promise<number> {
+async function pushTable(
+  table: SyncTable,
+  shopId: string,
+  deviceId: string,
+  generation: number,
+  mergeOnly: boolean
+): Promise<number> {
   const supa = (await getSupa())!
   const cursor = ((await getState(`push:${table}`)) as number | undefined) ?? 0
   const scanStart = Date.now()
@@ -171,23 +177,30 @@ async function pushTable(table: SyncTable, shopId: string, deviceId: string): Pr
     payload.push({
       uuid: r.uuid,
       shop_id: shopId,
+      generation,
       device_id: deviceId,
       deleted: Boolean(r.deleted),
       data: await encodeRefs(table, r)
     })
   }
-  const { error } = await supa.from(REMOTE[table]).upsert(payload, { onConflict: 'uuid' })
+  const { error } = await supa.from(REMOTE[table]).upsert(payload, {
+    onConflict: 'uuid',
+    // Safe merge adds backup rows that are absent from the server, while the
+    // current server copy wins whenever the same uuid already exists.
+    ignoreDuplicates: mergeOnly
+  })
   if (error) throw new Error(`${table}: ${error.message}`)
   await setState(`push:${table}`, scanStart)
   return payload.length
 }
 
-async function pullTable(table: SyncTable, deviceId: string): Promise<number> {
+async function pullTable(table: SyncTable, deviceId: string, generation: number): Promise<number> {
   const supa = (await getSupa())!
   const cursor = ((await getState(`pull:${table}`)) as string | undefined) ?? '1970-01-01T00:00:00Z'
   const { data, error } = await supa
     .from(REMOTE[table])
     .select('*')
+    .eq('generation', generation)
     .gt('updated_at', cursor)
     .order('updated_at', { ascending: true })
     .limit(1000)
@@ -270,7 +283,79 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
 let syncing = false
 let timer: ReturnType<typeof setInterval> | null = null
 
-export async function syncNow(): Promise<void> {
+async function currentGeneration(shopId: string): Promise<number> {
+  const supa = (await getSupa())!
+  const { data, error } = await supa.from('shops').select('restore_generation').eq('id', shopId).single()
+  if (error) throw new Error(`shops: ${error.message}`)
+  return Number(data.restore_generation ?? 0)
+}
+
+async function clearForGeneration(shopId: string, generation: number): Promise<void> {
+  await db.transaction('rw', [...SYNC_TABLES.map((t) => db.table(t)), db.syncState], async () => {
+    for (const table of SYNC_TABLES) await db.table(table).clear()
+    await db.syncState.clear()
+    await db.syncState.bulkPut([
+      { key: 'cloudShopId', value: shopId },
+      { key: 'restoreGeneration', value: generation }
+    ])
+  })
+}
+
+export function shouldResetForGeneration(
+  localShop: string | undefined,
+  localGeneration: number | undefined,
+  remoteShop: string,
+  remoteGeneration: number,
+  hasSyncHistory: boolean
+): boolean {
+  if (localShop && localShop !== remoteShop) return true
+  if (localGeneration !== undefined) return localGeneration !== remoteGeneration
+
+  // A device that synchronized with an older app version has cursors but no
+  // stored generation. Once the server generation is above zero, its local
+  // rows predate a full restore and must not be uploaded into the new snapshot.
+  return remoteGeneration > 0 && hasSyncHistory
+}
+
+/**
+ * A full restore increments the shop generation. Every updated device then
+ * discards its stale synchronized tables before it can push them back.
+ */
+async function ensureGeneration(shopId: string): Promise<number> {
+  const generation = await currentGeneration(shopId)
+  const localShop = (await getState('cloudShopId')) as string | undefined
+  const localGeneration = (await getState('restoreGeneration')) as number | undefined
+  const hasSyncHistory =
+    localGeneration === undefined &&
+    (await db.syncState.filter((row) => row.key.startsWith('push:') || row.key.startsWith('pull:')).count()) > 0
+
+  if (shouldResetForGeneration(localShop, localGeneration, shopId, generation, hasSyncHistory)) {
+    await clearForGeneration(shopId, generation)
+  } else {
+    await setState('cloudShopId', shopId)
+    await setState('restoreGeneration', generation)
+  }
+  return generation
+}
+
+export async function pauseSyncForRestore(): Promise<void> {
+  stopSync()
+  const deadline = Date.now() + 30_000
+  while (syncing && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50))
+  if (syncing) throw new Error('همگام‌سازی هنوز روان است؛ چند لحظه بعد دوباره کوشش کنید')
+}
+
+export async function beginCloudRestore(): Promise<{ shopId: string; generation: number }> {
+  const supa = await getSupa()
+  if (!supa) throw new Error('سرور تنظیم نشده')
+  const profile = await getProfile()
+  if (!profile || profile.role !== 'owner') throw new Error('فقط مالک می‌تواند همهٔ موبایل‌ها را با بکاپ عوض کند')
+  const { data, error } = await supa.rpc('begin_shop_restore')
+  if (error) throw new Error(`begin_shop_restore: ${error.message}`)
+  return { shopId: profile.shop_id, generation: Number(data) }
+}
+
+export async function syncNow(throwOnError = false): Promise<void> {
   if (syncing) return
   const supa = await getSupa()
   if (!supa) {
@@ -291,12 +376,16 @@ export async function syncNow(): Promise<void> {
   try {
     const profile = await getProfile()
     if (!profile) throw new Error('پروفایل یافت نشد')
+    const generation = await ensureGeneration(profile.shop_id)
     const deviceId = await getDeviceId()
-    for (const t of SYNC_TABLES) await pushTable(t, profile.shop_id, deviceId)
-    for (const t of SYNC_TABLES) await pullTable(t, deviceId)
+    const mergeOnly = (await getState('restorePushMode')) === 'merge'
+    for (const t of SYNC_TABLES) await pushTable(t, profile.shop_id, deviceId, generation, mergeOnly)
+    await db.syncState.delete('restorePushMode')
+    for (const t of SYNC_TABLES) await pullTable(t, deviceId, generation)
     setStatus({ state: 'ok', lastSync: Date.now(), message: undefined })
   } catch (e) {
     setStatus({ state: 'error', message: e instanceof Error ? e.message : String(e) })
+    if (throwOnError) throw e
   } finally {
     syncing = false
   }

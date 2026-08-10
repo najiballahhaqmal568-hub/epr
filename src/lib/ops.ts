@@ -848,48 +848,68 @@ export async function exportBackup(): Promise<string> {
   return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data })
 }
 
-export async function importBackup(json: string): Promise<void> {
+export type BackupImportMode = 'merge' | 'replace'
+
+export async function importBackup(json: string, mode: BackupImportMode = 'merge'): Promise<void> {
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
 
-  // Keep the new owner's current Supabase project/profile even when importing
-  // an older backup that contains the previous owner's settings.
-  const currentCloudIdentity = (
-    await Promise.all([...CLOUD_IDENTITY_SETTINGS].map((key) => db.settings.get(key)))
-  ).filter((row): row is { key: string; value: unknown } => Boolean(row))
+  const sync = await import('./sync')
+  await sync.pauseSyncForRestore()
 
-  await db.transaction('rw', [...TABLES.map((t) => db.table(t)), db.syncState], async () => {
-    for (const t of TABLES) {
-      await db.table(t).clear()
-      const rows = Array.isArray(parsed.data[t]) ? parsed.data[t] : []
-      const restorableRows =
-        t === 'settings'
-          ? rows.filter((row: { key?: unknown }) => !CLOUD_IDENTITY_SETTINGS.has(String(row.key)))
-          : rows
-      if (restorableRows.length) await db.table(t).bulkAdd(restorableRows)
-    }
-    if (currentCloudIdentity.length) await db.settings.bulkPut(currentCloudIdentity)
+  try {
+    // Keep the current Supabase project/profile even when the backup came from
+    // another owner. Cloud ownership is never transferred by a JSON backup.
+    const currentCloudIdentity = (
+      await Promise.all([...CLOUD_IDENTITY_SETTINGS].map((key) => db.settings.get(key)))
+    ).filter((row): row is { key: string; value: unknown } => Boolean(row))
 
-    // Old push/pull cursors belong to the previous local/account state. Clearing
-    // them makes every restored document upload to the current owner's shop and
-    // makes this device pull that shop again from the beginning.
-    await db.syncState.clear()
-
-    // بکاپ نسخهٔ ۱: کتگوری‌های پیش‌فرض و SKU را بساز
-    if (!parsed.data.expenseCategories?.length) {
-      for (const name of DEFAULT_EXPENSE_CATEGORIES) {
-        await db.expenseCategories.add({ name, isDefault: true })
+    await db.transaction('rw', [...TABLES.map((t) => db.table(t)), db.syncState], async () => {
+      for (const t of TABLES) {
+        await db.table(t).clear()
+        const rows = Array.isArray(parsed.data[t]) ? parsed.data[t] : []
+        const restorableRows =
+          t === 'settings'
+            ? rows.filter((row: { key?: unknown }) => !CLOUD_IDENTITY_SETTINGS.has(String(row.key)))
+            : rows
+        if (restorableRows.length) await db.table(t).bulkAdd(restorableRows)
       }
-    }
-    const variants = await db.variants.toArray()
-    for (const v of variants) {
-      if (!v.sku) await db.variants.update(v.id!, { sku: makeSku(v.id!, v.size) })
-    }
-  })
+      if (currentCloudIdentity.length) await db.settings.bulkPut(currentCloudIdentity)
 
-  // Do not wait for the 30-second timer after a restore.
-  const { syncNow } = await import('./sync')
-  await syncNow()
+      await db.syncState.clear()
+      // Keep replace restores non-destructive until the whole local backup has
+      // been validated by Dexie and committed successfully.
+      await db.syncState.put({ key: 'restorePushMode', value: 'merge' })
+
+      // بکاپ نسخهٔ ۱: کتگوری‌های پیش‌فرض و SKU را بساز
+      if (!parsed.data.expenseCategories?.length) {
+        for (const name of DEFAULT_EXPENSE_CATEGORIES) {
+          await db.expenseCategories.add({ name, isDefault: true })
+        }
+      }
+      const variants = await db.variants.toArray()
+      for (const v of variants) {
+        if (!v.sku) await db.variants.update(v.id!, { sku: makeSku(v.id!, v.size) })
+      }
+    })
+
+    if (mode === 'replace') {
+      // Only clear the cloud after the local import is known to be valid. If
+      // this RPC fails, the merge marker above prevents the backup from
+      // overwriting existing server rows when periodic sync resumes.
+      const cloudRestore = await sync.beginCloudRestore()
+      await db.syncState.bulkPut([
+        { key: 'cloudShopId', value: cloudRestore.shopId },
+        { key: 'restoreGeneration', value: cloudRestore.generation }
+      ])
+      await db.syncState.delete('restorePushMode')
+    }
+
+    // Safe merge uses insert-only upserts; replace uses the fresh generation.
+    await sync.syncNow(true)
+  } finally {
+    sync.startSync()
+  }
 }
 
 /** ریست کامل: همهٔ اسناد و اجناس در همه‌جا حذف (نرم) می‌شوند و به دستگاه‌های دیگر هم می‌رسد */
