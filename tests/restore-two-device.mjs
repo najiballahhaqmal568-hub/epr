@@ -34,9 +34,19 @@ function check(name, actual, expected) {
 
 async function newDevice() {
   const context = await browser.newContext()
+  let failNextStagingUpload = false
   await context.route(`${SUPA_URL}/**`, async (route) => {
     const request = route.request()
     try {
+      if (failNextStagingUpload && request.url().includes('/rest/v1/restore_staging') && request.method() === 'POST') {
+        failNextStagingUpload = false
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'simulated staging interruption' })
+        })
+        return
+      }
       const headers = { ...request.headers() }
       delete headers['accept-encoding']
       const response = await fetch(request.url(), {
@@ -55,7 +65,13 @@ async function newDevice() {
   })
   const page = await context.newPage()
   await page.goto(APP_URL)
-  return { context, page }
+  return {
+    context,
+    page,
+    failNextRestoreUpload() {
+      failNextStagingUpload = true
+    }
+  }
 }
 
 async function configure(page) {
@@ -131,6 +147,41 @@ try {
   await sync(a.page)
   check('later change reaches device A before restore', (await customerState(a.page)).names, ['baseline', 'later server change'])
 
+  // Prove an interrupted upload cannot expose an empty/partial generation or
+  // let the restoring phone overwrite the still-live server through ordinary
+  // sync. This is the exact failure that previously reset the user's phone.
+  a.failNextRestoreUpload()
+  const interrupted = await a.page.evaluate(async (backup) => {
+    try {
+      const { importBackup } = await import('/src/lib/ops.ts')
+      await importBackup(backup, 'replace')
+      return { failed: false }
+    } catch (error) {
+      const { db } = await import('/src/db.ts')
+      const { syncNow } = await import('/src/lib/sync.ts')
+      let ordinarySyncBlocked = false
+      try {
+        await syncNow(true)
+      } catch {
+        ordinarySyncBlocked = true
+      }
+      return {
+        failed: true,
+        pending: Boolean((await db.syncState.get('restorePending'))?.value),
+        ordinarySyncBlocked
+      }
+    }
+  }, backup)
+  check('interrupted staging reports failure', interrupted.failed, true)
+  check('interrupted staging leaves a local safety marker', interrupted.pending, true)
+  check('ordinary sync is blocked after interrupted staging', interrupted.ordinarySyncBlocked, true)
+  await sync(b.page)
+  check('server keeps its complete old copy after interruption', (await customerState(b.page)).names, [
+    'baseline',
+    'later server change'
+  ])
+
+  // Retrying the same backup starts a clean batch and atomically activates it.
   await a.page.evaluate(async (backup) => {
     const { importBackup } = await import('/src/lib/ops.ts')
     await importBackup(backup, 'replace')
