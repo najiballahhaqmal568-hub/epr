@@ -114,6 +114,39 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
   })
 }
 
+/** دفتر قرض‌دهنده: هم پولی که به دکان داده و هم پرداخت مستقیمش به فروشنده. */
+export function buildLenderLedger(payments: Payment[], lenderId: number): LedgerRow[] {
+  const events = payments.flatMap((p): Omit<LedgerRow, 'balance'>[] => {
+    if (p.partyType !== 'supplier') return []
+    if (p.partyId === lenderId) {
+      return [{
+        key: `p${p.id}`,
+        date: p.date,
+        label: p.amount < 0 ? (p.note?.trim() || 'دریافت قرض') : (p.note?.trim() || 'پرداخت قرض'),
+        source: { table: 'payments', id: p.id! },
+        delta: -p.amount
+      }]
+    }
+    if (p.via === 'lender' && p.lenderId === lenderId) {
+      return [{
+        key: `p${p.id}`,
+        date: p.date,
+        label: `پرداخت مستقیم به ${p.partyName}`,
+        note: p.note,
+        source: { table: 'payments', id: p.id! },
+        delta: p.amount
+      }]
+    }
+    return []
+  })
+  events.sort((a, b) => a.date - b.date || a.key.localeCompare(b.key))
+  let balance = 0
+  return events.map((event) => {
+    balance += event.delta
+    return { ...event, balance }
+  })
+}
+
 /**
  * قرضِ هر صفحهٔ دفتر — «صفحهٔ ۱۲ چقدر است».
  *

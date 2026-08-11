@@ -30,6 +30,8 @@ import {
   cashBalance,
   addLoan,
   repayLoan,
+  updateLender,
+  deleteLender,
   convertLoanToCapital,
   transferCash,
   boxBalances,
@@ -42,7 +44,7 @@ import {
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
-import { buildCashLedger, buildCustomerLedger, pageTotals } from '../src/lib/ledger'
+import { buildCashLedger, buildCustomerLedger, buildLenderLedger, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects, shouldResetForGeneration } from '../src/lib/sync'
@@ -1459,6 +1461,90 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       for (const d of live) await applyDocEffects('payments', d as unknown as Record<string, unknown>, false)
       for (const d of liveRet) await applyDocEffects('returns', d as unknown as Record<string, unknown>, false)
       eq('موبایل نو همان قرض را می‌سازد', (await db.customers.get(cId))!.balance, before)
+    }
+  },
+  {
+    name: 'قرض‌دهنده — قرض قبلی، پرداخت مستقیم فروشنده و حذف اشتباه',
+    run: async () => {
+      const lenderId = (await db.suppliers.add({ name: 'حاجی قرض‌دهنده', balance: 0, kind: 'lender' })) as number
+      const supplierId = await newSupplier('فروشنده')
+      await seedCash(100000)
+      await addOpeningDebt('supplier', supplierId, 'فروشنده', 50000)
+
+      // این پول قبلاً برای جنسِ موجودی اولیه مصرف شده؛ نباید دوباره وارد صندوق شود.
+      await addLoan(lenderId, 'حاجی قرض‌دهنده', 30000, Date.now(), 'جنس موجودی اولیه', 'opening')
+      eq('قرض قبلی به حساب قرض‌دهنده نشست', (await db.suppliers.get(lenderId))!.balance, 30000)
+      eq('قرض قبلی صندوق را زیاد نکرد', await cashBalance(), 100000)
+
+      // در خرید آینده قرض‌دهنده مستقیماً فروشنده را می‌پردازد.
+      await throws('پرداخت مستقیم بدون انتخاب قرض‌دهنده ثبت نمی‌شود', () =>
+        addPayment({
+          date: Date.now(),
+          partyType: 'supplier',
+          partyId: supplierId,
+          partyName: 'فروشنده',
+          amount: 20000,
+          via: 'lender'
+        })
+      )
+      eq('سند ناقص قرض فروشنده را تغییر نداد', (await db.suppliers.get(supplierId))!.balance, 50000)
+      await addPayment({
+        date: Date.now(),
+        partyType: 'supplier',
+        partyId: supplierId,
+        partyName: 'فروشنده',
+        amount: 20000,
+        via: 'lender',
+        lenderId,
+        lenderName: 'حاجی قرض‌دهنده'
+      })
+      eq('قرض فروشنده کم شد', (await db.suppliers.get(supplierId))!.balance, 30000)
+      eq('قرض قرض‌دهنده زیاد شد', (await db.suppliers.get(lenderId))!.balance, 50000)
+      eq('پرداخت مستقیم صندوق را تغییر نداد', await cashBalance(), 100000)
+
+      const docs = await db.payments.filter((p) => !p.deleted).toArray()
+      const lenderLedger = buildLenderLedger(docs, lenderId)
+      eq('دفتر قرض‌دهنده هر دو سند را نشان می‌دهد', lenderLedger.length, 2)
+      eq('جمع دفتر قرض‌دهنده درست است', lenderLedger.at(-1)?.balance ?? -1, 50000)
+
+      // عین بازپخش موبایل دوم: هر دو حساب باید از روی سندها دوباره ساخته شوند.
+      await db.suppliers.update(supplierId, { balance: 0 })
+      await db.suppliers.update(lenderId, { balance: 0 })
+      for (const p of docs) await applyDocEffects('payments', p as unknown as Record<string, unknown>, false)
+      eq('موبایل دوم قرض فروشنده را درست ساخت', (await db.suppliers.get(supplierId))!.balance, 30000)
+      eq('موبایل دوم قرض قرض‌دهنده را درست ساخت', (await db.suppliers.get(lenderId))!.balance, 50000)
+
+      await throws('قرض‌دهنده با سند زنده حذف نمی‌شود', () => deleteLender(lenderId))
+      await updateLender(lenderId, { name: 'حاجی اصلاح‌شده', phone: '0700000000', note: 'قسط ماهانه' })
+      is('نام قرض‌دهنده ویرایش شد', (await db.suppliers.get(lenderId))!.name, 'حاجی اصلاح‌شده')
+
+      const direct = docs.find((p) => p.via === 'lender')!
+      const directImpact = (await deletePaymentImpact(direct.id!))!
+      eq('حذف پرداخت مستقیم قرض فروشنده را برمی‌گرداند', directImpact.after, 50000)
+      eq('حذف پرداخت مستقیم قرض قرض‌دهنده را برمی‌گرداند', directImpact.related?.after ?? -1, 30000)
+      eq('حذف پرداخت مستقیم صندوق را دست نمی‌زند', directImpact.cash, 0)
+      await deletePayment(direct.id!)
+      eq('بعد حذف، قرض فروشنده برگشت', (await db.suppliers.get(supplierId))!.balance, 50000)
+      eq('بعد حذف، قرض قرض‌دهنده برگشت', (await db.suppliers.get(lenderId))!.balance, 30000)
+
+      const opening = docs.find((p) => p.partyId === lenderId && p.amount < 0)!
+      const openingImpact = (await deletePaymentImpact(opening.id!))!
+      eq('حذف قرض قبلی صندوق را دست نمی‌زند', openingImpact.cash, 0)
+      await deletePayment(opening.id!)
+      eq('قرض اشتباه پاک شد', (await db.suppliers.get(lenderId))!.balance, 0)
+      eq('صندوق بعد از هر دو حذف همان ماند', await cashBalance(), 100000)
+      await deleteLender(lenderId)
+      is('قرض‌دهندهٔ بدون سند حذف شد', (await db.suppliers.get(lenderId))!.deleted, true)
+
+      // قرض نقدی واقعاً وارد صندوق می‌شود و حذفش همان پول را برمی‌گرداند.
+      const cashLenderId = (await db.suppliers.add({ name: 'قرض‌دهنده نقدی', balance: 0, kind: 'lender' })) as number
+      await addLoan(cashLenderId, 'قرض‌دهنده نقدی', 7000, Date.now(), undefined, 'cash')
+      eq('قرض نقدی وارد صندوق شد', await cashBalance(), 107000)
+      const cashLoan = await db.payments.filter((p) => !p.deleted && p.partyId === cashLenderId).first()
+      await deletePayment(cashLoan!.id!)
+      eq('حذف قرض نقدی پول را از صندوق برگرداند', await cashBalance(), 100000)
+      eq('حذف قرض نقدی قرض را صفر کرد', (await db.suppliers.get(cashLenderId))!.balance, 0)
+      is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {

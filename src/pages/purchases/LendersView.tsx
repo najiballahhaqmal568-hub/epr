@@ -2,10 +2,21 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../../lib/networth'
 import { db, type Supplier } from '../../db'
-import { addLoan, repayLoan, convertLoanToCapital } from '../../lib/ops'
+import {
+  addLender,
+  addLoan,
+  addPayment,
+  convertLoanToCapital,
+  deleteLender,
+  deletePayment,
+  deletePaymentImpact,
+  repayLoan,
+  updateLender,
+  type LoanReceiptMode
+} from '../../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../../components/ui'
-import { buildCustomerLedger } from '../../lib/ledger'
+import { buildLenderLedger } from '../../lib/ledger'
 
 /** قرض‌دهنده: کسی که به دکان پول قرض داده — نه تأمین‌کننده است نه شریک */
 function LendersView() {
@@ -78,7 +89,7 @@ function NewLenderModal({ onClose }: { onClose: () => void }) {
         disabled={!name.trim()}
         onClick={async () => {
           try {
-            await db.suppliers.add({ name: name.trim(), phone: phone.trim() || undefined, note: note.trim() || undefined, balance: 0, kind: 'lender' })
+            await addLender({ name, phone, note })
             onClose()
           } catch (e) {
             setError(e instanceof Error ? e.message : String(e))
@@ -92,17 +103,26 @@ function NewLenderModal({ onClose }: { onClose: () => void }) {
 }
 
 function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () => void }) {
-  const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'partner'>('none')
+  const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'direct' | 'partner' | 'edit'>('none')
   const [amount, setAmount] = useState('')
   const [dateStr, setDateStr] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
+  const [loanReceipt, setLoanReceipt] = useState<LoanReceiptMode>('cash')
+  const [supplierId, setSupplierId] = useState<number | ''>('')
   const [shareStr, setShareStr] = useState('')
+  const [editName, setEditName] = useState(lender.name)
+  const [editPhone, setEditPhone] = useState(lender.phone ?? '')
+  const [editNote, setEditNote] = useState(lender.note ?? '')
   const [error, setError] = useState('')
 
   const live = useLiveQuery(() => db.suppliers.get(lender.id!), [lender.id])
   const payments = useLiveQuery(
-    () => db.payments.filter((p) => !p.deleted && p.partyType === 'supplier' && p.partyId === lender.id).toArray(),
+    () => db.payments.filter((p) => !p.deleted && p.partyType === 'supplier' && (p.partyId === lender.id || p.lenderId === lender.id)).toArray(),
     [lender.id]
+  )
+  const suppliers = useLiveQuery(
+    () => db.suppliers.filter((s) => !s.deleted && (s.kind === undefined || s.kind === 'supplier')).toArray(),
+    []
   )
   // دارایی خالص امروز — برای پیشنهاد سهم عادلانه
   const assets = useLiveQuery(async () => (await netWorth()).assets, [])
@@ -114,11 +134,13 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
   const fairShare = totalAfter > 0 ? Math.round((owed / totalAfter) * 100) : 0
 
   // دفتر: هر قسط و هر پرداخت با «قرض ما شد: …»
-  const ledger = buildCustomerLedger([], payments ?? [], [])
+  const ledger = buildLenderLedger(payments ?? [], l.id!)
 
   const reset = () => {
     setAmount('')
     setNote('')
+    setSupplierId('')
+    setLoanReceipt('cash')
     setError('')
     setDateStr(toDateInput(Date.now()))
   }
@@ -132,7 +154,20 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
         <p className="text-2xl font-bold text-red-600">{fmtMoney(owed)}</p>
       </div>
 
-      <div className="mb-3 flex gap-2">
+      <button
+        className="mb-3 w-full rounded-xl border border-slate-300 py-2 text-sm font-bold text-slate-700"
+        onClick={() => {
+          setEditName(l.name)
+          setEditPhone(l.phone ?? '')
+          setEditNote(l.note ?? '')
+          setMode(mode === 'edit' ? 'none' : 'edit')
+          setError('')
+        }}
+      >
+        ✏️ ویرایش مشخصات قرض‌دهنده
+      </button>
+
+      <div className="mb-3 grid grid-cols-2 gap-2">
         <button
           className="flex-1 rounded-xl bg-teal-700 py-2 text-sm font-bold text-white"
           onClick={() => {
@@ -151,11 +186,71 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
         >
           پرداخت قرض
         </button>
+        <button
+          className="col-span-2 rounded-xl bg-blue-100 py-2 text-sm font-bold text-blue-800"
+          onClick={() => {
+            setMode(mode === 'direct' ? 'none' : 'direct')
+            reset()
+          }}
+        >
+          پرداخت مستقیم به فروشنده
+        </button>
       </div>
+
+      {mode === 'edit' && (
+        <div className="mb-3 rounded-xl border border-slate-300 p-3">
+          <Field label="نام *">
+            <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} />
+          </Field>
+          <Field label="تلفن">
+            <input className={inputCls} dir="ltr" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+          </Field>
+          <Field label="یادداشت">
+            <input className={inputCls} value={editNote} onChange={(e) => setEditNote(e.target.value)} />
+          </Field>
+          <PrimaryBtn
+            disabled={!editName.trim()}
+            onClick={async () => {
+              try {
+                await updateLender(l.id!, { name: editName, phone: editPhone, note: editNote })
+                setMode('none')
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            ذخیرهٔ تغییرات
+          </PrimaryBtn>
+          <button
+            className="mt-3 w-full rounded-xl border border-red-300 py-2 text-sm font-bold text-red-700"
+            onClick={async () => {
+              if (!confirm('این قرض‌دهنده حذف شود؟ فقط وقتی حساب و سند زنده ندارد حذف می‌شود.')) return
+              try {
+                await deleteLender(l.id!)
+                onClose()
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            حذف قرض‌دهنده
+          </button>
+        </div>
+      )}
 
       {mode === 'loan' && (
         <div className="mb-3 rounded-xl border border-teal-200 p-3">
-          <p className="mb-2 text-xs text-slate-500">پول وارد صندوق می‌شود و قرض ما به او بالا می‌رود.</p>
+          <Field label="این قرض چگونه بوده؟">
+            <select className={inputCls} value={loanReceipt} onChange={(e) => setLoanReceipt(e.target.value as LoanReceiptMode)}>
+              <option value="cash">پول اکنون وارد صندوق شد</option>
+              <option value="opening">قرض قبلی — پول قبلاً برای جنس مصرف شده</option>
+            </select>
+          </Field>
+          <p className="mb-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
+            {loanReceipt === 'cash'
+              ? 'صندوق به همین مبلغ زیاد می‌شود و قرض ما به او بالا می‌رود.'
+              : 'برای جنس موجودی اولیه یا بکاپ: فقط قرض ثبت می‌شود و صندوق تغییر نمی‌کند.'}
+          </p>
           <Field label="مبلغ *">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
@@ -169,7 +264,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             disabled={parseNum(amount) <= 0}
             onClick={async () => {
               try {
-                await addLoan(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note)
+                await addLoan(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note, loanReceipt)
                 setMode('none')
                 reset()
               } catch (e) {
@@ -177,7 +272,63 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
               }
             }}
           >
-            ثبت دریافت قرض
+            {loanReceipt === 'cash' ? 'ثبت دریافت نقدی قرض' : 'ثبت قرض قبلی بدون تغییر صندوق'}
+          </PrimaryBtn>
+        </div>
+      )}
+
+      {mode === 'direct' && (
+        <div className="mb-3 rounded-xl border border-blue-200 p-3">
+          <p className="mb-2 rounded-lg bg-blue-50 p-2 text-xs text-blue-800">
+            برای خرید آینده که این شخص مستقیماً فروشنده را پرداخت کرده است. صندوق تغییر نمی‌کند.
+          </p>
+          <p className="mb-2 text-xs font-bold text-amber-700">
+            برای جنس موجودی اولیه/بکاپ این گزینه را نزنید؛ همان «قرض قبلی» را ثبت کنید.
+          </p>
+          <Field label="فروشنده *">
+            <select className={inputCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : '')}>
+              <option value="">انتخاب کنید...</option>
+              {suppliers?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} — قرض فعلی {fmtMoney(s.balance)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="مبلغ *">
+            <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          <Field label="تاریخ">
+            <input type="date" className={inputCls} value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
+          </Field>
+          <Field label="یادداشت">
+            <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          <PrimaryBtn
+            disabled={!supplierId || parseNum(amount) <= 0}
+            onClick={async () => {
+              const supplier = suppliers?.find((s) => s.id === supplierId)
+              if (!supplier) return
+              try {
+                await addPayment({
+                  date: fromDateInput(dateStr),
+                  partyType: 'supplier',
+                  partyId: supplier.id!,
+                  partyName: supplier.name,
+                  amount: parseNum(amount),
+                  note: note.trim() || undefined,
+                  via: 'lender',
+                  lenderId: l.id!,
+                  lenderName: l.name
+                })
+                setMode('none')
+                reset()
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            ثبت پرداخت مستقیم
           </PrimaryBtn>
         </div>
       )}
@@ -270,6 +421,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             <div className="min-w-0">
               <p className="font-bold text-slate-800">{r.delta > 0 ? 'دریافت قرض' : r.label}</p>
               <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
+              {r.note && <p className="mt-1 text-xs text-slate-500">{r.note}</p>}
             </div>
             <div className="shrink-0 text-left">
               <p className={`font-bold ${r.delta > 0 ? 'text-red-600' : 'text-teal-700'}`}>
@@ -279,6 +431,32 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
               <p className="text-xs text-slate-500">قرض ما شد: {fmtMoney(r.balance)}</p>
             </div>
           </div>
+          {r.source?.table === 'payments' && (
+            <button
+              className="mt-2 w-full border-t border-red-100 pt-2 text-xs font-bold text-red-600"
+              onClick={async () => {
+                try {
+                  const impact = await deletePaymentImpact(r.source!.id)
+                  if (!impact) return
+                  const changes = [
+                    `${impact.partyName}: ${fmtMoney(impact.before)} ← ${fmtMoney(impact.after)}`,
+                    ...(impact.related
+                      ? [`${impact.related.partyName}: ${fmtMoney(impact.related.before)} ← ${fmtMoney(impact.related.after)}`]
+                      : []),
+                    impact.cash === 0
+                      ? 'صندوق تغییر نمی‌کند.'
+                      : `تغییر صندوق: ${impact.cash > 0 ? '+' : '−'}${fmtMoney(Math.abs(impact.cash))}`
+                  ].join('\n')
+                  if (!confirm(`این سند اشتباه بود و حذف شود؟\n\n${changes}`)) return
+                  await deletePayment(r.source!.id)
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e))
+                }
+              }}
+            >
+              اشتباه بود — حذف سند
+            </button>
+          )}
         </div>
       ))}
       {l.note && <p className="mt-3 text-xs text-slate-400">یادداشت: {l.note}</p>}

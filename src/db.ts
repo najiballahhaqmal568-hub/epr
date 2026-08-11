@@ -185,10 +185,15 @@ export interface Payment extends Synced {
   partyName: string
   amount: number
   note?: string
-  /** پرداخت از صندوق یا از طریق صراف */
-  via?: 'cash' | 'sarraf'
+  /** سرچشمهٔ پول: صندوق، صراف، قرض‌دهنده، یا قرض قبلیِ بدون حرکت صندوق */
+  via?: 'cash' | 'sarraf' | 'lender' | 'opening'
   sarrafId?: number
   sarrafName?: string
+  /** وقتی قرض‌دهنده مستقیماً فروشنده را پرداخت کرده است */
+  lenderId?: number
+  lenderName?: string
+  /** اثر دقیق همین سند بر صندوق هنگام ثبت؛ برای حذف امن و بدون حدس */
+  cashDelta?: number
   /** صفحهٔ دفترِ فزیکی که این سند در آن نوشته شد — مثل Sale.bookPage */
   bookPage?: string
 }

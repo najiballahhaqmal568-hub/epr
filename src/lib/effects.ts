@@ -62,6 +62,8 @@ export function effectsOf(table: DocTable, doc: unknown): Effect[] {
     out.push(p.partyType === 'customer' ? debt(p.partyId, -p.amount) : owed(p.partyId, -p.amount))
     // پرداخت از راه صراف: قرض ما به تأمین‌کننده کم و به صراف زیاد می‌شود
     if (p.via === 'sarraf') out.push(owed(p.sarrafId, p.amount))
+    // قرض‌دهنده مستقیماً فروشنده را پرداخته: قرض فروشنده کم و قرض قرض‌دهنده زیاد می‌شود
+    if (p.via === 'lender') out.push(owed(p.lenderId, p.amount))
   } else if (table === 'adjustments') {
     const a = doc as Adjustment
     out.push(stock(a.variantId, a.qtyChange))

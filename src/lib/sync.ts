@@ -99,7 +99,10 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     const kind = (out.partyType ?? out.kind) as string
     await enc('partyId', kind === 'customer' ? 'customers' : 'suppliers', 'partyUuid')
   }
-  if (table === 'payments') await enc('sarrafId', 'suppliers', 'sarrafUuid')
+  if (table === 'payments') {
+    await enc('sarrafId', 'suppliers', 'sarrafUuid')
+    await enc('lenderId', 'suppliers', 'lenderUuid')
+  }
   if ('lines' in out && Array.isArray(out.lines)) {
     const vmap = await idMap('variants')
     out.lines = (out.lines as Array<Record<string, unknown>>).map((l) => ({
@@ -133,7 +136,10 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     const kind = (out.partyType ?? out.kind) as string
     await dec('partyUuid', kind === 'customer' ? 'customers' : 'suppliers', 'partyId')
   }
-  if (table === 'payments') await dec('sarrafUuid', 'suppliers', 'sarrafId')
+  if (table === 'payments') {
+    await dec('sarrafUuid', 'suppliers', 'sarrafId')
+    await dec('lenderUuid', 'suppliers', 'lenderId')
+  }
   if ('lines' in out && Array.isArray(out.lines)) {
     const vmap = await uuidMap('variants')
     out.lines = (out.lines as Array<Record<string, unknown>>).map((l) => {

@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -299,26 +299,61 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
   })
 }
 
+/** اثر دقیق سند پرداخت بر صندوق؛ سندهای جدید ذخیره می‌کنند و سندهای قدیمی با قاعدهٔ سازگار خوانده می‌شوند. */
+function paymentCashDelta(payment: Payment, partyKind?: Supplier['kind']): number {
+  if (typeof payment.cashDelta === 'number') return afn(payment.cashDelta)
+  if (payment.via === 'opening' || payment.via === 'sarraf' || payment.via === 'lender') return 0
+  if (payment.amount < 0) return partyKind === 'lender' ? -payment.amount : 0
+  return payment.partyType === 'customer' ? payment.amount : -payment.amount
+}
+
 /** ثبت پرداخت/دریافت: کاهش قرض طرف حساب + حرکت صندوق */
 export async function addPayment(payment: Payment): Promise<number> {
   payment.amount = afn(payment.amount)
+  if (payment.amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
   return db.transaction('rw', db.payments, db.customers, db.suppliers, db.cashMovements, async () => {
     if (payment.partyType === 'customer') {
       const c = await db.customers.get(payment.partyId)
-      if (c) await db.customers.update(payment.partyId, { balance: c.balance - payment.amount })
-      await movement({ date: payment.date, type: 'customerPayment', amount: payment.amount, note: payment.partyName })
+      if (!c || c.deleted) throw new Error('مشتری یافت نشد')
+      payment.via = 'cash'
+      payment.cashDelta = payment.amount
+      await db.customers.update(payment.partyId, { balance: c.balance - payment.amount })
     } else {
       const s = await db.suppliers.get(payment.partyId)
-      if (s) await db.suppliers.update(payment.partyId, { balance: s.balance - payment.amount })
-      if (payment.via === 'sarraf' && payment.sarrafId) {
+      if (!s || s.deleted) throw new Error('فروشنده یافت نشد')
+      await db.suppliers.update(payment.partyId, { balance: s.balance - payment.amount })
+      if (payment.via === 'sarraf') {
+        if (!payment.sarrafId) throw new Error('صراف را انتخاب کنید')
         // حواله: پول از صندوق نمی‌رود؛ قرض ما به صراف زیاد می‌شود
         const sf = await db.suppliers.get(payment.sarrafId)
-        if (sf) await db.suppliers.update(payment.sarrafId, { balance: sf.balance + payment.amount })
+        if (!sf || sf.deleted || sf.kind !== 'sarraf') throw new Error('صراف یافت نشد')
+        payment.cashDelta = 0
+        await db.suppliers.update(payment.sarrafId, { balance: sf.balance + payment.amount })
+      } else if (payment.via === 'lender') {
+        if (!payment.lenderId) throw new Error('قرض‌دهنده را انتخاب کنید')
+        // قرض‌دهنده پول را مستقیم به فروشنده داده؛ صندوق اصلاً دست نمی‌خورد.
+        const lender = await db.suppliers.get(payment.lenderId)
+        if (!lender || lender.deleted || lender.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+        if (lender.id === s.id) throw new Error('فروشنده و قرض‌دهنده نمی‌تواند یک نفر باشد')
+        payment.cashDelta = 0
+        payment.lenderName = lender.name
+        await db.suppliers.update(payment.lenderId, { balance: lender.balance + payment.amount })
       } else {
-        await movement({ date: payment.date, type: 'supplierPayment', amount: -payment.amount, note: payment.partyName })
+        payment.via = 'cash'
+        payment.cashDelta = -payment.amount
       }
     }
-    return (await db.payments.add(payment)) as number
+    const paymentId = (await db.payments.add(payment)) as number
+    if (payment.cashDelta) {
+      await movement({
+        date: payment.date,
+        type: payment.partyType === 'customer' ? 'customerPayment' : 'supplierPayment',
+        refId: paymentId,
+        amount: payment.cashDelta,
+        note: payment.partyName
+      })
+    }
+    return paymentId
   })
 }
 
@@ -342,15 +377,16 @@ export async function deletePayment(paymentId: number): Promise<void> {
       const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
       if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
     }
-    // «قرض قبلی» (مبلغ منفی) و حوالهٔ صراف پولی جابه‌جا نکرده‌اند
-    const hadCash = p.amount > 0 && !(p.partyType === 'supplier' && p.via === 'sarraf')
-    if (hadCash) {
+    const primary = p.partyType === 'customer' ? await db.customers.get(p.partyId) : await db.suppliers.get(p.partyId)
+    const primaryKind = p.partyType === 'supplier' ? (primary as Supplier | undefined)?.kind : undefined
+    const cashDelta = paymentCashDelta(p, primaryKind)
+    if (cashDelta !== 0) {
       await movement(
         {
           date: Date.now(),
-          type: p.partyType === 'customer' ? 'customerPayment' : 'supplierPayment',
+          type: p.partyType === 'customer' ? 'customerPayment' : primaryKind === 'lender' ? (p.amount < 0 ? 'loanIn' : 'loanRepay') : 'supplierPayment',
           refId: paymentId,
-          amount: p.partyType === 'customer' ? -p.amount : p.amount,
+          amount: -cashDelta,
           note: `حذف — ${p.partyName}`
         },
         // اصلاح اشتباه است؛ حتی اگر پول کم شود باید ثبت گردد
@@ -367,7 +403,14 @@ export async function deletePayment(paymentId: number): Promise<void> {
  */
 export async function deletePaymentImpact(
   paymentId: number
-): Promise<{ label: string; partyName: string; before: number; after: number; cash: number } | null> {
+): Promise<{
+  label: string
+  partyName: string
+  before: number
+  after: number
+  cash: number
+  related?: { partyName: string; before: number; after: number }
+} | null> {
   const p = await db.payments.get(paymentId)
   if (!p || p.deleted) return null
   const table = p.partyType === 'customer' ? db.customers : db.suppliers
@@ -375,13 +418,20 @@ export async function deletePaymentImpact(
   const before = row?.balance ?? 0
   // اثر پرداخت بر بیلانس «منهای مبلغ» است، پس حذفش «به‌علاوهٔ مبلغ»
   const after = before + p.amount
-  const hadCash = p.amount > 0 && !(p.partyType === 'supplier' && p.via === 'sarraf')
+  const partyKind = p.partyType === 'supplier' ? (row as Supplier | undefined)?.kind : undefined
+  const cashDelta = paymentCashDelta(p, partyKind)
+  let related: { partyName: string; before: number; after: number } | undefined
+  if (p.via === 'lender' && p.lenderId) {
+    const lender = await db.suppliers.get(p.lenderId)
+    if (lender) related = { partyName: lender.name, before: lender.balance, after: lender.balance - p.amount }
+  }
   return {
-    label: p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت/پرداخت پول',
+    label: p.via === 'lender' ? 'پرداخت مستقیم قرض‌دهنده به فروشنده' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت/پرداخت پول',
     partyName: p.partyName,
     before,
     after,
-    cash: hadCash ? (p.partyType === 'customer' ? -p.amount : p.amount) : 0
+    cash: -cashDelta,
+    related
   }
 }
 
@@ -412,6 +462,8 @@ export async function addOpeningDebt(
       partyName,
       amount: -amount,
       note: note?.trim() ? `قرض قبلی — ${note.trim()}` : 'قرض قبلی',
+      via: 'opening',
+      cashDelta: 0,
       bookPage: page || undefined
     })
   })
@@ -434,27 +486,81 @@ export async function recordCapitalCash(partnerName: string, amount: number): Pr
   await movement({ date: Date.now(), type: 'capitalIn', amount, partnerName, note: 'سرمایهٔ اول سال' })
 }
 
+export async function addLender(fields: { name: string; phone?: string; note?: string }): Promise<number> {
+  const name = fields.name.trim()
+  if (!name) throw new Error('نام قرض‌دهنده لازم است')
+  return db.transaction('rw', db.suppliers, async () =>
+    (await db.suppliers.add({
+      name,
+      phone: fields.phone?.trim() || undefined,
+      note: fields.note?.trim() || undefined,
+      balance: 0,
+      kind: 'lender'
+    })) as number
+  )
+}
+
+export async function updateLender(lenderId: number, fields: { name: string; phone?: string; note?: string }): Promise<void> {
+  const name = fields.name.trim()
+  if (!name) throw new Error('نام قرض‌دهنده لازم است')
+  return db.transaction('rw', db.suppliers, async () => {
+    const lender = await db.suppliers.get(lenderId)
+    if (!lender || lender.deleted || lender.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+    await db.suppliers.update(lenderId, {
+      name,
+      phone: fields.phone?.trim() || undefined,
+      note: fields.note?.trim() || undefined
+    })
+  })
+}
+
+export async function deleteLender(lenderId: number): Promise<void> {
+  return db.transaction('rw', [db.suppliers, db.payments], async () => {
+    const lender = await db.suppliers.get(lenderId)
+    if (!lender || lender.deleted) return
+    if (lender.kind !== 'lender') throw new Error('این شخص قرض‌دهنده نیست')
+    if (lender.balance !== 0) throw new Error('اول قرض این شخص را صفر کنید')
+    const hasDocs = await db.payments.filter((p) => !p.deleted && (p.partyId === lenderId || p.lenderId === lenderId)).first()
+    if (hasDocs) throw new Error('اول سندهای این شخص را حذف کنید')
+    await db.suppliers.update(lenderId, { deleted: true })
+  })
+}
+
+export type LoanReceiptMode = 'cash' | 'opening'
+
 /**
  * دریافت قرض از یک شخص (قرض‌دهنده) — قسط به قسط.
  * پول وارد صندوق می‌شود و قرض ما به او بالا می‌رود.
  * سند پرداخت با مبلغ منفی ثبت می‌شود تا بین دستگاه‌ها همگام شود — عین قرض قبلی.
  */
-export async function addLoan(lenderId: number, lenderName: string, amount: number, date = Date.now(), note?: string): Promise<void> {
+export async function addLoan(
+  lenderId: number,
+  lenderName: string,
+  amount: number,
+  date = Date.now(),
+  note?: string,
+  mode: LoanReceiptMode = 'cash'
+): Promise<void> {
   amount = afn(amount)
   if (amount <= 0) return
   return db.transaction('rw', db.payments, db.suppliers, db.cashMovements, async () => {
     const l = await db.suppliers.get(lenderId)
-    if (!l) throw new Error('قرض‌دهنده یافت نشد')
+    if (!l || l.deleted || l.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
     await db.suppliers.update(lenderId, { balance: l.balance + amount })
-    await db.payments.add({
+    const paymentId = (await db.payments.add({
       date,
       partyType: 'supplier',
       partyId: lenderId,
       partyName: lenderName,
       amount: -amount,
-      note: note?.trim() ? `قرض گرفته‌شده — ${note.trim()}` : 'قرض گرفته‌شده'
-    })
-    await movement({ date, type: 'loanIn', amount, note: `قرض از ${lenderName}` })
+      note:
+        mode === 'opening'
+          ? note?.trim() ? `قرض قبلی — ${note.trim()}` : 'قرض قبلی — پول قبلاً مصرف شده'
+          : note?.trim() ? `قرض گرفته‌شده — ${note.trim()}` : 'قرض گرفته‌شده',
+      via: mode,
+      cashDelta: mode === 'cash' ? amount : 0
+    })) as number
+    if (mode === 'cash') await movement({ date, type: 'loanIn', refId: paymentId, amount, note: `قرض از ${lenderName}` })
   })
 }
 
@@ -466,15 +572,17 @@ export async function repayLoan(lenderId: number, lenderName: string, amount: nu
     const l = await db.suppliers.get(lenderId)
     if (!l) throw new Error('قرض‌دهنده یافت نشد')
     await db.suppliers.update(lenderId, { balance: l.balance - amount })
-    await db.payments.add({
+    const paymentId = (await db.payments.add({
       date: Date.now(),
       partyType: 'supplier',
       partyId: lenderId,
       partyName: lenderName,
       amount,
-      note: note?.trim() || 'پرداخت قرض'
-    })
-    await movement({ date: Date.now(), type: 'loanRepay', amount: -amount, note: `پرداخت قرض به ${lenderName}` })
+      note: note?.trim() || 'پرداخت قرض',
+      via: 'cash',
+      cashDelta: -amount
+    })) as number
+    await movement({ date: Date.now(), type: 'loanRepay', refId: paymentId, amount: -amount, note: `پرداخت قرض به ${lenderName}` })
   })
 }
 
@@ -496,7 +604,8 @@ export async function convertLoanToCapital(lenderId: number, share: number): Pro
       partyId: lenderId,
       partyName: l.name,
       amount: owed,
-      note: 'تبدیل قرض به سرمایهٔ شریک'
+      note: 'تبدیل قرض به سرمایهٔ شریک',
+      cashDelta: 0
     })
     await db.suppliers.update(lenderId, {
       kind: 'partner',

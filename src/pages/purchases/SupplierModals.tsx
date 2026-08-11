@@ -44,9 +44,14 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
     () => db.suppliers.filter((s) => !s.deleted && s.kind === 'sarraf' && s.id !== supplierId).toArray(),
     [supplierId]
   )
+  const lenders = useLiveQuery(
+    () => db.suppliers.filter((s) => !s.deleted && s.kind === 'lender' && s.id !== supplierId).toArray(),
+    [supplierId]
+  )
   const [amount, setAmount] = useState('')
-  const [via, setVia] = useState<'cash' | 'sarraf'>('cash')
+  const [via, setVia] = useState<'cash' | 'sarraf' | 'lender'>('cash')
   const [sarrafId, setSarrafId] = useState<number | ''>('')
+  const [lenderId, setLenderId] = useState<number | ''>('')
   const [error, setError] = useState('')
   if (!supplier) return null
   const isSarraf = supplier.kind === 'sarraf'
@@ -67,11 +72,12 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
           💡 {fmtMoney(parseNum(amount) - Math.max(0, supplier.balance))} پیشکی ثبت می‌شود — {supplier.name} به شما قرضدار می‌شود.
         </p>
       )}
-      {!isSarraf && (sarrafs?.length ?? 0) > 0 && (
+      {!isSarraf && ((sarrafs?.length ?? 0) > 0 || (lenders?.length ?? 0) > 0) && (
         <Field label="طریق پرداخت">
-          <select className={inputCls} value={via} onChange={(e) => setVia(e.target.value as 'cash' | 'sarraf')}>
+          <select className={inputCls} value={via} onChange={(e) => setVia(e.target.value as 'cash' | 'sarraf' | 'lender')}>
             <option value="cash">نقد از صندوق</option>
-            <option value="sarraf">حواله از طریق صراف</option>
+            {(sarrafs?.length ?? 0) > 0 && <option value="sarraf">حواله از طریق صراف</option>}
+            {(lenders?.length ?? 0) > 0 && <option value="lender">قرض‌دهنده مستقیم فروشنده را پرداخت کرد</option>}
           </select>
         </Field>
       )}
@@ -90,19 +96,39 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
           <p className="mb-2 text-xs text-amber-600">پول از صندوق کم نمی‌شود؛ قرض شما به صراف زیاد می‌شود.</p>
         </>
       )}
+      {via === 'lender' && (
+        <>
+          <Field label="قرض‌دهنده *">
+            <select className={inputCls} value={lenderId} onChange={(e) => setLenderId(e.target.value ? Number(e.target.value) : '')}>
+              <option value="">انتخاب کنید...</option>
+              {lenders?.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <p className="mb-2 text-xs text-amber-600">صندوق تغییر نمی‌کند؛ قرض فروشنده کم و قرض شما به این شخص زیاد می‌شود.</p>
+        </>
+      )}
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <PrimaryBtn
-        disabled={parseNum(amount) <= 0 || (via === 'sarraf' && !sarrafId)}
+        disabled={parseNum(amount) <= 0 || (via === 'sarraf' && !sarrafId) || (via === 'lender' && !lenderId)}
         onClick={async () => {
           try {
             const sf = via === 'sarraf' ? sarrafs?.find((s) => s.id === sarrafId) : undefined
+            const lender = via === 'lender' ? lenders?.find((l) => l.id === lenderId) : undefined
             await addPayment({
               date: Date.now(),
               partyType: 'supplier',
               partyId: supplierId,
               partyName: supplier.name,
               amount: parseNum(amount),
-              ...(sf ? { via: 'sarraf' as const, sarrafId: sf.id!, sarrafName: sf.name } : {})
+              ...(sf
+                ? { via: 'sarraf' as const, sarrafId: sf.id!, sarrafName: sf.name }
+                : lender
+                  ? { via: 'lender' as const, lenderId: lender.id!, lenderName: lender.name }
+                  : { via: 'cash' as const })
             })
             onClose()
           } catch (e) {
