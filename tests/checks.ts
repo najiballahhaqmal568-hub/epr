@@ -53,7 +53,7 @@ import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { pageOrder, familyPages } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
-import { isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
+import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -176,6 +176,21 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'تنظیم ناقص سرور — حساب و همگام‌سازی در مرورگر پنهان نشود',
+    run: async () => {
+      await db.settings.put({ key: 'supaUrl', value: 'https://old-project.example' })
+      const onlyUrl = await getServerConfig()
+      is('URL تنها به پروژهٔ پیش‌فرض برمی‌گردد', onlyUrl?.url, 'https://xkvpdeguayorxzvjgpmv.supabase.co')
+      is('URL تنها کلید پیش‌فرض عمومی دارد', onlyUrl?.anonKey.startsWith('sb_publishable_'), true)
+
+      await db.settings.clear()
+      await db.settings.put({ key: 'supaKey', value: 'old-incomplete-key' })
+      const onlyKey = await getServerConfig()
+      is('کلید تنها به پروژهٔ پیش‌فرض برمی‌گردد', onlyKey?.url, 'https://xkvpdeguayorxzvjgpmv.supabase.co')
+      is('کلید تنها با کلید پیش‌فرض عمومی جایگزین می‌شود', onlyKey?.anonKey.startsWith('sb_publishable_'), true)
+    }
+  },
   {
     name: 'بازیابی رمز — لینک به نسخهٔ زنده برگردد، نه localhost',
     run: async () => {

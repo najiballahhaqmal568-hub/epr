@@ -20,14 +20,20 @@ export interface ServerConfig {
 export async function getServerConfig(): Promise<ServerConfig | null> {
   const url = (await db.settings.get('supaUrl'))?.value as string | undefined
   const anonKey = (await db.settings.get('supaKey'))?.value as string | undefined
-  if (!url && !anonKey) return DEFAULT_SERVER_CONFIG
-  if (!url || !anonKey) return null
+  // A URL without its matching key (or the reverse) is unusable. Old resets,
+  // interrupted writes, and partially restored settings can leave exactly that
+  // state, so recover to this shop's known public configuration.
+  if (!url || !anonKey) return DEFAULT_SERVER_CONFIG
   return { url, anonKey }
 }
 
 export async function setServerConfig(cfg: ServerConfig): Promise<void> {
-  await db.settings.put({ key: 'supaUrl', value: cfg.url.trim().replace(/\/$/, '') })
-  await db.settings.put({ key: 'supaKey', value: cfg.anonKey.trim() })
+  await db.transaction('rw', db.settings, async () => {
+    await db.settings.bulkPut([
+      { key: 'supaUrl', value: cfg.url.trim().replace(/\/$/, '') },
+      { key: 'supaKey', value: cfg.anonKey.trim() }
+    ])
+  })
   client = null
 }
 
