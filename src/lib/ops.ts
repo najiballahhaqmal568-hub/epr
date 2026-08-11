@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -625,7 +625,10 @@ export async function addLoan(
 
 export type LenderCashOutMode = Extract<LenderAction, 'cashRepayment' | 'cashLoan'>
 export type LenderGoodsMode = Extract<LenderAction, 'goodsSettlement' | 'goodsCredit'>
+/** کفش فعلی که واقعاً از گدام خارج می‌شود و باید variant داشته باشد. */
 export type LenderGoodsLine = Omit<SaleLine, 'unitCost'>
+/** کفش قبلی که شاید دیگر در گدام فعلی ثبت نباشد. */
+export type OpeningLenderGoodsLine = HistoricalGoodsLine
 
 /**
  * پولی که پیش از استفاده از اپ به قرض‌دهنده داده شده است.
@@ -667,7 +670,7 @@ export async function addOpeningLenderCash(
 export async function addOpeningLenderGoods(
   lenderId: number,
   lenderName: string,
-  lines: LenderGoodsLine[],
+  lines: OpeningLenderGoodsLine[],
   date = Date.now(),
   note?: string,
   mode: LenderGoodsMode = 'goodsSettlement'
@@ -675,6 +678,7 @@ export async function addOpeningLenderGoods(
   if (lines.length === 0) throw new Error('حداقل یک جنس را انتخاب کنید')
   const clean = lines.map((line) => ({ ...line, unitPrice: afn(line.unitPrice) }))
   for (const line of clean) {
+    if (!line.productName.trim() || !line.size.trim() || !line.color.trim()) throw new Error('مدل، سایز و رنگ هر کفش قبلی را کامل کنید')
     if (!Number.isInteger(line.qty) || line.qty <= 0) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
     if (line.unitPrice <= 0) throw new Error('قیمت توافقی هر جنس باید بیشتر از صفر باشد')
   }

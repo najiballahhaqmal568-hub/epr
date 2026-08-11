@@ -7,6 +7,9 @@
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
 import { db, type Sale, type Purchase, type Expense, type ReturnDoc, type Variant } from '../src/db'
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import LendersView from '../src/pages/purchases/LendersView'
 import {
   addSale,
   addPurchase,
@@ -84,6 +87,15 @@ async function throws(name: string, fn: () => Promise<unknown>) {
 async function fresh() {
   await db.delete()
   await db.open()
+}
+
+async function waitUntil(check: () => boolean, timeoutMs = 2000): Promise<void> {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    if (check()) return
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error('رابط کاربری در وقت تعیین‌شده آماده نشد')
 }
 
 async function makeVariant(over: Partial<Variant> = {}): Promise<number> {
@@ -1713,6 +1725,66 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('حذف کفش قبلی گدام را تغییر نداد', await stockOf(variantId), 10)
       eq('حذف کفش قبلی صندوق را تغییر نداد', await cashBalance(), 50000)
       is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      const beforeManualGoods = (await db.suppliers.get(lenderId))!.balance
+      await addOpeningLenderGoods(
+        lenderId,
+        'حاجی قدیمی',
+        [{ productName: 'مدل دیگر موجود نیست', size: '41', color: 'نصواری', qty: 2, unitPrice: 750 }],
+        Date.now(),
+        'کفش قدیمی بیرون از گدام فعلی',
+        'goodsSettlement'
+      )
+      eq('کفش قدیمی ناموجود فقط از حساب کم شد', (await db.suppliers.get(lenderId))!.balance, beforeManualGoods - 1500)
+      eq('کفش قدیمی ناموجود موجودی فعلی را تغییر نداد', await stockOf(variantId), 10)
+      const manualGoodsPayment = (await db.payments.filter((p) => p.note === 'کفش قدیمی بیرون از گدام فعلی').first())!
+      is('کفش قدیمی به موجودی فعلی وابسته نیست', manualGoodsPayment.goodsLines?.[0].variantId, undefined)
+      is(
+        'مشخصات دستی کفش قدیمی در دفتر دیده می‌شود',
+        buildLenderLedger(await db.payments.filter((p) => !p.deleted).toArray(), lenderId).find((row) => row.note === 'کفش قدیمی بیرون از گدام فعلی')?.items,
+        'مدل دیگر موجود نیست 41 نصواری ×۲'
+      )
+      await db.suppliers.update(lenderId, { balance: beforeManualGoods })
+      await applyDocEffects('payments', manualGoodsPayment as unknown as Record<string, unknown>, false)
+      eq('موبایل دوم سند کفش دستی را بازسازی کرد', (await db.suppliers.get(lenderId))!.balance, beforeManualGoods - 1500)
+      eq('موبایل دوم هم گدام را برای کفش دستی تغییر نداد', await stockOf(variantId), 10)
+      await deletePayment(manualGoodsPayment.id!)
+      eq('حذف کفش دستی حساب را برگرداند', (await db.suppliers.get(lenderId))!.balance, beforeManualGoods)
+
+      // همان مسیر واقعی فرم: کفش قبلی شاید دیگر در هیچ موجودی ثبت نباشد.
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(LendersView))
+        await waitUntil(() => host.textContent?.includes('حاجی قدیمی') === true)
+        const lenderName = Array.from(host.querySelectorAll('p')).find((node) => node.textContent?.includes('حاجی قدیمی'))
+        ;(lenderName?.parentElement?.parentElement?.parentElement as HTMLElement | null)?.click()
+        await waitUntil(() => host.textContent?.includes('سند قبلی — قبل از استفاده از اپ') === true)
+        const openingButton = Array.from(host.querySelectorAll('button')).find((button) =>
+          button.textContent?.includes('سند قبلی — قبل از استفاده از اپ')
+        )
+        openingButton?.click()
+        await waitUntil(() =>
+          Array.from(host.querySelectorAll('select')).some((select) =>
+            Array.from(select.options).some((option) => option.value === 'goodsSettlement')
+          )
+        )
+        const actionSelect = Array.from(host.querySelectorAll('select')).find((select) =>
+          Array.from(select.options).some((option) => option.value === 'goodsSettlement')
+        )!
+        actionSelect.value = 'goodsSettlement'
+        actionSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        await waitUntil(() => host.textContent?.includes('مشخصات کفش قدیمی را دستی') === true)
+        is(
+          'فرم کفش قبلی ورودی دستی برای جنس ناموجود دارد',
+          Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.includes('مشخصات کفش قدیمی را دستی')),
+          true
+        )
+      } finally {
+        root.unmount()
+        host.remove()
+      }
     }
   },
   {

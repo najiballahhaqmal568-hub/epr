@@ -18,13 +18,14 @@ import {
   type LoanReceiptMode,
   type LenderCashOutMode,
   type LenderGoodsLine,
+  type OpeningLenderGoodsLine,
   type LenderGoodsMode
 } from '../../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../../components/ui'
 import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
 
-type StockOption = LenderGoodsLine & { stockQty: number; retailPrice: number; wholesalePrice: number }
+type StockOption = LenderGoodsLine & { variantId: number; stockQty: number; retailPrice: number; wholesalePrice: number }
 
 /** قرض‌دهنده: کسی که به دکان پول قرض داده — نه تأمین‌کننده است نه شریک */
 function LendersView() {
@@ -122,7 +123,11 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
   const [variantId, setVariantId] = useState<number | ''>('')
   const [qty, setQty] = useState('1')
   const [agreedPrice, setAgreedPrice] = useState('')
-  const [goodsLines, setGoodsLines] = useState<LenderGoodsLine[]>([])
+  const [goodsLines, setGoodsLines] = useState<OpeningLenderGoodsLine[]>([])
+  const [manualOpeningGoods, setManualOpeningGoods] = useState(true)
+  const [oldProductName, setOldProductName] = useState('')
+  const [oldSize, setOldSize] = useState('')
+  const [oldColor, setOldColor] = useState('')
   const [supplierId, setSupplierId] = useState<number | ''>('')
   const [shareStr, setShareStr] = useState('')
   const [editName, setEditName] = useState(lender.name)
@@ -188,6 +193,10 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
     setQty('1')
     setAgreedPrice('')
     setGoodsLines([])
+    setManualOpeningGoods(true)
+    setOldProductName('')
+    setOldSize('')
+    setOldColor('')
     setError('')
     setDateStr(toDateInput(Date.now()))
   }
@@ -569,7 +578,9 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             disabled={goodsLines.length === 0}
             onClick={async () => {
               try {
-                await giveGoodsToLender(l.id!, l.name, goodsLines, fromDateInput(dateStr), note, goodsMode)
+                const currentLines = goodsLines.filter((line): line is LenderGoodsLine => typeof line.variantId === 'number')
+                if (currentLines.length !== goodsLines.length) throw new Error('برای کفش فعلی، جنس را از گدام انتخاب کنید')
+                await giveGoodsToLender(l.id!, l.name, currentLines, fromDateInput(dateStr), note, goodsMode)
                 setMode('none')
                 reset()
               } catch (e) {
@@ -599,6 +610,10 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
                 setVariantId('')
                 setQty('1')
                 setAgreedPrice('')
+                setManualOpeningGoods(true)
+                setOldProductName('')
+                setOldSize('')
+                setOldColor('')
                 setError('')
               }}
             >
@@ -617,73 +632,154 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
 
           {(openingAction === 'goodsSettlement' || openingAction === 'goodsCredit') && (
             <>
-              <Field label="مدل، سایز و رنگ *">
-                <select
-                  className={inputCls}
-                  value={variantId}
-                  onChange={(e) => {
-                    setVariantId(e.target.value ? Number(e.target.value) : '')
-                    setQty('1')
-                    setAgreedPrice('')
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${manualOpeningGoods ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-600'}`}
+                  onClick={() => {
+                    setManualOpeningGoods(true)
+                    setVariantId('')
+                    setError('')
                   }}
                 >
-                  <option value="">انتخاب کنید...</option>
-                  {allOptions?.map((v) => (
-                    <option key={v.variantId} value={v.variantId}>
-                      {v.productName} — سایز {v.size} — {v.color}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {variantId && (
+                  ✍️ مشخصات کفش قدیمی را دستی وارد کنید
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${!manualOpeningGoods ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-600'}`}
+                  onClick={() => {
+                    setManualOpeningGoods(false)
+                    setOldProductName('')
+                    setOldSize('')
+                    setOldColor('')
+                    setError('')
+                  }}
+                >
+                  📦 انتخاب از گدام فعلی
+                </button>
+              </div>
+
+              {manualOpeningGoods ? (
                 <>
+                  <p className="mb-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+                    این کفش فقط در سند حساب ثبت می‌شود؛ به فهرست یا موجودی گدام فعلی اضافه نمی‌شود.
+                  </p>
+                  <Field label="مدل کفش قبلی *">
+                    <input className={inputCls} value={oldProductName} onChange={(e) => setOldProductName(e.target.value)} placeholder="مثلاً اسپرتکس" />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="سایز قبلی *">
+                      <input className={inputCls} value={oldSize} onChange={(e) => setOldSize(e.target.value)} placeholder="مثلاً ۴۲" />
+                    </Field>
+                    <Field label="رنگ قبلی *">
+                      <input className={inputCls} value={oldColor} onChange={(e) => setOldColor(e.target.value)} placeholder="مثلاً سیاه" />
+                    </Field>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <Field label="تعداد قبلی *">
                       <input className={inputCls} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
                     </Field>
                     <Field label="قیمت توافقی قبلی *">
-                      <input
-                        className={inputCls}
-                        inputMode="numeric"
-                        value={agreedPrice}
-                        onChange={(e) => setAgreedPrice(e.target.value)}
-                        placeholder="قیمت همان وقت"
-                      />
+                      <input className={inputCls} inputMode="numeric" value={agreedPrice} onChange={(e) => setAgreedPrice(e.target.value)} placeholder="قیمت همان وقت" />
                     </Field>
                   </div>
                   <button
+                    type="button"
                     className="mb-3 w-full rounded-xl border border-slate-400 bg-white py-2 text-sm font-bold text-slate-700"
                     onClick={() => {
-                      const selected = allOptions?.find((v) => v.variantId === variantId)
                       const count = parseNum(qty)
                       const price = parseNum(agreedPrice)
-                      if (!selected || !Number.isInteger(count) || count <= 0 || price <= 0) {
-                        setError('جنس، تعداد صحیح و قیمت توافقی قبلی را کامل کنید')
+                      if (!oldProductName.trim() || !oldSize.trim() || !oldColor.trim() || !Number.isInteger(count) || count <= 0 || price <= 0) {
+                        setError('مدل، سایز، رنگ، تعداد صحیح و قیمت توافقی قبلی را کامل کنید')
                         return
                       }
                       setGoodsLines((xs) => [
                         ...xs,
                         {
-                          variantId: selected.variantId,
-                          productName: selected.productName,
-                          size: selected.size,
-                          color: selected.color,
+                          productName: oldProductName.trim(),
+                          size: oldSize.trim(),
+                          color: oldColor.trim(),
                           qty: count,
                           unitPrice: price
                         }
                       ])
-                      setVariantId('')
+                      setOldProductName('')
+                      setOldSize('')
+                      setOldColor('')
                       setQty('1')
                       setAgreedPrice('')
                       setError('')
                     }}
                   >
-                    ＋ افزودن به سند قبلی
+                    ＋ افزودن کفش قدیمی به سند
                   </button>
+                </>
+              ) : (
+                <>
+                  <Field label="مدل، سایز و رنگ موجود">
+                    <select
+                      className={inputCls}
+                      value={variantId}
+                      onChange={(e) => {
+                        setVariantId(e.target.value ? Number(e.target.value) : '')
+                        setQty('1')
+                        setAgreedPrice('')
+                      }}
+                    >
+                      <option value="">انتخاب کنید...</option>
+                      {allOptions?.map((v) => (
+                        <option key={v.variantId} value={v.variantId}>
+                          {v.productName} — سایز {v.size} — {v.color}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {variantId && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field label="تعداد قبلی *">
+                          <input className={inputCls} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+                        </Field>
+                        <Field label="قیمت توافقی قبلی *">
+                          <input className={inputCls} inputMode="numeric" value={agreedPrice} onChange={(e) => setAgreedPrice(e.target.value)} placeholder="قیمت همان وقت" />
+                        </Field>
+                      </div>
+                      <button
+                        type="button"
+                        className="mb-3 w-full rounded-xl border border-slate-400 bg-white py-2 text-sm font-bold text-slate-700"
+                        onClick={() => {
+                          const selected = allOptions?.find((v) => v.variantId === variantId)
+                          const count = parseNum(qty)
+                          const price = parseNum(agreedPrice)
+                          if (!selected || !Number.isInteger(count) || count <= 0 || price <= 0) {
+                            setError('جنس، تعداد صحیح و قیمت توافقی قبلی را کامل کنید')
+                            return
+                          }
+                          setGoodsLines((xs) => [
+                            ...xs,
+                            {
+                              variantId: selected.variantId,
+                              productName: selected.productName,
+                              size: selected.size,
+                              color: selected.color,
+                              qty: count,
+                              unitPrice: price
+                            }
+                          ])
+                          setVariantId('')
+                          setQty('1')
+                          setAgreedPrice('')
+                          setError('')
+                        }}
+                      >
+                        ＋ افزودن به سند قبلی
+                      </button>
+                    </>
+                  )}
                 </>
               )}
               {goodsLines.map((line, index) => (
-                <div key={`old-${line.variantId}-${index}`} className="mb-2 flex items-center justify-between rounded-lg bg-white p-2 text-xs">
+                <div key={`old-${line.variantId ?? `${line.productName}-${line.size}-${line.color}`}-${index}`} className="mb-2 flex items-center justify-between rounded-lg bg-white p-2 text-xs">
                   <span>
                     {line.productName} {line.size} {line.color} ×{fmtNum(line.qty)} — {fmtMoney(line.qty * line.unitPrice)}
                   </span>

@@ -97,6 +97,12 @@ export interface SaleLine {
   unitCost?: number
 }
 
+/**
+ * جزئیات کفشی که پیش از استفاده از اپ داده شده است.
+ * ممکن است آن کفش دیگر در گدام فعلی وجود نداشته باشد، پس پیوند به variant اختیاری است.
+ */
+export type HistoricalGoodsLine = Omit<SaleLine, 'variantId'> & { variantId?: number }
+
 /** نوع رفت‌وآمد میان دکان و قرض‌دهنده؛ نام‌ها عمداً جدا اند تا معنای سند گم نشود. */
 export type LenderAction = 'cashRepayment' | 'cashLoan' | 'goodsSettlement' | 'goodsCredit'
 
@@ -205,7 +211,7 @@ export interface Payment extends Synced {
   /** این رفت‌وآمد پیش از استفاده از اپ رخ داده و فقط حساب افتتاحیه را می‌سازد. */
   lenderOpening?: boolean
   /** جزئیات کفشِ سند قبلی؛ چون نباید فروش یا حرکت گدام امروز ساخته شود. */
-  goodsLines?: SaleLine[]
+  goodsLines?: HistoricalGoodsLine[]
   /** پیوند پایدار میان سند کفش (Sale) و سند حساب (Payment)، حتی میان دو موبایل. */
   groupUuid?: string
   /** اثر دقیق همین سند بر صندوق هنگام ثبت؛ برای حذف امن و بدون حدس */
