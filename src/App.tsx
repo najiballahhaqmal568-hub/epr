@@ -16,7 +16,7 @@ import { useExpenseReminder } from './lib/useExpenseReminder'
 import { useDebtReminder } from './lib/useDebtReminder'
 import { useIntegrityCheck } from './lib/useIntegrityCheck'
 import { fmtNum, fmtMoney } from './lib/format'
-import { getSupa, getProfile, isPasswordRecoveryUrl, type Profile } from './lib/supa'
+import { getSupa, getProfile, getServerConfig, isPasswordRecoveryUrl, type Profile } from './lib/supa'
 import { startSync, syncNow } from './lib/sync'
 
 const tabs = [
@@ -43,11 +43,7 @@ export default function App() {
   const debtReminder = useDebtReminder()
   const integrity = useIntegrityCheck()
 
-  const serverCfg = useLiveQuery(async () => {
-    const url = (await db.settings.get('supaUrl'))?.value
-    const key = (await db.settings.get('supaKey'))?.value
-    return Boolean(url && key)
-  }, [])
+  const serverCfg = useLiveQuery(async () => Boolean(await getServerConfig()), [])
 
   useEffect(() => {
     if (!serverCfg) return

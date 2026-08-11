@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../../db'
-import { setServerConfig } from '../../lib/supa'
+import { getServerConfig, setServerConfig } from '../../lib/supa'
 import { Card, inputCls, Field, PrimaryBtn } from '../../components/ui'
 
 export function ServerCard() {
@@ -9,7 +8,7 @@ export function ServerCard() {
   const [url, setUrl] = useState('')
   const [key, setKey] = useState('')
   const [msg, setMsg] = useState('')
-  const configured = useLiveQuery(async () => Boolean((await db.settings.get('supaUrl'))?.value), [])
+  const configured = useLiveQuery(async () => Boolean(await getServerConfig()), [])
 
   return (
     <Card>

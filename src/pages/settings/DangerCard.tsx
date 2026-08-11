@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../../db'
 import { exportBackup, resetAllData, resetLocalDevice } from '../../lib/ops'
-import { getProfile } from '../../lib/supa'
+import { getProfile, getServerConfig } from '../../lib/supa'
 import { syncNow } from '../../lib/sync'
 import { Card, inputCls, Field } from '../../components/ui'
 
@@ -11,7 +10,7 @@ export function DangerCard() {
   const [confirmText, setConfirmText] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  const serverConfigured = useLiveQuery(async () => Boolean((await db.settings.get('supaUrl'))?.value), [])
+  const serverConfigured = useLiveQuery(async () => Boolean(await getServerConfig()), [])
 
   async function downloadBackup() {
     const json = await exportBackup()

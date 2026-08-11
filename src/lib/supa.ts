@@ -4,6 +4,14 @@ import { db, newUuid } from '../db'
 let client: SupabaseClient | null = null
 let clientKey = ''
 
+// This is a public browser key, not a secret/service-role key. Keeping the
+// shop's default project here lets a new phone or browser show the login page
+// immediately instead of silently running with cloud sync disabled.
+const DEFAULT_SERVER_CONFIG: ServerConfig = {
+  url: 'https://xkvpdeguayorxzvjgpmv.supabase.co',
+  anonKey: 'sb_publishable_42m2CI7EWyoXGI1av1pSJA_8jBhbiGT'
+}
+
 export interface ServerConfig {
   url: string
   anonKey: string
@@ -12,6 +20,7 @@ export interface ServerConfig {
 export async function getServerConfig(): Promise<ServerConfig | null> {
   const url = (await db.settings.get('supaUrl'))?.value as string | undefined
   const anonKey = (await db.settings.get('supaKey'))?.value as string | undefined
+  if (!url && !anonKey) return DEFAULT_SERVER_CONFIG
   if (!url || !anonKey) return null
   return { url, anonKey }
 }
