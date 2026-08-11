@@ -87,7 +87,10 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     if (typeof v === 'number') out[target] = (await idMap(refTable)).get(v) ?? null
   }
   if (table === 'variants') await enc('productId', 'products', 'productUuid')
-  if (table === 'sales') await enc('customerId', 'customers', 'customerUuid')
+  if (table === 'sales') {
+    await enc('customerId', 'customers', 'customerUuid')
+    await enc('lenderId', 'suppliers', 'lenderUuid')
+  }
   if (table === 'purchases') {
     await enc('supplierId', 'suppliers', 'supplierUuid')
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
@@ -124,7 +127,10 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     }
   }
   if (table === 'variants') await dec('productUuid', 'products', 'productId')
-  if (table === 'sales') await dec('customerUuid', 'customers', 'customerId')
+  if (table === 'sales') {
+    await dec('customerUuid', 'customers', 'customerId')
+    await dec('lenderUuid', 'suppliers', 'lenderId')
+  }
   if (table === 'purchases') {
     await dec('supplierUuid', 'suppliers', 'supplierId')
     await dec('sarrafUuid', 'suppliers', 'sarrafId')

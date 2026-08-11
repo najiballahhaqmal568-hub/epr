@@ -30,6 +30,8 @@ import {
   cashBalance,
   addLoan,
   repayLoan,
+  giveCashToLender,
+  giveGoodsToLender,
   updateLender,
   deleteLender,
   convertLoanToCapital,
@@ -44,7 +46,7 @@ import {
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
-import { buildCashLedger, buildCustomerLedger, buildLenderLedger, pageTotals } from '../src/lib/ledger'
+import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects, shouldResetForGeneration } from '../src/lib/sync'
@@ -1544,6 +1546,109 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await deletePayment(cashLoan!.id!)
       eq('حذف قرض نقدی پول را از صندوق برگرداند', await cashBalance(), 100000)
       eq('حذف قرض نقدی قرض را صفر کرد', (await db.suppliers.get(cashLenderId))!.balance, 0)
+      is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'حساب کامل قرض‌دهنده — پول و کفش، تسویه و قرض',
+    run: async () => {
+      const lenderId = (await db.suppliers.add({ name: 'حاجی عبدالکریم', balance: 0, kind: 'lender' })) as number
+      const variantId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(variantId, 10, 'اسپرتکس')
+      await seedCash(50000)
+      await addLoan(lenderId, 'حاجی عبدالکریم', 100000, Date.now(), 'قرض پیشین', 'opening')
+
+      await giveCashToLender(lenderId, 'حاجی عبدالکریم', 20000, Date.now(), 'قسط ماه', 'cashRepayment')
+      await giveCashToLender(lenderId, 'حاجی عبدالکریم', 10000, Date.now(), 'قرض برای خانه', 'cashLoan')
+      eq('دو پرداخت نقدی از صندوق کم شد', await cashBalance(), 20000)
+      eq('دو پرداخت نقدی در حساب خالص کم شد', (await db.suppliers.get(lenderId))!.balance, 70000)
+
+      await giveGoodsToLender(
+        lenderId,
+        'حاجی عبدالکریم',
+        [{ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 900 }],
+        Date.now(),
+        'دو جوړه بابت قسط',
+        'goodsSettlement'
+      )
+      await giveGoodsToLender(
+        lenderId,
+        'حاجی عبدالکریم',
+        [{ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 800 }],
+        Date.now(),
+        'یک جوړه برای خودش',
+        'goodsCredit'
+      )
+      eq('سه جوړه از گدام کم شد', await stockOf(variantId), 7)
+      eq('قیمت توافقی کفش از حساب خالص کم شد', (await db.suppliers.get(lenderId))!.balance, 67400)
+      eq('دادن کفش صندوق را تغییر نداد', await cashBalance(), 20000)
+      eq('مفاد با قیمت توافقی و قیمت خرید حساب شد', await profitAndLoss(), 1100)
+
+      const payments = await db.payments.filter((p) => !p.deleted).toArray()
+      const sales = await db.sales.filter((s) => !s.deleted).toArray()
+      const summary = summarizeLenderAccount(payments, lenderId)
+      eq('خلاصه قرض قبلی', summary.openingLoan, 100000)
+      eq('خلاصه پرداخت نقدی قرض', summary.cashRepaid, 20000)
+      eq('خلاصه قرض نقدی به قرض‌دهنده', summary.cashLoaned, 10000)
+      eq('خلاصه کفش بابت تسویه', summary.goodsSettlement, 1800)
+      eq('خلاصه کفش قرضی', summary.goodsCredit, 800)
+      eq('خلاصه با حساب ذخیره‌شده برابر است', summary.net, 67400)
+      const ledger = buildLenderLedger(payments, lenderId, sales)
+      eq('دفتر پنج نوع سند را نشان می‌دهد', ledger.length, 5)
+      is('جزئیات کفش در دفتر است', ledger.find((r) => r.label === 'کفش بابت تسویه')?.items, 'اسپرتکس 42 سیاه ×۲')
+      eq('آخر دفتر با حساب خالص برابر است', ledger.at(-1)?.balance ?? -1, 67400)
+
+      // بازپخش عین موبایل دوم: موجودی و حساب باید فقط از اسناد دوباره ساخته شود.
+      await db.suppliers.update(lenderId, { balance: 0 })
+      await db.variants.update(variantId, { stockQty: 10 })
+      for (const s of sales) await applyDocEffects('sales', s as unknown as Record<string, unknown>, false)
+      for (const p of payments) await applyDocEffects('payments', p as unknown as Record<string, unknown>, false)
+      eq('موبایل دوم همان موجودی را می‌سازد', await stockOf(variantId), 7)
+      eq('موبایل دوم همان حساب قرض‌دهنده را می‌سازد', (await db.suppliers.get(lenderId))!.balance, 67400)
+
+      const settlementPayment = payments.find((p) => p.lenderAction === 'goodsSettlement')!
+      const settlementSale = sales.find((s) => s.lenderAction === 'goodsSettlement')!
+      await deletePayment(settlementPayment.id!)
+      eq('حذف سند کفش، جنس را به گدام برگرداند', await stockOf(variantId), 9)
+      eq('حذف سند کفش، حساب را برگرداند', (await db.suppliers.get(lenderId))!.balance, 69200)
+      is('فروش پیوندشده هم حذف شد', (await db.sales.get(settlementSale.id!))!.deleted, true)
+      eq('پس از حذف فقط مفاد کفش قرضی ماند', await profitAndLoss(), 300)
+
+      const creditSale = sales.find((s) => s.lenderAction === 'goodsCredit')!
+      const creditPayment = payments.find((p) => p.lenderAction === 'goodsCredit')!
+      await deleteSale(creditSale.id!)
+      eq('حذف از سند فروش هم جنس را برگرداند', await stockOf(variantId), 10)
+      eq('حذف از سند فروش هم حساب را برگرداند', (await db.suppliers.get(lenderId))!.balance, 70000)
+      is('سند حساب پیوندشده هم حذف شد', (await db.payments.get(creditPayment.id!))!.deleted, true)
+
+      await throws('تسویه نقدی بیشتر از قرض پذیرفته نمی‌شود', () =>
+        giveCashToLender(lenderId, 'حاجی عبدالکریم', 70001, Date.now(), undefined, 'cashRepayment')
+      )
+      await throws('تسویه با کفش بیشتر از قرض پذیرفته نمی‌شود', () =>
+        giveGoodsToLender(
+          lenderId,
+          'حاجی عبدالکریم',
+          [{ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 70001 }],
+          Date.now(),
+          undefined,
+          'goodsSettlement'
+        )
+      )
+      eq('سند نامعتبر حساب را تغییر نداد', (await db.suppliers.get(lenderId))!.balance, 70000)
+      eq('سند نامعتبر گدام را تغییر نداد', await stockOf(variantId), 10)
+      await giveGoodsToLender(
+        lenderId,
+        'حاجی عبدالکریم',
+        [{ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 70001 }],
+        Date.now(),
+        'قرض بزرگ برای خودش',
+        'goodsCredit'
+      )
+      eq('کفش قرضی می‌تواند حساب را به طلب ما تبدیل کند', (await db.suppliers.get(lenderId))!.balance, -1)
+      const crossing = await db.payments.filter((p) => !p.deleted && p.lenderAction === 'goodsCredit').first()
+      await deletePayment(crossing!.id!)
+      eq('حذف کفش قرضی بزرگ حساب را برگرداند', (await db.suppliers.get(lenderId))!.balance, 70000)
+      eq('حذف کفش قرضی بزرگ گدام را برگرداند', await stockOf(variantId), 10)
       is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },

@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -110,7 +110,7 @@ export async function addSale(sale: Sale): Promise<number> {
 
 /** حذف فروش: برگشت گدام + برگشت قرض + خروج نقد */
 export async function deleteSale(saleId: number): Promise<void> {
-  return db.transaction('rw', [db.sales, db.variants, db.customers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
+  return db.transaction('rw', [db.sales, db.payments, db.variants, db.customers, db.suppliers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const sale = await db.sales.get(saleId)
     if (!sale || sale.deleted) return
     for (const line of sale.lines) {
@@ -122,13 +122,28 @@ export async function deleteSale(saleId: number): Promise<void> {
       const c = await db.customers.get(sale.customerId)
       if (c) await db.customers.update(sale.customerId, { balance: c.balance - remainder })
     }
+    // کفشِ قرض‌دهنده دو نیمه دارد: فروش برای گدام/مفاد و پرداخت برای حساب شخص.
+    // حذف هر کدام باید نیمهٔ دیگر را هم برگرداند تا سند نیمه‌تمام نماند.
+    const linkedPayment = sale.groupUuid
+      ? await db.payments.filter((p) => !p.deleted && p.groupUuid === sale.groupUuid).first()
+      : undefined
+    if (linkedPayment) {
+      for (const e of effectsOf('payments', linkedPayment)) {
+        const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
+        if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
+      }
+      await db.payments.update(linkedPayment.id!, { deleted: true })
+    }
     // پول در همان جایی برمی‌گردد که آمده بود
     const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
-    // حذفِ اصلاحی است — حتی اگر پول کم شود باید ثبت گردد
-    await movement(
-      { date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, box: orig ? boxOf(orig) : SHOP_BOX, note: 'حذف فروش' },
-      { allowNegative: true }
-    )
+    // کفش قرض‌دهنده نقد نیست؛ paid آن «پرداخت با حساب» است و صندوق نباید لمس شود.
+    if (!sale.lenderAction) {
+      // حذفِ اصلاحی است — حتی اگر پول کم شود باید ثبت گردد
+      await movement(
+        { date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, box: orig ? boxOf(orig) : SHOP_BOX, note: 'حذف فروش' },
+        { allowNegative: true }
+      )
+    }
     await db.sales.update(saleId, { deleted: true })
     // حذف یک سند، تاریخچه را عوض می‌کند و میانگین قیمت به ترتیب رویدادها بند است.
     // پس قیمت دوباره از روی اسنادِ باقی‌مانده ساخته می‌شود تا موبایل دوم هم به
@@ -149,7 +164,8 @@ export async function deleteSaleImpact(
   const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
   const box = orig ? boxOf(orig) : SHOP_BOX
   const before = await cashBalance(box)
-  return { paid: sale.paid, box, before, after: before - sale.paid }
+  const paid = sale.lenderAction ? 0 : sale.paid
+  return { paid, box, before, after: before - paid }
 }
 
 // قاعده‌های قیمت تمام‌شده در lib/costing.ts زندگی می‌کنند تا sync و integrity هم همان را ببینند
@@ -302,7 +318,7 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
 /** اثر دقیق سند پرداخت بر صندوق؛ سندهای جدید ذخیره می‌کنند و سندهای قدیمی با قاعدهٔ سازگار خوانده می‌شوند. */
 function paymentCashDelta(payment: Payment, partyKind?: Supplier['kind']): number {
   if (typeof payment.cashDelta === 'number') return afn(payment.cashDelta)
-  if (payment.via === 'opening' || payment.via === 'sarraf' || payment.via === 'lender') return 0
+  if (payment.via === 'opening' || payment.via === 'sarraf' || payment.via === 'lender' || payment.via === 'goods') return 0
   if (payment.amount < 0) return partyKind === 'lender' ? -payment.amount : 0
   return payment.partyType === 'customer' ? payment.amount : -payment.amount
 }
@@ -370,12 +386,22 @@ export async function addPayment(payment: Payment): Promise<number> {
  * نوشته می‌شود — سند قدیم پاک نمی‌شود تا رد کار بماند.
  */
 export async function deletePayment(paymentId: number): Promise<void> {
-  return db.transaction('rw', [db.payments, db.customers, db.suppliers, db.cashMovements], async () => {
+  return db.transaction('rw', [db.payments, db.sales, db.variants, db.customers, db.suppliers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const p = await db.payments.get(paymentId)
     if (!p || p.deleted) return
     for (const e of effectsOf('payments', p)) {
       const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
       if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
+    }
+    const linkedSale = p.groupUuid
+      ? await db.sales.filter((s) => !s.deleted && s.groupUuid === p.groupUuid).first()
+      : undefined
+    if (linkedSale) {
+      for (const e of effectsOf('sales', linkedSale)) {
+        const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
+        if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
+      }
+      await db.sales.update(linkedSale.id!, { deleted: true })
     }
     const primary = p.partyType === 'customer' ? await db.customers.get(p.partyId) : await db.suppliers.get(p.partyId)
     const primaryKind = p.partyType === 'supplier' ? (primary as Supplier | undefined)?.kind : undefined
@@ -384,7 +410,15 @@ export async function deletePayment(paymentId: number): Promise<void> {
       await movement(
         {
           date: Date.now(),
-          type: p.partyType === 'customer' ? 'customerPayment' : primaryKind === 'lender' ? (p.amount < 0 ? 'loanIn' : 'loanRepay') : 'supplierPayment',
+          type: p.partyType === 'customer'
+            ? 'customerPayment'
+            : primaryKind === 'lender'
+              ? p.amount < 0
+                ? 'loanIn'
+                : p.lenderAction === 'cashLoan'
+                  ? 'lenderCashLoan'
+                  : 'loanRepay'
+              : 'supplierPayment',
           refId: paymentId,
           amount: -cashDelta,
           note: `حذف — ${p.partyName}`
@@ -394,6 +428,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
       )
     }
     await db.payments.update(paymentId, { deleted: true })
+    if (linkedSale) await applyRebuiltCosts()
   })
 }
 
@@ -410,6 +445,7 @@ export async function deletePaymentImpact(
   after: number
   cash: number
   related?: { partyName: string; before: number; after: number }
+  goods?: { pairs: number; items: string }
 } | null> {
   const p = await db.payments.get(paymentId)
   if (!p || p.deleted) return null
@@ -425,13 +461,35 @@ export async function deletePaymentImpact(
     const lender = await db.suppliers.get(p.lenderId)
     if (lender) related = { partyName: lender.name, before: lender.balance, after: lender.balance - p.amount }
   }
+  const linkedSale = p.groupUuid
+    ? await db.sales.filter((s) => !s.deleted && s.groupUuid === p.groupUuid).first()
+    : undefined
+  const goods = linkedSale
+    ? {
+        pairs: linkedSale.lines.reduce((sum, line) => sum + line.qty, 0),
+        items: linkedSale.lines
+          .map((line) => `${line.productName} ${line.size} ${line.color} ×${line.qty}`.replace(/\s+/g, ' ').trim())
+          .join('، ')
+      }
+    : undefined
+  const actionLabel: Partial<Record<LenderAction, string>> = {
+    cashRepayment: 'پرداخت نقدی قرض',
+    cashLoan: 'قرض نقدی به قرض‌دهنده',
+    goodsSettlement: 'کفش بابت تسویه',
+    goodsCredit: 'کفش قرضی به قرض‌دهنده'
+  }
   return {
-    label: p.via === 'lender' ? 'پرداخت مستقیم قرض‌دهنده به فروشنده' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت/پرداخت پول',
+    label: p.via === 'lender'
+      ? 'پرداخت مستقیم قرض‌دهنده به فروشنده'
+      : p.lenderAction
+        ? actionLabel[p.lenderAction]!
+        : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت/پرداخت پول',
     partyName: p.partyName,
     before,
     after,
     cash: -cashDelta,
-    related
+    related,
+    goods
   }
 }
 
@@ -564,25 +622,122 @@ export async function addLoan(
   })
 }
 
-/** پرداخت قرض به قرض‌دهنده — نقد از صندوق */
-export async function repayLoan(lenderId: number, lenderName: string, amount: number, note?: string): Promise<void> {
+export type LenderCashOutMode = Extract<LenderAction, 'cashRepayment' | 'cashLoan'>
+export type LenderGoodsMode = Extract<LenderAction, 'goodsSettlement' | 'goodsCredit'>
+export type LenderGoodsLine = Omit<SaleLine, 'unitCost'>
+
+/**
+ * پولی که خود قرض‌دهنده می‌گیرد:
+ *  - cashRepayment: پرداخت بدهی ما (بیشتر از قرض فعلی نمی‌شود)
+ *  - cashLoan: پولی که او از دکان قرض می‌گیرد و می‌تواند حساب را منفی کند
+ */
+export async function giveCashToLender(
+  lenderId: number,
+  lenderName: string,
+  amount: number,
+  date = Date.now(),
+  note?: string,
+  mode: LenderCashOutMode = 'cashRepayment'
+): Promise<void> {
   amount = afn(amount)
   if (amount <= 0) return
   return db.transaction('rw', db.payments, db.suppliers, db.cashMovements, async () => {
     const l = await db.suppliers.get(lenderId)
-    if (!l) throw new Error('قرض‌دهنده یافت نشد')
+    if (!l || l.deleted || l.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+    if (mode === 'cashRepayment' && amount > Math.max(0, afn(l.balance))) {
+      throw new Error('مبلغ تسویه بیشتر از قرض فعلی است؛ برای مبلغ اضافی «قرض نقدی به قرض‌دهنده» را انتخاب کنید')
+    }
     await db.suppliers.update(lenderId, { balance: l.balance - amount })
     const paymentId = (await db.payments.add({
-      date: Date.now(),
+      date,
       partyType: 'supplier',
       partyId: lenderId,
-      partyName: lenderName,
+      partyName: l.name || lenderName,
       amount,
-      note: note?.trim() || 'پرداخت قرض',
+      note: note?.trim() || undefined,
       via: 'cash',
-      cashDelta: -amount
+      cashDelta: -amount,
+      lenderAction: mode
     })) as number
-    await movement({ date: Date.now(), type: 'loanRepay', refId: paymentId, amount: -amount, note: `پرداخت قرض به ${lenderName}` })
+    await movement({
+      date,
+      type: mode === 'cashRepayment' ? 'loanRepay' : 'lenderCashLoan',
+      refId: paymentId,
+      amount: -amount,
+      note: note?.trim() || (mode === 'cashRepayment' ? `پرداخت قرض به ${l.name}` : `قرض نقدی به ${l.name}`)
+    })
+  })
+}
+
+/** سازگاری با فورم‌ها و بکاپ‌های پیشین: repayLoan همان پرداخت نقدی قرض است. */
+export async function repayLoan(lenderId: number, lenderName: string, amount: number, note?: string): Promise<void> {
+  return giveCashToLender(lenderId, lenderName, amount, Date.now(), note, 'cashRepayment')
+}
+
+/**
+ * دادن کفش به قرض‌دهنده با قیمت توافقی. یک Sale موجودی/مفاد را نگه می‌دارد و
+ * یک Payment حساب شخص را؛ groupUuid باعث می‌شود حذف و همگام‌سازی همیشه جفت بماند.
+ */
+export async function giveGoodsToLender(
+  lenderId: number,
+  lenderName: string,
+  lines: LenderGoodsLine[],
+  date = Date.now(),
+  note?: string,
+  mode: LenderGoodsMode = 'goodsSettlement'
+): Promise<{ saleId: number; paymentId: number }> {
+  if (lines.length === 0) throw new Error('حداقل یک جنس را انتخاب کنید')
+  const clean = lines.map((line) => ({ ...line, unitPrice: afn(line.unitPrice) }))
+  for (const line of clean) {
+    if (!Number.isInteger(line.qty) || line.qty <= 0) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
+    if (line.unitPrice <= 0) throw new Error('قیمت توافقی هر جنس باید بیشتر از صفر باشد')
+  }
+  const total = afn(clean.reduce((sum, line) => sum + line.qty * line.unitPrice, 0))
+  const groupUuid = newUuid()
+
+  return db.transaction('rw', [db.sales, db.payments, db.variants, db.suppliers], async () => {
+    const lender = await db.suppliers.get(lenderId)
+    if (!lender || lender.deleted || lender.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+    if (mode === 'goodsSettlement' && total > Math.max(0, afn(lender.balance))) {
+      throw new Error('ارزش کفشِ تسویه بیشتر از قرض فعلی است؛ برای اضافه «کفش قرضی» را انتخاب کنید')
+    }
+
+    const savedLines: SaleLine[] = []
+    for (const line of clean) {
+      const variant = await db.variants.get(line.variantId)
+      if (!variant || variant.deleted) throw new Error('جنس یافت نشد')
+      if (variant.stockQty < line.qty) throw new Error(`موجودی کافی نیست: ${line.productName} ${line.size}`)
+      await db.variants.update(line.variantId, { stockQty: variant.stockQty - line.qty })
+      savedLines.push({ ...line, unitCost: variant.purchasePrice })
+    }
+
+    const saleId = (await db.sales.add({
+      date,
+      customerName: lender.name || lenderName,
+      saleType: 'retail',
+      lines: savedLines,
+      total,
+      // این «پرداخت با حساب شخص» است، نه ورود نقد؛ بنابراین movement ساخته نمی‌شود.
+      paid: total,
+      lenderId,
+      lenderName: lender.name || lenderName,
+      lenderAction: mode,
+      groupUuid
+    })) as number
+    await db.suppliers.update(lenderId, { balance: lender.balance - total })
+    const paymentId = (await db.payments.add({
+      date,
+      partyType: 'supplier',
+      partyId: lenderId,
+      partyName: lender.name || lenderName,
+      amount: total,
+      note: note?.trim() || undefined,
+      via: 'goods',
+      cashDelta: 0,
+      lenderAction: mode,
+      groupUuid
+    })) as number
+    return { saleId, paymentId }
   })
 }
 

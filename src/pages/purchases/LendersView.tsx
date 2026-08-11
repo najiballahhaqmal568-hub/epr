@@ -10,13 +10,19 @@ import {
   deleteLender,
   deletePayment,
   deletePaymentImpact,
-  repayLoan,
+  giveCashToLender,
+  giveGoodsToLender,
   updateLender,
-  type LoanReceiptMode
+  type LoanReceiptMode,
+  type LenderCashOutMode,
+  type LenderGoodsLine,
+  type LenderGoodsMode
 } from '../../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../../components/ui'
-import { buildLenderLedger } from '../../lib/ledger'
+import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
+
+type StockOption = LenderGoodsLine & { stockQty: number; retailPrice: number; wholesalePrice: number }
 
 /** قرض‌دهنده: کسی که به دکان پول قرض داده — نه تأمین‌کننده است نه شریک */
 function LendersView() {
@@ -51,8 +57,8 @@ function LendersView() {
               )}
             </div>
             <div className="text-left">
-              <p className="font-bold text-red-600">{fmtMoney(Math.abs(l.balance))}</p>
-              <p className="text-xs text-slate-400">{l.balance > 0 ? 'قرض ما به او' : 'تصفیه'}</p>
+              <p className={`font-bold ${l.balance < 0 ? 'text-teal-700' : 'text-red-600'}`}>{fmtMoney(Math.abs(l.balance))}</p>
+              <p className="text-xs text-slate-400">{l.balance > 0 ? 'قرض ما به او' : l.balance < 0 ? 'طلب ما از او' : 'تصفیه'}</p>
             </div>
           </div>
           <p className="mt-2 text-xs text-slate-500">جزئیات و قسط‌ها ←</p>
@@ -103,11 +109,17 @@ function NewLenderModal({ onClose }: { onClose: () => void }) {
 }
 
 function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () => void }) {
-  const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'direct' | 'partner' | 'edit'>('none')
+  const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'goods' | 'direct' | 'partner' | 'edit'>('none')
   const [amount, setAmount] = useState('')
   const [dateStr, setDateStr] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
   const [loanReceipt, setLoanReceipt] = useState<LoanReceiptMode>('cash')
+  const [cashMode, setCashMode] = useState<LenderCashOutMode>('cashRepayment')
+  const [goodsMode, setGoodsMode] = useState<LenderGoodsMode>('goodsSettlement')
+  const [variantId, setVariantId] = useState<number | ''>('')
+  const [qty, setQty] = useState('1')
+  const [agreedPrice, setAgreedPrice] = useState('')
+  const [goodsLines, setGoodsLines] = useState<LenderGoodsLine[]>([])
   const [supplierId, setSupplierId] = useState<number | ''>('')
   const [shareStr, setShareStr] = useState('')
   const [editName, setEditName] = useState(lender.name)
@@ -124,6 +136,28 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
     () => db.suppliers.filter((s) => !s.deleted && (s.kind === undefined || s.kind === 'supplier')).toArray(),
     []
   )
+  const lenderSales = useLiveQuery(
+    () => db.sales.filter((s) => !s.deleted && s.lenderId === lender.id).toArray(),
+    [lender.id]
+  )
+  const stockOptions = useLiveQuery(async (): Promise<StockOption[]> => {
+    const [products, variants] = await Promise.all([
+      db.products.filter((p) => !p.deleted).toArray(),
+      db.variants.filter((v) => !v.deleted && v.stockQty > 0).toArray()
+    ])
+    const names = new Map(products.map((p) => [p.id!, p.name]))
+    return variants.map((v) => ({
+      variantId: v.id!,
+      productName: names.get(v.productId) ?? 'جنس',
+      size: v.size,
+      color: v.color,
+      qty: 1,
+      unitPrice: 0,
+      stockQty: v.stockQty,
+      retailPrice: v.retailPrice,
+      wholesalePrice: v.wholesalePrice
+    }))
+  }, [])
   // دارایی خالص امروز — برای پیشنهاد سهم عادلانه
   const assets = useLiveQuery(async () => (await netWorth()).assets, [])
 
@@ -134,13 +168,21 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
   const fairShare = totalAfter > 0 ? Math.round((owed / totalAfter) * 100) : 0
 
   // دفتر: هر قسط و هر پرداخت با «قرض ما شد: …»
-  const ledger = buildLenderLedger(payments ?? [], l.id!)
+  const ledger = buildLenderLedger(payments ?? [], l.id!, lenderSales ?? [])
+  const summary = summarizeLenderAccount(payments ?? [], l.id!)
+  const goodsTotal = goodsLines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)
 
   const reset = () => {
     setAmount('')
     setNote('')
     setSupplierId('')
     setLoanReceipt('cash')
+    setCashMode('cashRepayment')
+    setGoodsMode('goodsSettlement')
+    setVariantId('')
+    setQty('1')
+    setAgreedPrice('')
+    setGoodsLines([])
     setError('')
     setDateStr(toDateInput(Date.now()))
   }
@@ -150,9 +192,24 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
       {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
 
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
-        <p className="text-sm text-slate-500">قرض ما به او</p>
-        <p className="text-2xl font-bold text-red-600">{fmtMoney(owed)}</p>
+        <p className="text-sm text-slate-500">{owed > 0 ? 'قرض ما به او' : owed < 0 ? 'طلب ما از او' : 'حساب تصفیه است'}</p>
+        <p className={`text-2xl font-bold ${owed > 0 ? 'text-red-600' : owed < 0 ? 'text-teal-700' : 'text-slate-600'}`}>
+          {fmtMoney(Math.abs(owed))}
+        </p>
       </div>
+
+      <details className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-sm">
+        <summary className="cursor-pointer font-bold text-slate-700">خلاصهٔ کامل رفت‌وآمدها</summary>
+        <div className="mt-2 space-y-1 text-xs">
+          <SummaryRow label="قرض قبلی" value={summary.openingLoan} plus />
+          <SummaryRow label="دریافت نقدی قرض" value={summary.cashReceived} plus />
+          <SummaryRow label="پرداخت مستقیم فروشنده" value={summary.directSupplier} plus />
+          <SummaryRow label="پرداخت نقدی قرض" value={summary.cashRepaid} />
+          <SummaryRow label="قرض نقدی به قرض‌دهنده" value={summary.cashLoaned} />
+          <SummaryRow label="کفش بابت تسویه" value={summary.goodsSettlement} />
+          <SummaryRow label="کفش قرضی" value={summary.goodsCredit} />
+        </div>
+      </details>
 
       <button
         className="mb-3 w-full rounded-xl border border-slate-300 py-2 text-sm font-bold text-slate-700"
@@ -175,7 +232,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             reset()
           }}
         >
-          ＋ دریافت قسط
+          ＋ دریافت از او
         </button>
         <button
           className="flex-1 rounded-xl bg-amber-100 py-2 text-sm font-bold text-amber-800"
@@ -184,10 +241,19 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             reset()
           }}
         >
-          پرداخت قرض
+          پول به او
         </button>
         <button
-          className="col-span-2 rounded-xl bg-blue-100 py-2 text-sm font-bold text-blue-800"
+          className="rounded-xl bg-orange-100 py-2 text-sm font-bold text-orange-800"
+          onClick={() => {
+            setMode(mode === 'goods' ? 'none' : 'goods')
+            reset()
+          }}
+        >
+          کفش به او
+        </button>
+        <button
+          className="rounded-xl bg-blue-100 py-2 text-sm font-bold text-blue-800"
           onClick={() => {
             setMode(mode === 'direct' ? 'none' : 'direct')
             reset()
@@ -335,14 +401,31 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
 
       {mode === 'repay' && (
         <div className="mb-3 rounded-xl border border-amber-200 p-3">
-          <Field label="مبلغ پرداختی *">
+          <Field label="این پول چگونه حساب شود؟">
+            <select className={inputCls} value={cashMode} onChange={(e) => setCashMode(e.target.value as LenderCashOutMode)}>
+              <option value="cashRepayment">پرداخت قرض ما به او</option>
+              <option value="cashLoan">قرض نقدی به خود قرض‌دهنده</option>
+            </select>
+          </Field>
+          <p className="mb-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+            {cashMode === 'cashRepayment'
+              ? 'از قرض ما کم می‌شود و بیشتر از قرض فعلی ثبت نمی‌شود.'
+              : 'این پول قرضِ او از دکان است؛ اگر حساب منفی شود، یعنی او به ما بدهکار است.'}
+          </p>
+          <Field label="مبلغ *">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          <Field label="تاریخ">
+            <input type="date" className={inputCls} value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
+          </Field>
+          <Field label="یادداشت">
+            <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً قسط ماه یا مصرف خانه" />
           </Field>
           <PrimaryBtn
             disabled={parseNum(amount) <= 0}
             onClick={async () => {
               try {
-                await repayLoan(l.id!, l.name, parseNum(amount), note)
+                await giveCashToLender(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note, cashMode)
                 setMode('none')
                 reset()
               } catch (e) {
@@ -350,7 +433,132 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
               }
             }}
           >
-            ثبت پرداخت
+            {cashMode === 'cashRepayment' ? 'ثبت پرداخت قرض' : 'ثبت قرض نقدی به او'}
+          </PrimaryBtn>
+        </div>
+      )}
+
+      {mode === 'goods' && (
+        <div className="mb-3 rounded-xl border border-orange-200 p-3">
+          <Field label="این کفش چگونه حساب شود؟">
+            <select className={inputCls} value={goodsMode} onChange={(e) => setGoodsMode(e.target.value as LenderGoodsMode)}>
+              <option value="goodsSettlement">کفش بابت تسویهٔ قرض ما</option>
+              <option value="goodsCredit">کفش قرضی برای خودش</option>
+            </select>
+          </Field>
+          <p className="mb-2 rounded-lg bg-orange-50 p-2 text-xs text-orange-800">
+            {goodsMode === 'goodsSettlement'
+              ? 'قیمت توافقی از قرض ما کم می‌شود؛ ارزش کل نمی‌تواند بیشتر از قرض فعلی باشد.'
+              : 'قیمت توافقی طلب دکان از او است و در حساب خالص کم می‌شود.'}
+          </p>
+          <Field label="مدل، سایز و رنگ *">
+            <select
+              className={inputCls}
+              value={variantId}
+              onChange={(e) => {
+                setVariantId(e.target.value ? Number(e.target.value) : '')
+                setQty('1')
+                setAgreedPrice('')
+              }}
+            >
+              <option value="">انتخاب کنید...</option>
+              {stockOptions?.map((v) => (
+                <option key={v.variantId} value={v.variantId}>
+                  {v.productName} — سایز {v.size} — {v.color} — موجودی {fmtNum(v.stockQty)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {variantId && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="تعداد *">
+                  <input className={inputCls} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+                </Field>
+                <Field label="قیمت توافقی فی جوړه *">
+                  <input
+                    className={inputCls}
+                    inputMode="numeric"
+                    value={agreedPrice}
+                    onChange={(e) => setAgreedPrice(e.target.value)}
+                    placeholder="قیمت توافق‌شده"
+                  />
+                </Field>
+              </div>
+              {(() => {
+                const selected = stockOptions?.find((v) => v.variantId === variantId)
+                return selected ? (
+                  <p className="mb-2 text-xs text-slate-500">
+                    راهنما: پرچون {fmtMoney(selected.retailPrice)}، عمده {fmtMoney(selected.wholesalePrice)}
+                  </p>
+                ) : null
+              })()}
+              <button
+                className="mb-3 w-full rounded-xl border border-orange-300 py-2 text-sm font-bold text-orange-800"
+                onClick={() => {
+                  const selected = stockOptions?.find((v) => v.variantId === variantId)
+                  const count = parseNum(qty)
+                  const price = parseNum(agreedPrice)
+                  const already = goodsLines.filter((x) => x.variantId === variantId).reduce((sum, x) => sum + x.qty, 0)
+                  if (!selected || !Number.isInteger(count) || count <= 0 || price <= 0) {
+                    setError('جنس، تعداد صحیح و قیمت توافقی را کامل کنید')
+                    return
+                  }
+                  if (already + count > selected.stockQty) {
+                    setError('تعداد انتخاب‌شده بیشتر از موجودی گدام است')
+                    return
+                  }
+                  setGoodsLines((xs) => [
+                    ...xs,
+                    {
+                      variantId: selected.variantId,
+                      productName: selected.productName,
+                      size: selected.size,
+                      color: selected.color,
+                      qty: count,
+                      unitPrice: price
+                    }
+                  ])
+                  setVariantId('')
+                  setQty('1')
+                  setAgreedPrice('')
+                  setError('')
+                }}
+              >
+                ＋ افزودن به سند
+              </button>
+            </>
+          )}
+          {goodsLines.map((line, index) => (
+            <div key={`${line.variantId}-${index}`} className="mb-2 flex items-center justify-between rounded-lg bg-slate-50 p-2 text-xs">
+              <span>
+                {line.productName} {line.size} {line.color} ×{fmtNum(line.qty)} — {fmtMoney(line.qty * line.unitPrice)}
+              </span>
+              <button className="font-bold text-red-600" onClick={() => setGoodsLines((xs) => xs.filter((_, i) => i !== index))}>
+                حذف
+              </button>
+            </div>
+          ))}
+          {goodsLines.length > 0 && <p className="mb-2 text-left font-bold text-orange-800">مجموع توافقی: {fmtMoney(goodsTotal)}</p>}
+          <Field label="تاریخ">
+            <input type="date" className={inputCls} value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
+          </Field>
+          <Field label="یادداشت و جزئیات">
+            <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً بابت قسط ماه" />
+          </Field>
+          <PrimaryBtn
+            disabled={goodsLines.length === 0}
+            onClick={async () => {
+              try {
+                await giveGoodsToLender(l.id!, l.name, goodsLines, fromDateInput(dateStr), note, goodsMode)
+                setMode('none')
+                reset()
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            {goodsMode === 'goodsSettlement' ? 'ثبت کفش بابت تسویه' : 'ثبت کفش قرضی'}
           </PrimaryBtn>
         </div>
       )}
@@ -419,8 +627,9 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
         <div key={r.key} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="font-bold text-slate-800">{r.delta > 0 ? 'دریافت قرض' : r.label}</p>
+              <p className="font-bold text-slate-800">{r.label}</p>
               <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
+              {r.items && <p className="mt-1 text-xs font-bold text-slate-600">{r.items}</p>}
               {r.note && <p className="mt-1 text-xs text-slate-500">{r.note}</p>}
             </div>
             <div className="shrink-0 text-left">
@@ -428,7 +637,9 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
                 {r.delta > 0 ? '+' : '−'}
                 {fmtMoney(Math.abs(r.delta))}
               </p>
-              <p className="text-xs text-slate-500">قرض ما شد: {fmtMoney(r.balance)}</p>
+              <p className="text-xs text-slate-500">
+                {r.balance > 0 ? 'قرض ما شد' : r.balance < 0 ? 'طلب ما شد' : 'حساب شد'}: {fmtMoney(Math.abs(r.balance))}
+              </p>
             </div>
           </div>
           {r.source?.table === 'payments' && (
@@ -443,6 +654,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
                     ...(impact.related
                       ? [`${impact.related.partyName}: ${fmtMoney(impact.related.before)} ← ${fmtMoney(impact.related.after)}`]
                       : []),
+                    ...(impact.goods ? [`برگشت به گدام: ${impact.goods.items}`] : []),
                     impact.cash === 0
                       ? 'صندوق تغییر نمی‌کند.'
                       : `تغییر صندوق: ${impact.cash > 0 ? '+' : '−'}${fmtMoney(Math.abs(impact.cash))}`
@@ -462,6 +674,17 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
       {l.note && <p className="mt-3 text-xs text-slate-400">یادداشت: {l.note}</p>}
       {ledger.length > 0 && <p className="mt-2 text-xs text-slate-400">اولین قسط: {fmtDateShort(ledger[0].date)}</p>}
     </Modal>
+  )
+}
+
+function SummaryRow({ label, value, plus = false }: { label: string; value: number; plus?: boolean }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="text-slate-500">{label}</span>
+      <span className={plus ? 'font-bold text-red-600' : 'font-bold text-teal-700'}>
+        {plus ? '+' : '−'} {fmtMoney(value)}
+      </span>
+    </div>
   )
 }
 

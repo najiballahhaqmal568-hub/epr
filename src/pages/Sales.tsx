@@ -17,7 +17,9 @@ export default function Sales({ isStaff }: { isStaff?: boolean }) {
   const [exchanging, setExchanging] = useState<Sale | null>(null)
   const [receiptFor, setReceiptFor] = useState<Sale | null>(null)
   const [justSaved, setJustSaved] = useState<Sale | null>(null)
-  const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().filter((s) => !s.deleted).limit(100).toArray(), [])
+  // کفشِ قرض‌دهنده از دفتر همان شخص حذف/اصلاح می‌شود؛ در آمار مفاد می‌ماند
+  // اما در این لیست عملیاتی نمی‌آید تا مرجوعی/تبادله حساب پیوندشده را نیمه‌کاره نکند.
+  const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().filter((s) => !s.deleted && !s.lenderAction).limit(100).toArray(), [])
 
   const tabCls = (v: string) =>
     `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`

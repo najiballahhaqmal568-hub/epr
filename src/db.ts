@@ -97,6 +97,9 @@ export interface SaleLine {
   unitCost?: number
 }
 
+/** نوع رفت‌وآمد میان دکان و قرض‌دهنده؛ نام‌ها عمداً جدا اند تا معنای سند گم نشود. */
+export type LenderAction = 'cashRepayment' | 'cashLoan' | 'goodsSettlement' | 'goodsCredit'
+
 export interface Sale extends Synced {
   id?: number
   date: number
@@ -115,6 +118,11 @@ export interface Sale extends Synced {
    * گذشته هم به صفحهٔ نو می‌پرید.
    */
   bookPage?: string
+  /** کفشی که قرض‌دهنده برده؛ حسابش با یک Payment هم‌گروه نگه داشته می‌شود. */
+  lenderId?: number
+  lenderName?: string
+  lenderAction?: Extract<LenderAction, 'goodsSettlement' | 'goodsCredit'>
+  groupUuid?: string
 }
 
 export interface PurchaseLine {
@@ -186,12 +194,16 @@ export interface Payment extends Synced {
   amount: number
   note?: string
   /** سرچشمهٔ پول: صندوق، صراف، قرض‌دهنده، یا قرض قبلیِ بدون حرکت صندوق */
-  via?: 'cash' | 'sarraf' | 'lender' | 'opening'
+  via?: 'cash' | 'sarraf' | 'lender' | 'opening' | 'goods'
   sarrafId?: number
   sarrafName?: string
   /** وقتی قرض‌دهنده مستقیماً فروشنده را پرداخت کرده است */
   lenderId?: number
   lenderName?: string
+  /** معنای دقیق پول/کفشی که به خود قرض‌دهنده داده شده است. */
+  lenderAction?: LenderAction
+  /** پیوند پایدار میان سند کفش (Sale) و سند حساب (Payment)، حتی میان دو موبایل. */
+  groupUuid?: string
   /** اثر دقیق همین سند بر صندوق هنگام ثبت؛ برای حذف امن و بدون حدس */
   cashDelta?: number
   /** صفحهٔ دفترِ فزیکی که این سند در آن نوشته شد — مثل Sale.bookPage */
@@ -231,6 +243,7 @@ export type CashMovementType =
   | 'landing'
   | 'loanIn'
   | 'loanRepay'
+  | 'lenderCashLoan'
   | 'transfer'
 
 export interface CashMovement extends Synced {

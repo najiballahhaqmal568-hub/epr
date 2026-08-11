@@ -114,15 +114,80 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
   })
 }
 
-/** دفتر قرض‌دهنده: هم پولی که به دکان داده و هم پرداخت مستقیمش به فروشنده. */
-export function buildLenderLedger(payments: Payment[], lenderId: number): LedgerRow[] {
+export interface LenderAccountSummary {
+  openingLoan: number
+  cashReceived: number
+  directSupplier: number
+  cashRepaid: number
+  cashLoaned: number
+  goodsSettlement: number
+  goodsCredit: number
+  net: number
+}
+
+/** جمع دسته‌ها جدا می‌ماند؛ net همان عدد نهایی حساب قرض‌دهنده است. */
+export function summarizeLenderAccount(payments: Payment[], lenderId: number): LenderAccountSummary {
+  const out: LenderAccountSummary = {
+    openingLoan: 0,
+    cashReceived: 0,
+    directSupplier: 0,
+    cashRepaid: 0,
+    cashLoaned: 0,
+    goodsSettlement: 0,
+    goodsCredit: 0,
+    net: 0
+  }
+  for (const p of payments) {
+    if (p.deleted || p.partyType !== 'supplier') continue
+    if (p.partyId === lenderId) {
+      if (p.amount < 0) {
+        if (p.via === 'opening') out.openingLoan += -p.amount
+        else out.cashReceived += -p.amount
+      } else if (p.lenderAction === 'cashLoan') out.cashLoaned += p.amount
+      else if (p.lenderAction === 'goodsSettlement') out.goodsSettlement += p.amount
+      else if (p.lenderAction === 'goodsCredit') out.goodsCredit += p.amount
+      else out.cashRepaid += p.amount
+    } else if (p.via === 'lender' && p.lenderId === lenderId) {
+      out.directSupplier += p.amount
+    }
+  }
+  out.net =
+    out.openingLoan +
+    out.cashReceived +
+    out.directSupplier -
+    out.cashRepaid -
+    out.cashLoaned -
+    out.goodsSettlement -
+    out.goodsCredit
+  return out
+}
+
+/** دفتر قرض‌دهنده: قرض‌های دریافتی و هر پول/کفشی که خودش برده است. */
+export function buildLenderLedger(payments: Payment[], lenderId: number, sales: Sale[] = []): LedgerRow[] {
+  const saleByGroup = new Map(sales.filter((s) => !s.deleted && s.groupUuid).map((s) => [s.groupUuid!, s]))
   const events = payments.flatMap((p): Omit<LedgerRow, 'balance'>[] => {
+    if (p.deleted) return []
     if (p.partyType !== 'supplier') return []
     if (p.partyId === lenderId) {
+      const label =
+        p.amount < 0
+          ? p.via === 'opening'
+            ? 'قرض قبلی'
+            : 'دریافت نقدی قرض'
+          : p.lenderAction === 'cashLoan'
+            ? 'قرض نقدی به قرض‌دهنده'
+            : p.lenderAction === 'goodsSettlement'
+              ? 'کفش بابت تسویه'
+              : p.lenderAction === 'goodsCredit'
+                ? 'کفش قرضی به قرض‌دهنده'
+                : 'پرداخت نقدی قرض'
+      const linkedSale = p.groupUuid ? saleByGroup.get(p.groupUuid) : undefined
       return [{
         key: `p${p.id}`,
         date: p.date,
-        label: p.amount < 0 ? (p.note?.trim() || 'دریافت قرض') : (p.note?.trim() || 'پرداخت قرض'),
+        label,
+        note: p.note,
+        items: linkedSale ? itemsLabel(linkedSale.lines) : undefined,
         source: { table: 'payments', id: p.id! },
         delta: -p.amount
       }]
