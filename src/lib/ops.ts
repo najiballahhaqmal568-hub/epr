@@ -464,10 +464,11 @@ export async function deletePaymentImpact(
   const linkedSale = p.groupUuid
     ? await db.sales.filter((s) => !s.deleted && s.groupUuid === p.groupUuid).first()
     : undefined
-  const goods = linkedSale
+  const impactLines = linkedSale?.lines ?? p.goodsLines
+  const goods = impactLines
     ? {
-        pairs: linkedSale.lines.reduce((sum, line) => sum + line.qty, 0),
-        items: linkedSale.lines
+        pairs: impactLines.reduce((sum, line) => sum + line.qty, 0),
+        items: impactLines
           .map((line) => `${line.productName} ${line.size} ${line.color} ×${line.qty}`.replace(/\s+/g, ' ').trim())
           .join('، ')
       }
@@ -625,6 +626,78 @@ export async function addLoan(
 export type LenderCashOutMode = Extract<LenderAction, 'cashRepayment' | 'cashLoan'>
 export type LenderGoodsMode = Extract<LenderAction, 'goodsSettlement' | 'goodsCredit'>
 export type LenderGoodsLine = Omit<SaleLine, 'unitCost'>
+
+/**
+ * پولی که پیش از استفاده از اپ به قرض‌دهنده داده شده است.
+ * فقط حساب افتتاحیه را می‌سازد؛ صندوق امروز حرکت نمی‌کند.
+ */
+export async function addOpeningLenderCash(
+  lenderId: number,
+  lenderName: string,
+  amount: number,
+  date = Date.now(),
+  note?: string,
+  mode: LenderCashOutMode = 'cashRepayment'
+): Promise<void> {
+  amount = afn(amount)
+  if (amount <= 0) return
+  return db.transaction('rw', db.payments, db.suppliers, async () => {
+    const lender = await db.suppliers.get(lenderId)
+    if (!lender || lender.deleted || lender.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+    await db.suppliers.update(lenderId, { balance: lender.balance - amount })
+    await db.payments.add({
+      date,
+      partyType: 'supplier',
+      partyId: lenderId,
+      partyName: lender.name || lenderName,
+      amount,
+      note: note?.trim() || undefined,
+      via: 'opening',
+      cashDelta: 0,
+      lenderAction: mode,
+      lenderOpening: true
+    })
+  })
+}
+
+/**
+ * کفشی که قرض‌دهنده پیش از استفاده از اپ برده است.
+ * جزئیات و قیمت توافقی می‌ماند، اما فروش/مفاد و حرکت گدام امروز ساخته نمی‌شود.
+ */
+export async function addOpeningLenderGoods(
+  lenderId: number,
+  lenderName: string,
+  lines: LenderGoodsLine[],
+  date = Date.now(),
+  note?: string,
+  mode: LenderGoodsMode = 'goodsSettlement'
+): Promise<void> {
+  if (lines.length === 0) throw new Error('حداقل یک جنس را انتخاب کنید')
+  const clean = lines.map((line) => ({ ...line, unitPrice: afn(line.unitPrice) }))
+  for (const line of clean) {
+    if (!Number.isInteger(line.qty) || line.qty <= 0) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
+    if (line.unitPrice <= 0) throw new Error('قیمت توافقی هر جنس باید بیشتر از صفر باشد')
+  }
+  const total = afn(clean.reduce((sum, line) => sum + line.qty * line.unitPrice, 0))
+  return db.transaction('rw', db.payments, db.suppliers, async () => {
+    const lender = await db.suppliers.get(lenderId)
+    if (!lender || lender.deleted || lender.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+    await db.suppliers.update(lenderId, { balance: lender.balance - total })
+    await db.payments.add({
+      date,
+      partyType: 'supplier',
+      partyId: lenderId,
+      partyName: lender.name || lenderName,
+      amount: total,
+      note: note?.trim() || undefined,
+      via: 'opening',
+      cashDelta: 0,
+      lenderAction: mode,
+      lenderOpening: true,
+      goodsLines: clean
+    })
+  })
+}
 
 /**
  * پولی که خود قرض‌دهنده می‌گیرد:

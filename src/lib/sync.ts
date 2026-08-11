@@ -106,9 +106,9 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
     await enc('lenderId', 'suppliers', 'lenderUuid')
   }
-  if ('lines' in out && Array.isArray(out.lines)) {
+  for (const field of ['lines', 'goodsLines'] as const) if (field in out && Array.isArray(out[field])) {
     const vmap = await idMap('variants')
-    out.lines = (out.lines as Array<Record<string, unknown>>).map((l) => ({
+    out[field] = (out[field] as Array<Record<string, unknown>>).map((l) => ({
       ...l,
       variantUuid: typeof l.variantId === 'number' ? (vmap.get(l.variantId) ?? null) : null
     }))
@@ -146,9 +146,9 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     await dec('sarrafUuid', 'suppliers', 'sarrafId')
     await dec('lenderUuid', 'suppliers', 'lenderId')
   }
-  if ('lines' in out && Array.isArray(out.lines)) {
+  for (const field of ['lines', 'goodsLines'] as const) if (field in out && Array.isArray(out[field])) {
     const vmap = await uuidMap('variants')
-    out.lines = (out.lines as Array<Record<string, unknown>>).map((l) => {
+    out[field] = (out[field] as Array<Record<string, unknown>>).map((l) => {
       const local = typeof l.variantUuid === 'string' ? vmap.get(l.variantUuid) : undefined
       return { ...l, variantId: local ?? l.variantId }
     })

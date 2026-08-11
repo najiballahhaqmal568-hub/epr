@@ -202,6 +202,10 @@ export interface Payment extends Synced {
   lenderName?: string
   /** معنای دقیق پول/کفشی که به خود قرض‌دهنده داده شده است. */
   lenderAction?: LenderAction
+  /** این رفت‌وآمد پیش از استفاده از اپ رخ داده و فقط حساب افتتاحیه را می‌سازد. */
+  lenderOpening?: boolean
+  /** جزئیات کفشِ سند قبلی؛ چون نباید فروش یا حرکت گدام امروز ساخته شود. */
+  goodsLines?: SaleLine[]
   /** پیوند پایدار میان سند کفش (Sale) و سند حساب (Payment)، حتی میان دو موبایل. */
   groupUuid?: string
   /** اثر دقیق همین سند بر صندوق هنگام ثبت؛ برای حذف امن و بدون حدس */

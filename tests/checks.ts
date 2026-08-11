@@ -32,6 +32,8 @@ import {
   repayLoan,
   giveCashToLender,
   giveGoodsToLender,
+  addOpeningLenderCash,
+  addOpeningLenderGoods,
   updateLender,
   deleteLender,
   convertLoanToCapital,
@@ -1649,6 +1651,67 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await deletePayment(crossing!.id!)
       eq('حذف کفش قرضی بزرگ حساب را برگرداند', (await db.suppliers.get(lenderId))!.balance, 70000)
       eq('حذف کفش قرضی بزرگ گدام را برگرداند', await stockOf(variantId), 10)
+      is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'سند قبلی قرض‌دهنده — حساب اصلاح شود، صندوق و گدام امروز نه',
+    run: async () => {
+      const lenderId = (await db.suppliers.add({ name: 'حاجی قدیمی', balance: 0, kind: 'lender' })) as number
+      const variantId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(variantId, 10, 'اسپرتکس')
+      await seedCash(50000)
+      await addLoan(lenderId, 'حاجی قدیمی', 100000, Date.now(), 'قرض دکان از قبل', 'opening')
+
+      await addOpeningLenderCash(lenderId, 'حاجی قدیمی', 20000, Date.now(), 'پرداخت قدیمی ما', 'cashRepayment')
+      await addOpeningLenderCash(lenderId, 'حاجی قدیمی', 10000, Date.now(), 'پول قدیمی برای خانه', 'cashLoan')
+      await addOpeningLenderGoods(
+        lenderId,
+        'حاجی قدیمی',
+        [{ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 900 }],
+        Date.now(),
+        'کفش قدیمی بابت قسط',
+        'goodsSettlement'
+      )
+      await addOpeningLenderGoods(
+        lenderId,
+        'حاجی قدیمی',
+        [{ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 800 }],
+        Date.now(),
+        'کفش قدیمی برای خودش',
+        'goodsCredit'
+      )
+
+      eq('چهار سند قبلی فقط حساب خالص را ساخت', (await db.suppliers.get(lenderId))!.balance, 67400)
+      eq('پول قدیمی صندوق امروز را تغییر نداد', await cashBalance(), 50000)
+      eq('کفش قدیمی موجودی امروز را تغییر نداد', await stockOf(variantId), 10)
+      eq('کفش قدیمی مفاد امروز نساخت', await profitAndLoss(), 0)
+      eq('برای کفش قبلی فروش امروزی ساخته نشد', await db.sales.filter((s) => !s.deleted).count(), 0)
+
+      const payments = await db.payments.filter((p) => !p.deleted).toArray()
+      const summary = summarizeLenderAccount(payments, lenderId)
+      eq('خلاصه پرداخت نقدی قبلی', summary.previousCashRepaid, 20000)
+      eq('خلاصه قرض نقدی قبلی به او', summary.previousCashLoaned, 10000)
+      eq('خلاصه کفش قبلی بابت تسویه', summary.previousGoodsSettlement, 1800)
+      eq('خلاصه کفش قرضی قبلی', summary.previousGoodsCredit, 800)
+      eq('سند قبلی با معامله جاری قاطی نشد', summary.cashRepaid + summary.cashLoaned + summary.goodsSettlement + summary.goodsCredit, 0)
+      eq('خلاصه قبلی با حساب خالص برابر است', summary.net, 67400)
+
+      const ledger = buildLenderLedger(payments, lenderId)
+      is('عنوان سند قبلی واضح است', ledger.find((r) => r.label === 'قبلی — کفش بابت تسویه')?.label, 'قبلی — کفش بابت تسویه')
+      is('جزئیات کفش قبلی در دفتر است', ledger.find((r) => r.label === 'قبلی — کفش بابت تسویه')?.items, 'اسپرتکس 42 سیاه ×۲')
+
+      await db.suppliers.update(lenderId, { balance: 0 })
+      await db.variants.update(variantId, { stockQty: 10 })
+      for (const p of payments) await applyDocEffects('payments', p as unknown as Record<string, unknown>, false)
+      eq('موبایل دوم حساب قبلی را بازسازی کرد', (await db.suppliers.get(lenderId))!.balance, 67400)
+      eq('موبایل دوم برای کفش قبلی گدام را کم نکرد', await stockOf(variantId), 10)
+
+      const oldGoods = payments.find((p) => p.lenderOpening && p.lenderAction === 'goodsSettlement')!
+      await deletePayment(oldGoods.id!)
+      eq('حذف کفش قبلی حساب را برگرداند', (await db.suppliers.get(lenderId))!.balance, 69200)
+      eq('حذف کفش قبلی گدام را تغییر نداد', await stockOf(variantId), 10)
+      eq('حذف کفش قبلی صندوق را تغییر نداد', await cashBalance(), 50000)
       is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },

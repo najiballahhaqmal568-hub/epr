@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../../lib/networth'
-import { db, type Supplier } from '../../db'
+import { db, type Supplier, type LenderAction } from '../../db'
 import {
   addLender,
   addLoan,
@@ -12,6 +12,8 @@ import {
   deletePaymentImpact,
   giveCashToLender,
   giveGoodsToLender,
+  addOpeningLenderCash,
+  addOpeningLenderGoods,
   updateLender,
   type LoanReceiptMode,
   type LenderCashOutMode,
@@ -109,13 +111,14 @@ function NewLenderModal({ onClose }: { onClose: () => void }) {
 }
 
 function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () => void }) {
-  const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'goods' | 'direct' | 'partner' | 'edit'>('none')
+  const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'goods' | 'opening' | 'direct' | 'partner' | 'edit'>('none')
   const [amount, setAmount] = useState('')
   const [dateStr, setDateStr] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
   const [loanReceipt, setLoanReceipt] = useState<LoanReceiptMode>('cash')
   const [cashMode, setCashMode] = useState<LenderCashOutMode>('cashRepayment')
   const [goodsMode, setGoodsMode] = useState<LenderGoodsMode>('goodsSettlement')
+  const [openingAction, setOpeningAction] = useState<LenderAction>('cashRepayment')
   const [variantId, setVariantId] = useState<number | ''>('')
   const [qty, setQty] = useState('1')
   const [agreedPrice, setAgreedPrice] = useState('')
@@ -140,10 +143,10 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
     () => db.sales.filter((s) => !s.deleted && s.lenderId === lender.id).toArray(),
     [lender.id]
   )
-  const stockOptions = useLiveQuery(async (): Promise<StockOption[]> => {
+  const allOptions = useLiveQuery(async (): Promise<StockOption[]> => {
     const [products, variants] = await Promise.all([
       db.products.filter((p) => !p.deleted).toArray(),
-      db.variants.filter((v) => !v.deleted && v.stockQty > 0).toArray()
+      db.variants.filter((v) => !v.deleted).toArray()
     ])
     const names = new Map(products.map((p) => [p.id!, p.name]))
     return variants.map((v) => ({
@@ -158,6 +161,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
       wholesalePrice: v.wholesalePrice
     }))
   }, [])
+  const stockOptions = allOptions?.filter((v) => v.stockQty > 0)
   // دارایی خالص امروز — برای پیشنهاد سهم عادلانه
   const assets = useLiveQuery(async () => (await netWorth()).assets, [])
 
@@ -179,6 +183,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
     setLoanReceipt('cash')
     setCashMode('cashRepayment')
     setGoodsMode('goodsSettlement')
+    setOpeningAction('cashRepayment')
     setVariantId('')
     setQty('1')
     setAgreedPrice('')
@@ -208,6 +213,11 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
           <SummaryRow label="قرض نقدی به قرض‌دهنده" value={summary.cashLoaned} />
           <SummaryRow label="کفش بابت تسویه" value={summary.goodsSettlement} />
           <SummaryRow label="کفش قرضی" value={summary.goodsCredit} />
+          <p className="border-t border-slate-200 pt-1 font-bold text-slate-600">اسناد قبلیِ برداشت او</p>
+          <SummaryRow label="پرداخت نقدی قبلی قرض" value={summary.previousCashRepaid} />
+          <SummaryRow label="قرض نقدی قبلی به او" value={summary.previousCashLoaned} />
+          <SummaryRow label="کفش قبلی بابت تسویه" value={summary.previousGoodsSettlement} />
+          <SummaryRow label="کفش قرضی قبلی" value={summary.previousGoodsCredit} />
         </div>
       </details>
 
@@ -260,6 +270,15 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
           }}
         >
           پرداخت مستقیم به فروشنده
+        </button>
+        <button
+          className="col-span-2 rounded-xl border border-dashed border-slate-400 bg-slate-50 py-2 text-sm font-bold text-slate-700"
+          onClick={() => {
+            setMode(mode === 'opening' ? 'none' : 'opening')
+            reset()
+          }}
+        >
+          🕘 سند قبلی — قبل از استفاده از اپ
         </button>
       </div>
 
@@ -559,6 +578,165 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             }}
           >
             {goodsMode === 'goodsSettlement' ? 'ثبت کفش بابت تسویه' : 'ثبت کفش قرضی'}
+          </PrimaryBtn>
+        </div>
+      )}
+
+      {mode === 'opening' && (
+        <div className="mb-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-3">
+          <p className="mb-2 font-bold text-slate-800">🕘 سند قبلی — قبل از استفاده از اپ</p>
+          <p className="mb-2 rounded-lg bg-white p-2 text-xs text-slate-600">
+            این سند فقط حساب قرض‌دهنده را می‌سازد؛ صندوق، موجودی گدام و مفاد امروز تغییر نمی‌کند.
+          </p>
+          <Field label="چه چیزی قبلاً رخ داده بود؟">
+            <select
+              className={inputCls}
+              value={openingAction}
+              onChange={(e) => {
+                setOpeningAction(e.target.value as LenderAction)
+                setAmount('')
+                setGoodsLines([])
+                setVariantId('')
+                setQty('1')
+                setAgreedPrice('')
+                setError('')
+              }}
+            >
+              <option value="cashRepayment">پرداخت نقدی قبلی قرض ما به او</option>
+              <option value="cashLoan">قرض نقدی قبلی او از دکان</option>
+              <option value="goodsSettlement">کفش قبلی بابت تسویهٔ قرض ما</option>
+              <option value="goodsCredit">کفش قرضی قبلی برای خودش</option>
+            </select>
+          </Field>
+
+          {(openingAction === 'cashRepayment' || openingAction === 'cashLoan') && (
+            <Field label="مبلغ قبلی *">
+              <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </Field>
+          )}
+
+          {(openingAction === 'goodsSettlement' || openingAction === 'goodsCredit') && (
+            <>
+              <Field label="مدل، سایز و رنگ *">
+                <select
+                  className={inputCls}
+                  value={variantId}
+                  onChange={(e) => {
+                    setVariantId(e.target.value ? Number(e.target.value) : '')
+                    setQty('1')
+                    setAgreedPrice('')
+                  }}
+                >
+                  <option value="">انتخاب کنید...</option>
+                  {allOptions?.map((v) => (
+                    <option key={v.variantId} value={v.variantId}>
+                      {v.productName} — سایز {v.size} — {v.color}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {variantId && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="تعداد قبلی *">
+                      <input className={inputCls} inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value)} />
+                    </Field>
+                    <Field label="قیمت توافقی قبلی *">
+                      <input
+                        className={inputCls}
+                        inputMode="numeric"
+                        value={agreedPrice}
+                        onChange={(e) => setAgreedPrice(e.target.value)}
+                        placeholder="قیمت همان وقت"
+                      />
+                    </Field>
+                  </div>
+                  <button
+                    className="mb-3 w-full rounded-xl border border-slate-400 bg-white py-2 text-sm font-bold text-slate-700"
+                    onClick={() => {
+                      const selected = allOptions?.find((v) => v.variantId === variantId)
+                      const count = parseNum(qty)
+                      const price = parseNum(agreedPrice)
+                      if (!selected || !Number.isInteger(count) || count <= 0 || price <= 0) {
+                        setError('جنس، تعداد صحیح و قیمت توافقی قبلی را کامل کنید')
+                        return
+                      }
+                      setGoodsLines((xs) => [
+                        ...xs,
+                        {
+                          variantId: selected.variantId,
+                          productName: selected.productName,
+                          size: selected.size,
+                          color: selected.color,
+                          qty: count,
+                          unitPrice: price
+                        }
+                      ])
+                      setVariantId('')
+                      setQty('1')
+                      setAgreedPrice('')
+                      setError('')
+                    }}
+                  >
+                    ＋ افزودن به سند قبلی
+                  </button>
+                </>
+              )}
+              {goodsLines.map((line, index) => (
+                <div key={`old-${line.variantId}-${index}`} className="mb-2 flex items-center justify-between rounded-lg bg-white p-2 text-xs">
+                  <span>
+                    {line.productName} {line.size} {line.color} ×{fmtNum(line.qty)} — {fmtMoney(line.qty * line.unitPrice)}
+                  </span>
+                  <button className="font-bold text-red-600" onClick={() => setGoodsLines((xs) => xs.filter((_, i) => i !== index))}>
+                    حذف
+                  </button>
+                </div>
+              ))}
+              {goodsLines.length > 0 && <p className="mb-2 text-left font-bold text-slate-700">مجموع قبلی: {fmtMoney(goodsTotal)}</p>}
+            </>
+          )}
+
+          <Field label="تاریخ قبلی">
+            <input type="date" className={inputCls} value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
+          </Field>
+          <Field label="یادداشت و جزئیات">
+            <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً قبل از بکاپ یا بابت قسط قدیمی" />
+          </Field>
+          <PrimaryBtn
+            disabled={
+              openingAction === 'cashRepayment' || openingAction === 'cashLoan'
+                ? parseNum(amount) <= 0
+                : goodsLines.length === 0
+            }
+            onClick={async () => {
+              try {
+                if (openingAction === 'cashRepayment' || openingAction === 'cashLoan') {
+                  await addOpeningLenderCash(
+                    l.id!,
+                    l.name,
+                    parseNum(amount),
+                    fromDateInput(dateStr),
+                    note,
+                    openingAction
+                  )
+                } else {
+                  await addOpeningLenderGoods(
+                    l.id!,
+                    l.name,
+                    goodsLines,
+                    fromDateInput(dateStr),
+                    note,
+                    openingAction
+                  )
+                }
+                setMode('none')
+                reset()
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            ثبت سند قبلی بدون تغییر صندوق و گدام
           </PrimaryBtn>
         </div>
       )}

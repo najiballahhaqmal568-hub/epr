@@ -122,6 +122,10 @@ export interface LenderAccountSummary {
   cashLoaned: number
   goodsSettlement: number
   goodsCredit: number
+  previousCashRepaid: number
+  previousCashLoaned: number
+  previousGoodsSettlement: number
+  previousGoodsCredit: number
   net: number
 }
 
@@ -135,6 +139,10 @@ export function summarizeLenderAccount(payments: Payment[], lenderId: number): L
     cashLoaned: 0,
     goodsSettlement: 0,
     goodsCredit: 0,
+    previousCashRepaid: 0,
+    previousCashLoaned: 0,
+    previousGoodsSettlement: 0,
+    previousGoodsCredit: 0,
     net: 0
   }
   for (const p of payments) {
@@ -143,7 +151,11 @@ export function summarizeLenderAccount(payments: Payment[], lenderId: number): L
       if (p.amount < 0) {
         if (p.via === 'opening') out.openingLoan += -p.amount
         else out.cashReceived += -p.amount
-      } else if (p.lenderAction === 'cashLoan') out.cashLoaned += p.amount
+      } else if (p.lenderOpening && p.lenderAction === 'cashRepayment') out.previousCashRepaid += p.amount
+      else if (p.lenderOpening && p.lenderAction === 'cashLoan') out.previousCashLoaned += p.amount
+      else if (p.lenderOpening && p.lenderAction === 'goodsSettlement') out.previousGoodsSettlement += p.amount
+      else if (p.lenderOpening && p.lenderAction === 'goodsCredit') out.previousGoodsCredit += p.amount
+      else if (p.lenderAction === 'cashLoan') out.cashLoaned += p.amount
       else if (p.lenderAction === 'goodsSettlement') out.goodsSettlement += p.amount
       else if (p.lenderAction === 'goodsCredit') out.goodsCredit += p.amount
       else out.cashRepaid += p.amount
@@ -158,7 +170,11 @@ export function summarizeLenderAccount(payments: Payment[], lenderId: number): L
     out.cashRepaid -
     out.cashLoaned -
     out.goodsSettlement -
-    out.goodsCredit
+    out.goodsCredit -
+    out.previousCashRepaid -
+    out.previousCashLoaned -
+    out.previousGoodsSettlement -
+    out.previousGoodsCredit
   return out
 }
 
@@ -169,7 +185,7 @@ export function buildLenderLedger(payments: Payment[], lenderId: number, sales: 
     if (p.deleted) return []
     if (p.partyType !== 'supplier') return []
     if (p.partyId === lenderId) {
-      const label =
+      const baseLabel =
         p.amount < 0
           ? p.via === 'opening'
             ? 'قرض قبلی'
@@ -181,13 +197,14 @@ export function buildLenderLedger(payments: Payment[], lenderId: number, sales: 
               : p.lenderAction === 'goodsCredit'
                 ? 'کفش قرضی به قرض‌دهنده'
                 : 'پرداخت نقدی قرض'
+      const label = p.lenderOpening && p.amount > 0 ? `قبلی — ${baseLabel}` : baseLabel
       const linkedSale = p.groupUuid ? saleByGroup.get(p.groupUuid) : undefined
       return [{
         key: `p${p.id}`,
         date: p.date,
         label,
         note: p.note,
-        items: linkedSale ? itemsLabel(linkedSale.lines) : undefined,
+        items: linkedSale ? itemsLabel(linkedSale.lines) : p.goodsLines ? itemsLabel(p.goodsLines) : undefined,
         source: { table: 'payments', id: p.id! },
         delta: -p.amount
       }]
