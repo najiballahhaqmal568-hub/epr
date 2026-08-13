@@ -74,8 +74,8 @@ export interface Supplier extends Synced {
   phone?: string
   /** مثبت = ما به تأمین‌کننده قرضدار هستیم */
   balance: number
-  /** 'sarraf' = صراف (حواله‌دار)، 'partner' = شریک فروشگاه */
-  kind?: 'supplier' | 'sarraf' | 'partner' | 'lender'
+  /** 'sarraf' = صراف، 'partner' = شریک، 'expenseCreditor' = طلبکار مصرف */
+  kind?: 'supplier' | 'sarraf' | 'partner' | 'lender' | 'expenseCreditor'
   /** یادداشت — مثلاً شرایط پرداخت قرض‌دهنده */
   note?: string
   /** فیصدی سهم شریک از مفاد */
@@ -128,7 +128,25 @@ export interface Sale extends Synced {
   lenderId?: number
   lenderName?: string
   lenderAction?: Extract<LenderAction, 'goodsSettlement' | 'goodsCredit'>
+  /** کفشی که برای تسویهٔ مصرف قرضی داده شده است. */
+  expenseCreditorId?: number
+  expenseCreditorName?: string
+  /** پول واقعیِ همین فروش؛ پرداخت با حساب قرض نقد نیست. */
+  cashPaid?: number
   groupUuid?: string
+}
+
+/** پول واقعی که از یک فروش وارد صندوق شده است. */
+export function saleCashPaid(sale: Sale): number {
+  if (typeof sale.cashPaid === 'number') return sale.cashPaid
+  if (sale.lenderAction || sale.expenseCreditorId) return 0
+  return sale.paid
+}
+
+/** قرض مشتریِ واقعی؛ فروش‌های تسویهٔ حساب شخص مشتری عادی نیستند. */
+export function saleCreditAmount(sale: Sale): number {
+  if (sale.lenderAction || sale.expenseCreditorId) return 0
+  return Math.max(0, sale.total - sale.paid)
 }
 
 export interface PurchaseLine {
@@ -210,12 +228,17 @@ export interface Payment extends Synced {
   lenderAction?: LenderAction
   /** این رفت‌وآمد پیش از استفاده از اپ رخ داده و فقط حساب افتتاحیه را می‌سازد. */
   lenderOpening?: boolean
+  /** پرداخت بعدیِ قرض یک مصرف، با پول یا کفش. */
+  expenseCreditorSettlement?: 'cash' | 'goods'
+  settlementExcessMode?: 'cash' | 'credit'
   /** جزئیات کفشِ سند قبلی؛ چون نباید فروش یا حرکت گدام امروز ساخته شود. */
   goodsLines?: HistoricalGoodsLine[]
   /** پیوند پایدار میان سند کفش (Sale) و سند حساب (Payment)، حتی میان دو موبایل. */
   groupUuid?: string
   /** اثر دقیق همین سند بر صندوق هنگام ثبت؛ برای حذف امن و بدون حدس */
   cashDelta?: number
+  /** جای پولِ پرداخت یا دریافت نقدی. */
+  box?: string
   /** صفحهٔ دفترِ فزیکی که این سند در آن نوشته شد — مثل Sale.bookPage */
   bookPage?: string
 }
@@ -234,6 +257,14 @@ export interface Expense extends Synced {
   categoryId?: number
   categoryName: string
   amount: number
+  /** بخشی که همان لحظه از صندوق پرداخت شده؛ سندهای قدیمی یعنی تمام مبلغ. */
+  cashPaid?: number
+  /** بخشی که به قرض طلبکار مصرف ثبت شده است. */
+  creditAmount?: number
+  creditorId?: number
+  creditorName?: string
+  /** جای پول بخش نقدی. */
+  box?: string
   note?: string
   type: ExpenseType
 }
@@ -254,6 +285,7 @@ export type CashMovementType =
   | 'loanIn'
   | 'loanRepay'
   | 'lenderCashLoan'
+  | 'expenseCreditorReceipt'
   | 'transfer'
 
 export interface CashMovement extends Synced {
@@ -528,7 +560,7 @@ db.version(4).upgrade(async (tx) => {
     if (typeof id === 'number') balEffect.set(`${t}:${id}`, (balEffect.get(`${t}:${id}`) ?? 0) + d)
   }
   sales.forEach((s) => {
-    const rem = s.total - s.paid
+    const rem = saleCreditAmount(s)
     if (rem > 0) addBal('customer', s.customerId, rem)
   })
   purchases.forEach((p) => {

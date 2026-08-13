@@ -24,7 +24,7 @@ export default function Purchases() {
 
   const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
-  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner' && s.kind !== 'lender')
+  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner' && s.kind !== 'lender' && s.kind !== 'expenseCreditor')
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
 
   const tabCls = (v: string) =>

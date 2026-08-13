@@ -18,6 +18,7 @@ export const MOVE_LABELS: Record<CashMovementType, string> = {
   loanIn: 'قرض گرفته‌شده',
   loanRepay: 'پرداخت قرض',
   lenderCashLoan: 'قرض نقدی به قرض‌دهنده',
+  expenseCreditorReceipt: 'دریافت مازاد تسویهٔ مصرف',
   transfer: 'انتقال بین جاهای پول'
 }
 

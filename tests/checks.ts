@@ -10,6 +10,8 @@ import { db, type Sale, type Purchase, type Expense, type ReturnDoc, type Varian
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
+import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
+import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
 import {
   addSale,
   addPurchase,
@@ -21,6 +23,8 @@ import {
   addSupplierReturn,
   addExchange,
   addExpense,
+  payExpenseCreditorCash,
+  payExpenseCreditorGoods,
   addPayment,
   addOpeningDebt,
   addAdjustment,
@@ -466,6 +470,118 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('صندوق دست‌نخورده ماند', await cashBalance(), 1000)
       await throws('برداشت بیشتر از موجودی رد شود', () => addPartnerWithdrawal('مالک', 1500))
       eq('صندوق باز هم دست‌نخورده', await cashBalance(), 1000)
+    }
+  },
+  {
+    name: 'مصرف قرضی و ترکیبی — طلبکار، پرداخت نقد و کفش با مازاد',
+    run: async () => {
+      const now = Date.now()
+      const catId = (await db.expenseCategories.add({ name: 'کرایه دکان' })) as number
+      const creditorId = (await db.suppliers.add({ name: 'احمد کرایه‌دار', balance: 0, kind: 'expenseCreditor' } as never)) as number
+      await seedCash(20000)
+
+      const expenseId = await addExpense({
+        date: now,
+        type: 'business',
+        categoryId: catId,
+        categoryName: 'کرایه دکان',
+        amount: 10000,
+        cashPaid: 3000,
+        creditAmount: 7000,
+        creditorId,
+        creditorName: 'احمد کرایه‌دار',
+        box: SHOP_BOX
+      } as Expense)
+      eq('فقط بخش نقدی از صندوق کم شد', await cashBalance(), 17000)
+      eq('بخش قرضی به حساب طلبکار نشست', (await db.suppliers.get(creditorId))!.balance, 7000)
+      eq('تمام مصرف همان روز از مفاد کم شد', await profitAndLoss(), -10000)
+
+      const expenseDoc = (await db.expenses.get(expenseId))!
+      await db.suppliers.update(creditorId, { balance: 0 })
+      await applyDocEffects('expenses', expenseDoc as unknown as Record<string, unknown>, false)
+      eq('موبایل دوم قرض مصرف را بازسازی کرد', (await db.suppliers.get(creditorId))!.balance, 7000)
+
+      await payExpenseCreditorCash(creditorId, 2000, now, 'قسط نقدی', SHOP_BOX)
+      eq('قسط نقدی قرض را کم کرد', (await db.suppliers.get(creditorId))!.balance, 5000)
+      eq('قسط نقدی از صندوق کم شد', await cashBalance(), 15000)
+      eq('قسط دوباره مصرف حساب نشد', await profitAndLoss(), -10000)
+
+      const variantId = await makeVariant({ purchasePrice: 3000 })
+      await setOpeningStock(variantId, 3, 'کفش تسویه')
+      await payExpenseCreditorGoods(
+        creditorId,
+        [{ variantId, productName: 'کفش تسویه', size: '42', color: 'سیاه', qty: 2, unitPrice: 4000 }],
+        now,
+        'تسویه با کفش و دریافت مازاد',
+        'cash',
+        SHOP_BOX
+      )
+      eq('قرض طلبکار با کفش صفر شد', (await db.suppliers.get(creditorId))!.balance, 0)
+      eq('دو جوړه از گدام کم شد', await stockOf(variantId), 1)
+      eq('سه هزار مازاد نقداً وارد صندوق شد', await cashBalance(), 18000)
+      eq('فایدهٔ کفش در راپور روز/ماه/سال حساب شد', await profitAndLoss(), -8000)
+      const cashExcessSale = (await db.sales.filter((s) => s.expenseCreditorId === creditorId && !s.deleted).first())!
+      eq('فقط مازاد نقدی در راپور نقد فروش است', cashExcessSale.cashPaid ?? 0, 3000)
+      eq('قیمت کامل کفش در فروش و مفاد ثبت است', cashExcessSale.total, 8000)
+
+      const goodsPayment = (await db.payments.filter((p) => p.expenseCreditorSettlement === 'goods' && !p.deleted).first())!
+      await deletePayment(goodsPayment.id!)
+      eq('حذف تسویه قرض را برگرداند', (await db.suppliers.get(creditorId))!.balance, 5000)
+      eq('حذف تسویه کفش را برگرداند', await stockOf(variantId), 3)
+      eq('حذف تسویه نقد مازاد را پس گرفت', await cashBalance(), 15000)
+      eq('حذف تسویه مفاد کفش را پس گرفت', await profitAndLoss(), -10000)
+
+      await payExpenseCreditorGoods(
+        creditorId,
+        [{ variantId, productName: 'کفش تسویه', size: '42', color: 'سیاه', qty: 2, unitPrice: 4000 }],
+        now,
+        'مازاد به قرض شخص',
+        'credit',
+        SHOP_BOX
+      )
+      eq('مازاد سه هزار طلب دکان از شخص شد', (await db.suppliers.get(creditorId))!.balance, -3000)
+      eq('در حالت قرض مازاد صندوق تغییر نکرد', await cashBalance(), 15000)
+      eq('فایدهٔ کفش در حالت قرض هم حساب شد', await profitAndLoss(), -8000)
+      const creditExcessSale = (await db.sales.filter((s) => s.expenseCreditorId === creditorId && !s.deleted).first())!
+      await deleteSale(creditExcessSale.id!)
+      eq('حذف از روی فروش هم قرض را یک بار برگرداند', (await db.suppliers.get(creditorId))!.balance, 5000)
+      eq('حذف از روی فروش گدام را برگرداند', await stockOf(variantId), 3)
+      eq('حذف از روی فروش صندوق را دست نزد', await cashBalance(), 15000)
+      eq('حذف از روی فروش مفاد را برگرداند', await profitAndLoss(), -10000)
+      is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      const expenseHost = document.createElement('div')
+      document.body.append(expenseHost)
+      const expenseRoot = createRoot(expenseHost)
+      try {
+        expenseRoot.render(createElement(NewExpenseModal, { onClose: () => undefined }))
+        await waitUntil(() => expenseHost.textContent?.includes('نقد و قرض') === true)
+        is('فرم مصرف گزینه نقد و قرض دارد', expenseHost.textContent?.includes('نقد و قرض'), true)
+        const creditButton = Array.from(expenseHost.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'قرضی')
+        creditButton?.click()
+        await waitUntil(() => expenseHost.textContent?.includes('قرض به نام کی است؟') === true)
+        is('در حالت قرضی نام طلبکار خواسته می‌شود', expenseHost.textContent?.includes('قرض به نام کی است؟'), true)
+        is('در حالت قرضی طلبکار جدید ساخته می‌شود', expenseHost.textContent?.includes('طلبکار جدید'), true)
+      } finally {
+        expenseRoot.unmount()
+        expenseHost.remove()
+      }
+
+      const creditorHost = document.createElement('div')
+      document.body.append(creditorHost)
+      const creditorRoot = createRoot(creditorHost)
+      try {
+        creditorRoot.render(createElement(ExpenseCreditors))
+        await waitUntil(() => creditorHost.textContent?.includes('احمد کرایه‌دار') === true)
+        const creditorButton = Array.from(creditorHost.querySelectorAll('button')).find((button) => button.textContent?.includes('احمد کرایه‌دار'))
+        creditorButton?.click()
+        await waitUntil(() => creditorHost.textContent?.includes('پرداخت با کفش') === true)
+        is('دفتر طلبکار پرداخت نقدی دارد', creditorHost.textContent?.includes('پرداخت نقدی'), true)
+        is('دفتر طلبکار پرداخت با کفش دارد', creditorHost.textContent?.includes('پرداخت با کفش'), true)
+      } finally {
+        creditorRoot.unmount()
+        creditorHost.remove()
+      }
     }
   },
   {

@@ -90,13 +90,17 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
   if (table === 'sales') {
     await enc('customerId', 'customers', 'customerUuid')
     await enc('lenderId', 'suppliers', 'lenderUuid')
+    await enc('expenseCreditorId', 'suppliers', 'expenseCreditorUuid')
   }
   if (table === 'purchases') {
     await enc('supplierId', 'suppliers', 'supplierUuid')
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
     await enc('landingSarrafId', 'suppliers', 'landingSarrafUuid')
   }
-  if (table === 'expenses') await enc('categoryId', 'expenseCategories', 'categoryUuid')
+  if (table === 'expenses') {
+    await enc('categoryId', 'expenseCategories', 'categoryUuid')
+    await enc('creditorId', 'suppliers', 'creditorUuid')
+  }
   if (table === 'adjustments') await enc('variantId', 'variants', 'variantUuid')
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string
@@ -130,13 +134,17 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
   if (table === 'sales') {
     await dec('customerUuid', 'customers', 'customerId')
     await dec('lenderUuid', 'suppliers', 'lenderId')
+    await dec('expenseCreditorUuid', 'suppliers', 'expenseCreditorId')
   }
   if (table === 'purchases') {
     await dec('supplierUuid', 'suppliers', 'supplierId')
     await dec('sarrafUuid', 'suppliers', 'sarrafId')
     await dec('landingSarrafUuid', 'suppliers', 'landingSarrafId')
   }
-  if (table === 'expenses') await dec('categoryUuid', 'expenseCategories', 'categoryId')
+  if (table === 'expenses') {
+    await dec('categoryUuid', 'expenseCategories', 'categoryId')
+    await dec('creditorUuid', 'suppliers', 'creditorId')
+  }
   if (table === 'adjustments') await dec('variantUuid', 'variants', 'variantId')
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string

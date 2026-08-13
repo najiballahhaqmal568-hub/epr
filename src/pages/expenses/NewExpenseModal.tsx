@@ -11,6 +11,11 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
   const [categoryId, setCategoryId] = useState<number | ''>('')
   const [partnerId, setPartnerId] = useState<number | ''>('')
   const [amount, setAmount] = useState('')
+  const [paymentMode, setPaymentMode] = useState<'cash' | 'credit' | 'mixed'>('cash')
+  const [cashPart, setCashPart] = useState('')
+  const [creditorId, setCreditorId] = useState<number | ''>('')
+  const [newCreditor, setNewCreditor] = useState('')
+  const [showNewCreditor, setShowNewCreditor] = useState(false)
   const [note, setNote] = useState('')
   const [newCat, setNewCat] = useState('')
   const [showNewCat, setShowNewCat] = useState(false)
@@ -18,6 +23,7 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
+  const creditors = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'expenseCreditor').toArray(), [])
 
   const type = mode === 'partner' ? 'withdrawal' : mode
   const modeLabels: Record<ExpenseMode, string> = { ...TYPE_LABELS, partner: 'شریک' }
@@ -50,6 +56,20 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
         catId = undefined
       }
       const e: Expense = { date: Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
+      if (mode === 'business') {
+        const cashPaid = paymentMode === 'cash' ? amt : paymentMode === 'credit' ? 0 : parseNum(cashPart)
+        const creditAmount = amt - cashPaid
+        if (cashPaid < 0 || cashPaid > amt) return setError('بخش نقدی نمی‌تواند بیشتر از تمام مصرف باشد')
+        if (creditAmount > 0) {
+          if (!creditorId) return setError('طلبکار مصرف را انتخاب کنید')
+          const creditor = await db.suppliers.get(Number(creditorId))
+          if (!creditor) return setError('طلبکار مصرف یافت نشد')
+          e.creditorId = creditor.id
+          e.creditorName = creditor.name
+        }
+        e.cashPaid = cashPaid
+        e.creditAmount = creditAmount
+      }
       await addExpense(e, needsPartner ? chosenPartner!.name : undefined)
       onClose()
     } catch (err) {
@@ -131,6 +151,75 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
       <Field label="مبلغ *">
         <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </Field>
+      {mode === 'business' && (
+        <>
+          <Field label="پرداخت مصرف چگونه است؟">
+            <div className="grid grid-cols-3 gap-1">
+              {([
+                ['cash', 'نقدی'],
+                ['credit', 'قرضی'],
+                ['mixed', 'نقد و قرض']
+              ] as const).map(([value, label]) => (
+                <button
+                  type="button"
+                  key={value}
+                  onClick={() => {
+                    setPaymentMode(value)
+                    setCashPart('')
+                    setError('')
+                  }}
+                  className={`rounded-xl py-2 text-xs font-bold ${paymentMode === value ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </Field>
+          {paymentMode === 'mixed' && (
+            <Field label="چقدر حالا نقد پرداخت شد؟ *">
+              <input className={inputCls} inputMode="numeric" value={cashPart} onChange={(e) => setCashPart(e.target.value)} />
+              <p className="mt-1 text-xs text-slate-500">باقی قرض: {Math.max(0, parseNum(amount) - parseNum(cashPart)).toLocaleString('fa-AF')} ؋</p>
+            </Field>
+          )}
+          {paymentMode !== 'cash' && (
+            <>
+              <Field label="قرض به نام کی است؟ *">
+                <select className={inputCls} value={creditorId} onChange={(e) => setCreditorId(e.target.value ? Number(e.target.value) : '')}>
+                  <option value="">طلبکار را انتخاب کنید...</option>
+                  {creditors?.map((creditor) => (
+                    <option key={creditor.id} value={creditor.id}>{creditor.name}</option>
+                  ))}
+                </select>
+              </Field>
+              {!showNewCreditor ? (
+                <button type="button" className="mb-3 text-sm font-bold text-teal-700" onClick={() => setShowNewCreditor(true)}>
+                  ＋ طلبکار جدید
+                </button>
+              ) : (
+                <div className="mb-3 flex gap-2">
+                  <input className={inputCls} value={newCreditor} onChange={(e) => setNewCreditor(e.target.value)} placeholder="نام شخص یا اداره" />
+                  <button
+                    type="button"
+                    className="whitespace-nowrap rounded-xl bg-teal-700 px-3 font-bold text-white"
+                    onClick={async () => {
+                      if (!newCreditor.trim()) return
+                      const id = (await db.suppliers.add({ name: newCreditor.trim(), balance: 0, kind: 'expenseCreditor' })) as number
+                      setCreditorId(id)
+                      setNewCreditor('')
+                      setShowNewCreditor(false)
+                    }}
+                  >
+                    افزودن
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          <p className="mb-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+            تمام مبلغ امروز مصرف حساب می‌شود؛ فقط بخش نقدی از صندوق کم و باقی به حساب طلبکار ثبت می‌شود.
+          </p>
+        </>
+      )}
       <Field label="یادداشت">
         <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>

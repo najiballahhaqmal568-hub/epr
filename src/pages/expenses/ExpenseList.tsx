@@ -7,6 +7,7 @@ import { Fab, Empty, Card } from '../../components/ui'
 import { TYPE_LABELS, TYPE_COLORS } from './labels'
 import NewExpenseModal from './NewExpenseModal'
 import CategoryManager from './CategoryManager'
+import ExpenseCreditors from './ExpenseCreditors'
 
 export function ExpenseList() {
   const [showNew, setShowNew] = useState(false)
@@ -60,6 +61,8 @@ export function ExpenseList() {
         </div>
       </div>
 
+      <ExpenseCreditors />
+
       <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
         <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="همه" />
         <FilterChip active={filter === 'business'} onClick={() => setFilter('business')} label="تجارت" />
@@ -87,6 +90,11 @@ export function ExpenseList() {
                 </span>
               </p>
               {e.note && <p className="text-sm text-slate-500">{e.note}</p>}
+              {!e.partner && 'creditAmount' in e && (e.creditAmount ?? 0) > 0 && (
+                <p className="text-xs font-bold text-amber-700">
+                  نقد {fmtMoney(e.cashPaid ?? 0)} · قرض به {e.creditorName}: {fmtMoney(e.creditAmount ?? 0)}
+                </p>
+              )}
               <p className="text-xs text-slate-500">{fmtDate(e.date)}</p>
             </div>
             <div className="text-left">

@@ -13,7 +13,7 @@
  *   • integrity.ts → اثرها را جمع می‌زند تا عدد مورد انتظار را بسازد
  *   • آزمایش تصادفی → می‌سنجد که ops.ts هم به همان عدد رسیده باشد
  */
-import { landingSarrafOwed, type Adjustment, type Payment, type Purchase, type ReturnDoc, type Sale } from '../db'
+import { landingSarrafOwed, saleCreditAmount, type Adjustment, type Expense, type Payment, type Purchase, type ReturnDoc, type Sale } from '../db'
 
 export type EffectTable = 'variants' | 'customers' | 'suppliers'
 export type EffectField = 'stockQty' | 'balance'
@@ -26,7 +26,7 @@ export interface Effect {
 }
 
 /** جدول‌هایی که سندشان اثر دارد */
-export type DocTable = 'sales' | 'purchases' | 'payments' | 'adjustments' | 'returns'
+export type DocTable = 'sales' | 'purchases' | 'payments' | 'expenses' | 'adjustments' | 'returns'
 
 const stock = (id: number | undefined, delta: number): Effect => ({ table: 'variants', id, field: 'stockQty', delta })
 const debt = (id: number | undefined, delta: number): Effect => ({ table: 'customers', id, field: 'balance', delta })
@@ -42,7 +42,7 @@ export function effectsOf(table: DocTable, doc: unknown): Effect[] {
     const s = doc as Sale
     // فروش: جنس از گدام کم می‌شود، باقی‌ماندهٔ پول قرضِ مشتری می‌شود
     for (const l of s.lines) out.push(stock(l.variantId, -l.qty))
-    const remainder = s.total - s.paid
+    const remainder = saleCreditAmount(s)
     if (remainder > 0) out.push(debt(s.customerId, remainder))
   } else if (table === 'purchases') {
     const p = doc as Purchase
@@ -64,6 +64,11 @@ export function effectsOf(table: DocTable, doc: unknown): Effect[] {
     if (p.via === 'sarraf') out.push(owed(p.sarrafId, p.amount))
     // قرض‌دهنده مستقیماً فروشنده را پرداخته: قرض فروشنده کم و قرض قرض‌دهنده زیاد می‌شود
     if (p.via === 'lender') out.push(owed(p.lenderId, p.amount))
+  } else if (table === 'expenses') {
+    const e = doc as Expense
+    // مصرف همان روز کامل حساب می‌شود؛ فقط بخش قرضی به حساب طلبکار می‌نشیند.
+    const credit = e.creditAmount ?? 0
+    if (credit > 0) out.push(owed(e.creditorId, credit))
   } else if (table === 'adjustments') {
     const a = doc as Adjustment
     out.push(stock(a.variantId, a.qtyChange))

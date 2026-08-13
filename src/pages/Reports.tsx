@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Variant } from '../db'
+import { db, saleCashPaid, type Variant } from '../db'
 import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { inputCls, Card } from '../components/ui'
 import Row from './reports/Row'
@@ -69,7 +69,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   variants?.forEach((v) => variantMap.set(v.id!, v))
 
   const salesTotal = sales?.reduce((s, x) => s + x.total, 0) ?? 0
-  const salesCash = sales?.reduce((s, x) => s + x.paid, 0) ?? 0
+  const salesCash = sales?.reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
   const pairsSold = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
   // قیمت خرید ثبت‌شده در خود فاکتور — مفاد گذشته با تغییر قیمت عوض نمی‌شود
   const costOf = (l: { variantId: number; unitCost?: number }) => l.unitCost ?? variantMap.get(l.variantId)?.purchasePrice ?? 0

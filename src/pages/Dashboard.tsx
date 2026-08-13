@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../lib/networth'
-import { db, type Sale, type Variant } from '../db'
+import { db, saleCashPaid, type Sale, type Variant } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear } from '../lib/format'
 import { useSyncStatus, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
@@ -72,7 +72,7 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
       .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0)
 
   const todayTotal = todaySales.reduce((s, x) => s + x.total, 0)
-  const todayCash = todaySales.reduce((s, x) => s + x.paid, 0)
+  const todayCash = todaySales.reduce((s, x) => s + saleCashPaid(x), 0)
   const todayProfit = grossProfit(todaySales) - returnProfit(dayStart)
 
   const monthExpenses = expenses?.filter((e) => e.date >= monthStart && e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0

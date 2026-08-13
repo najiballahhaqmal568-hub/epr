@@ -7,7 +7,7 @@
  */
 import { computeCosts } from './costing'
 import { foldEffects } from './effects'
-import { db, type Adjustment, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
+import { db, type Adjustment, type Expense, type Purchase, type Payment, type ReturnDoc, type Sale, type Variant } from '../db'
 
 export interface Mismatch {
   kind: 'variant' | 'customer' | 'supplier' | 'cost'
@@ -53,10 +53,11 @@ export function computeCustomerBalances(sales: Sale[], payments: Payment[], retu
 }
 
 /** بیلانس مورد انتظار هر تأمین‌کننده/صراف، از روی اسناد */
-export function computeSupplierBalances(purchases: Purchase[], payments: Payment[], returns: ReturnDoc[]): Map<number, number> {
+export function computeSupplierBalances(purchases: Purchase[], payments: Payment[], returns: ReturnDoc[], expenses: Expense[] = []): Map<number, number> {
   return foldEffects([
     { table: 'purchases', rows: purchases },
     { table: 'payments', rows: payments.filter((p) => p.partyType === 'supplier') },
+    { table: 'expenses', rows: expenses },
     { table: 'returns', rows: returns }
   ]).supplierBalance
 }
@@ -66,10 +67,11 @@ const near = (a: number, b: number) => Math.abs(a - b) < 0.5
 /** اجرای کامل کنترل روی دیتابیس */
 export async function runIntegrityCheck(): Promise<IntegrityReport> {
   const live = <T extends { deleted?: boolean }>(rows: T[]) => rows.filter((r) => !r.deleted)
-  const [sales, purchases, payments, adjustments, returns, variants, customers, suppliers, products] = await Promise.all([
+  const [sales, purchases, payments, expenses, adjustments, returns, variants, customers, suppliers, products] = await Promise.all([
     db.sales.toArray().then(live),
     db.purchases.toArray().then(live),
     db.payments.toArray().then(live),
+    db.expenses.toArray().then(live),
     db.adjustments.toArray().then(live),
     db.returns.toArray().then(live),
     db.variants.toArray().then(live),
@@ -93,7 +95,7 @@ export async function runIntegrityCheck(): Promise<IntegrityReport> {
     new Map(variants.filter((v) => !bought.has(v.id!)).map((v) => [v.id!, v.purchasePrice]))
   )
   const custBal = computeCustomerBalances(sales, payments, returns)
-  const suppBal = computeSupplierBalances(purchases, payments, returns)
+  const suppBal = computeSupplierBalances(purchases, payments, returns, expenses)
 
   const mismatches: Mismatch[] = []
   for (const v of variants) {

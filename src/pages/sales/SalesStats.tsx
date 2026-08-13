@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../../db'
+import { db, saleCashPaid, saleCreditAmount } from '../../db'
 import { fmtNum, fmtMoney } from '../../lib/format'
 import { Card } from '../../components/ui'
 import { STATS_PERIODS, periodBounds, periodLabel, type StatsPeriod } from '../../lib/period'
@@ -34,9 +34,10 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
   )
 
   const total = sales?.reduce((s, x) => s + x.total, 0) ?? 0
-  const cash = sales?.reduce((s, x) => s + x.paid, 0) ?? 0
+  const cash = sales?.reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
   const pairs = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
-  const credit = Math.max(0, total - cash)
+  // تسویه با کفش فروش است و مفاد دارد، اما قرض مشتری نیست.
+  const credit = sales?.reduce((sum, sale) => sum + saleCreditAmount(sale), 0) ?? 0
 
   const soldBy = new Map<string, { qty: number; revenue: number }>()
   sales?.forEach((s) =>

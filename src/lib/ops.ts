@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -92,7 +92,7 @@ export async function addSale(sale: Sale): Promise<number> {
       line.unitCost = v.purchasePrice
       await db.variants.update(line.variantId, { stockQty: v.stockQty - line.qty })
     }
-    const remainder = sale.total - sale.paid
+    const remainder = saleCreditAmount(sale)
     if (remainder > 0 && sale.customerId) {
       const c = await db.customers.get(sale.customerId)
       if (c) {
@@ -103,7 +103,8 @@ export async function addSale(sale: Sale): Promise<number> {
       }
     }
     const id = (await db.sales.add(sale)) as number
-    await movement({ date: sale.date, type: 'sale', refId: id, amount: sale.paid, note: sale.customerName })
+    const cash = saleCashPaid(sale)
+    if (cash !== 0) await movement({ date: sale.date, type: 'sale', refId: id, amount: cash, note: sale.customerName })
     return id
   })
 }
@@ -117,7 +118,7 @@ export async function deleteSale(saleId: number): Promise<void> {
       const v = await db.variants.get(line.variantId)
       if (v) await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty })
     }
-    const remainder = sale.total - sale.paid
+    const remainder = saleCreditAmount(sale)
     if (remainder > 0 && sale.customerId) {
       const c = await db.customers.get(sale.customerId)
       if (c) await db.customers.update(sale.customerId, { balance: c.balance - remainder })
@@ -132,15 +133,31 @@ export async function deleteSale(saleId: number): Promise<void> {
         const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
         if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
       }
+      const linkedCash = paymentCashDelta(linkedPayment)
+      if (linkedCash !== 0) {
+        const linkedOrig = await db.cashMovements.filter((m) => !m.deleted && m.refId === linkedPayment.id).first()
+        await movement(
+          {
+            date: Date.now(),
+            type: 'supplierPayment',
+            refId: linkedPayment.id,
+            amount: -linkedCash,
+            box: linkedOrig ? boxOf(linkedOrig) : linkedPayment.box,
+            note: `حذف — ${linkedPayment.partyName}`
+          },
+          { allowNegative: true }
+        )
+      }
       await db.payments.update(linkedPayment.id!, { deleted: true })
     }
     // پول در همان جایی برمی‌گردد که آمده بود
     const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
-    // کفش قرض‌دهنده نقد نیست؛ paid آن «پرداخت با حساب» است و صندوق نباید لمس شود.
-    if (!sale.lenderAction) {
+    const cash = saleCashPaid(sale)
+    // در تسویهٔ جفت‌شده، پول مازاد به سند Payment وصل است و همان بالا برگشت.
+    if (cash !== 0 && !linkedPayment) {
       // حذفِ اصلاحی است — حتی اگر پول کم شود باید ثبت گردد
       await movement(
-        { date: Date.now(), type: 'sale', refId: saleId, amount: -sale.paid, box: orig ? boxOf(orig) : SHOP_BOX, note: 'حذف فروش' },
+        { date: Date.now(), type: 'sale', refId: saleId, amount: -cash, box: orig ? boxOf(orig) : SHOP_BOX, note: 'حذف فروش' },
         { allowNegative: true }
       )
     }
@@ -164,7 +181,7 @@ export async function deleteSaleImpact(
   const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
   const box = orig ? boxOf(orig) : SHOP_BOX
   const before = await cashBalance(box)
-  const paid = sale.lenderAction ? 0 : sale.paid
+  const paid = saleCashPaid(sale)
   return { paid, box, before, after: before - paid }
 }
 
@@ -366,6 +383,7 @@ export async function addPayment(payment: Payment): Promise<number> {
         type: payment.partyType === 'customer' ? 'customerPayment' : 'supplierPayment',
         refId: paymentId,
         amount: payment.cashDelta,
+        box: payment.box,
         note: payment.partyName
       })
     }
@@ -407,6 +425,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
     const primaryKind = p.partyType === 'supplier' ? (primary as Supplier | undefined)?.kind : undefined
     const cashDelta = paymentCashDelta(p, primaryKind)
     if (cashDelta !== 0) {
+      const orig = await db.cashMovements.filter((m) => !m.deleted && m.refId === paymentId).first()
       await movement(
         {
           date: Date.now(),
@@ -421,6 +440,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
               : 'supplierPayment',
           refId: paymentId,
           amount: -cashDelta,
+          box: orig ? boxOf(orig) : p.box,
           note: `حذف — ${p.partyName}`
         },
         // اصلاح اشتباه است؛ حتی اگر پول کم شود باید ثبت گردد
@@ -863,36 +883,184 @@ const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'persona
   withdrawal: 'withdrawal'
 }
 
-/** ثبت مصرف (تجارت/خانه/شخصی) یا برداشت مالک: خروج نقد از صندوق */
+export const expenseCashPaid = (expense: Expense): number =>
+  afn(expense.cashPaid ?? (expense.creditAmount === undefined ? expense.amount : expense.amount - expense.creditAmount))
+
+export const expenseCreditAmount = (expense: Expense): number => afn(expense.creditAmount ?? 0)
+
+/** ثبت مصرف نقدی، قرضی یا ترکیبی؛ کل مصرف امروز حساب می‌شود و فقط بخش نقدی از صندوق می‌رود. */
 export async function addExpense(expense: Expense, partnerName?: string): Promise<number> {
   expense.amount = afn(expense.amount)
-  return db.transaction('rw', db.expenses, db.cashMovements, async () => {
+  const cashPaid = expenseCashPaid(expense)
+  const creditAmount = expenseCreditAmount(expense)
+  if (expense.amount <= 0) throw new Error('مبلغ مصرف باید بیشتر از صفر باشد')
+  if (cashPaid < 0 || creditAmount < 0 || cashPaid + creditAmount !== expense.amount) {
+    throw new Error('جمع بخش نقدی و قرضی باید دقیقاً برابر مبلغ مصرف باشد')
+  }
+  return db.transaction('rw', db.expenses, db.cashMovements, db.suppliers, async () => {
+    if (creditAmount > 0) {
+      if (!expense.creditorId) throw new Error('طلبکار مصرف را انتخاب کنید')
+      const creditor = await db.suppliers.get(expense.creditorId)
+      if (!creditor || creditor.deleted || creditor.kind === 'partner') throw new Error('طلبکار مصرف یافت نشد')
+      expense.creditorName = creditor.name
+      await db.suppliers.update(expense.creditorId, { balance: creditor.balance + creditAmount })
+    }
+    expense.cashPaid = cashPaid
+    expense.creditAmount = creditAmount
     const id = (await db.expenses.add(expense)) as number
-    await movement({
-      date: expense.date,
-      type: EXPENSE_MOVE[expense.type],
-      refId: id,
-      amount: -expense.amount,
-      // مصرف خانه/شخصی و برداشت باید به نام یک شریک ثبت شود، وگرنه آخر سال
-      // از سهم هیچ‌کس کم نمی‌شود و بار آن روی همهٔ شرکا می‌افتد
-      ...(partnerName ? { partnerName } : {}),
-      note: expense.categoryName
-    })
+    if (cashPaid > 0) {
+      await movement({
+        date: expense.date,
+        type: EXPENSE_MOVE[expense.type],
+        refId: id,
+        amount: -cashPaid,
+        box: expense.box,
+        // مصرف خانه/شخصی و برداشت باید به نام یک شریک ثبت شود، وگرنه آخر سال
+        // از سهم هیچ‌کس کم نمی‌شود و بار آن روی همهٔ شرکا می‌افتد
+        ...(partnerName ? { partnerName } : {}),
+        note: expense.categoryName
+      })
+    }
     return id
   })
 }
 
+export type ExpenseSettlementExcessMode = 'cash' | 'credit'
+
+/** پرداخت نقدیِ بعدیِ مصرف قرضی؛ مصرف تازه نیست، فقط قرض و صندوق کم می‌شود. */
+export async function payExpenseCreditorCash(
+  creditorId: number,
+  amount: number,
+  date = Date.now(),
+  note?: string,
+  box = SHOP_BOX
+): Promise<number> {
+  amount = afn(amount)
+  if (amount <= 0) throw new Error('مبلغ پرداخت باید بیشتر از صفر باشد')
+  return db.transaction('rw', db.payments, db.suppliers, db.cashMovements, async () => {
+    const creditor = await db.suppliers.get(creditorId)
+    if (!creditor || creditor.deleted || creditor.kind === 'partner') throw new Error('طلبکار مصرف یافت نشد')
+    const debt = Math.max(0, afn(creditor.balance))
+    if (debt <= 0) throw new Error('به این شخص قرض مصرف باقی نمانده است')
+    if (amount > debt) throw new Error('پرداخت نقدی بیشتر از قرض باقی‌مانده است')
+    await db.suppliers.update(creditorId, { balance: creditor.balance - amount })
+    const paymentId = (await db.payments.add({
+      date,
+      partyType: 'supplier',
+      partyId: creditorId,
+      partyName: creditor.name,
+      amount,
+      note: note?.trim() || 'پرداخت نقدی مصرف قرضی',
+      via: 'cash',
+      cashDelta: -amount,
+      box,
+      expenseCreditorSettlement: 'cash'
+    })) as number
+    await movement({ date, type: 'supplierPayment', refId: paymentId, amount: -amount, box, note: `پرداخت مصرف قرضی به ${creditor.name}` })
+    return paymentId
+  })
+}
+
+/**
+ * پرداخت مصرف قرضی با کفش. فروش، گدام و مفاد را نگه می‌دارد و Payment حساب شخص را.
+ * اگر ارزش کفش بیشتر باشد، مازاد یا نقداً گرفته می‌شود یا طلب دکان از شخص می‌گردد.
+ */
+export async function payExpenseCreditorGoods(
+  creditorId: number,
+  lines: LenderGoodsLine[],
+  date = Date.now(),
+  note?: string,
+  excessMode: ExpenseSettlementExcessMode = 'credit',
+  box = SHOP_BOX
+): Promise<{ saleId: number; paymentId: number; excess: number }> {
+  if (lines.length === 0) throw new Error('حداقل یک کفش را انتخاب کنید')
+  const clean = lines.map((line) => ({ ...line, unitPrice: afn(line.unitPrice) }))
+  for (const line of clean) {
+    if (!Number.isInteger(line.qty) || line.qty <= 0) throw new Error('تعداد هر کفش باید عدد صحیح و بیشتر از صفر باشد')
+    if (line.unitPrice <= 0) throw new Error('قیمت توافقی هر کفش باید بیشتر از صفر باشد')
+  }
+  const total = afn(clean.reduce((sum, line) => sum + line.qty * line.unitPrice, 0))
+  const groupUuid = newUuid()
+
+  return db.transaction('rw', [db.sales, db.payments, db.variants, db.suppliers, db.cashMovements], async () => {
+    const creditor = await db.suppliers.get(creditorId)
+    if (!creditor || creditor.deleted || creditor.kind === 'partner') throw new Error('طلبکار مصرف یافت نشد')
+    const debt = Math.max(0, afn(creditor.balance))
+    if (debt <= 0) throw new Error('به این شخص قرض مصرف باقی نمانده است')
+    const excess = Math.max(0, total - debt)
+    const paymentAmount = excess > 0 && excessMode === 'cash' ? debt : total
+
+    const savedLines: SaleLine[] = []
+    for (const line of clean) {
+      const variant = await db.variants.get(line.variantId)
+      if (!variant || variant.deleted) throw new Error('کفش یافت نشد')
+      if (variant.stockQty < line.qty) throw new Error(`موجودی کافی نیست: ${line.productName} ${line.size}`)
+      await db.variants.update(line.variantId, { stockQty: variant.stockQty - line.qty })
+      savedLines.push({ ...line, unitCost: variant.purchasePrice })
+    }
+
+    const saleId = (await db.sales.add({
+      date,
+      customerName: creditor.name,
+      saleType: 'retail',
+      lines: savedLines,
+      total,
+      paid: total,
+      cashPaid: excessMode === 'cash' ? excess : 0,
+      expenseCreditorId: creditorId,
+      expenseCreditorName: creditor.name,
+      groupUuid
+    })) as number
+    await db.suppliers.update(creditorId, { balance: creditor.balance - paymentAmount })
+    const paymentId = (await db.payments.add({
+      date,
+      partyType: 'supplier',
+      partyId: creditorId,
+      partyName: creditor.name,
+      amount: paymentAmount,
+      note: note?.trim() || 'پرداخت مصرف قرضی با کفش',
+      via: 'goods',
+      cashDelta: excessMode === 'cash' ? excess : 0,
+      box,
+      expenseCreditorSettlement: 'goods',
+      settlementExcessMode: excess > 0 ? excessMode : undefined,
+      groupUuid
+    })) as number
+    if (excess > 0 && excessMode === 'cash') {
+      await movement({
+        date,
+        type: 'expenseCreditorReceipt',
+        refId: paymentId,
+        amount: excess,
+        box,
+        note: `دریافت مازاد کفش از ${creditor.name}`
+      })
+    }
+    return { saleId, paymentId, excess }
+  })
+}
+
 export async function deleteExpense(expenseId: number): Promise<void> {
-  return db.transaction('rw', db.expenses, db.cashMovements, async () => {
+  return db.transaction('rw', db.expenses, db.cashMovements, db.suppliers, async () => {
     const e = await db.expenses.get(expenseId)
     if (!e || e.deleted) return
-    await movement({
-      date: Date.now(),
-      type: EXPENSE_MOVE[e.type],
-      refId: expenseId,
-      amount: e.amount,
-      note: `حذف: ${e.categoryName}`
-    })
+    const cashPaid = expenseCashPaid(e)
+    const creditAmount = expenseCreditAmount(e)
+    if (creditAmount > 0 && e.creditorId) {
+      const creditor = await db.suppliers.get(e.creditorId)
+      if (creditor) await db.suppliers.update(e.creditorId, { balance: creditor.balance - creditAmount })
+    }
+    if (cashPaid > 0) {
+      const orig = await db.cashMovements.filter((m) => !m.deleted && m.refId === expenseId && m.type === EXPENSE_MOVE[e.type]).first()
+      await movement({
+        date: Date.now(),
+        type: EXPENSE_MOVE[e.type],
+        refId: expenseId,
+        amount: cashPaid,
+        box: orig ? boxOf(orig) : e.box,
+        note: `حذف: ${e.categoryName}`
+      })
+    }
     await db.expenses.update(expenseId, { deleted: true })
   })
 }
