@@ -247,6 +247,13 @@ export interface ExpenseCategory extends Synced {
   id?: number
   name: string
   isDefault?: boolean
+  /** این کتگوری در هر روز باز دکان باید بررسی شود. */
+  dailyEnabled?: boolean
+  /** عقب‌مانده‌ها فقط از روز فعال‌شدن این کتگوری ساخته می‌شوند. */
+  dailyFrom?: number
+  /** پیشنهاد قابل تغییر برای فورم هر روز. */
+  dailyDefaultAmount?: number
+  dailyDefaultPaymentMode?: 'cash' | 'credit' | 'mixed'
 }
 
 export type ExpenseType = 'business' | 'home' | 'personal' | 'withdrawal'
@@ -267,6 +274,8 @@ export interface Expense extends Synced {
   box?: string
   note?: string
   type: ExpenseType
+  /** سند وضعیت روز بسته؛ مصرف و حرکت صندوق نیست. */
+  shopClosed?: boolean
 }
 
 export type CashMovementType =

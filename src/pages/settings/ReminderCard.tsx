@@ -16,9 +16,9 @@ export function ReminderCard() {
 
   return (
     <Card>
-      <p className="mb-1 font-bold text-slate-800">یادآوری روزانهٔ مصارف</p>
+      <p className="mb-1 font-bold text-slate-800">یادآوری کتگوری‌های روزانه</p>
       <p className="mb-3 text-sm text-slate-500">
-        اگر تا آخر روز مصرفی ثبت نکرده باشید، هنگام باز بودن اپ یادآوری نشان داده می‌شود.
+        کتگوری‌های روزانه را از «مصارف ← مدیریت کتگوری‌ها» فعال کنید. موارد ثبت‌نشدهٔ امروز و روزهای گذشته یادآوری می‌شوند؛ روز بسته استثنا است.
       </p>
       <div className="flex items-center gap-3">
         <button

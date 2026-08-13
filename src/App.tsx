@@ -271,15 +271,14 @@ export default function App() {
           )}
           {reminder.show && (
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-amber-500 p-3 text-white shadow-lg">
-              <span className="flex-1 text-sm font-bold">💵 مصارف امروز را ثبت نکرده‌اید!</span>
+              <span className="flex-1 text-sm font-bold">💵 {fmtNum(reminder.count)} مصرف روزانه ثبت نشده است!</span>
               <button
                 className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
                 onClick={() => {
                   setTab('expenses')
-                  reminder.dismissToday()
                 }}
               >
-                ثبت مصرف
+                دیدن فهرست
               </button>
               <button className="px-1" onClick={() => reminder.dismissToday()}>
                 ✕

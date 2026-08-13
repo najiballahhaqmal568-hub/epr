@@ -8,6 +8,7 @@ import { TYPE_LABELS, TYPE_COLORS } from './labels'
 import NewExpenseModal from './NewExpenseModal'
 import CategoryManager from './CategoryManager'
 import ExpenseCreditors from './ExpenseCreditors'
+import DailyExpenseChecklist from './DailyExpenseChecklist'
 
 export function ExpenseList() {
   const [showNew, setShowNew] = useState(false)
@@ -16,7 +17,7 @@ export function ExpenseList() {
   const monthStart = startOfMonth()
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
-  const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().filter((e) => !e.deleted).limit(300).toArray(), [])
+  const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().filter((e) => !e.deleted && !e.shopClosed).limit(300).toArray(), [])
   // برداشت‌های شریک به شکل حرکت صندوق ثبت می‌شوند — این‌ها را هم در لیست مصارف نشان بده
   const partnerDraws = useLiveQuery(
     () => db.cashMovements.filter((m) => !m.deleted && m.type === 'withdrawal' && Boolean(m.partnerName)).reverse().sortBy('date'),
@@ -62,6 +63,7 @@ export function ExpenseList() {
       </div>
 
       <ExpenseCreditors />
+      <DailyExpenseChecklist />
 
       <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
         <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="همه" />

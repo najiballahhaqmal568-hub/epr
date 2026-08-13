@@ -13,7 +13,7 @@ export function ExpenseStats() {
   const { from, to } = periodBounds(period)
 
   const expenses = useLiveQuery(
-    () => db.expenses.where('date').between(from, to, true, true).filter((e) => !e.deleted).toArray(),
+    () => db.expenses.where('date').between(from, to, true, true).filter((e) => !e.deleted && !e.shopClosed).toArray(),
     [from, to]
   )
 

@@ -35,7 +35,7 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
   const yearStart = startOfYear()
 
   const sales = useLiveQuery(() => db.sales.where('date').aboveOrEqual(yearStart).filter((s) => !s.deleted).toArray(), [yearStart])
-  const expenses = useLiveQuery(() => db.expenses.where('date').aboveOrEqual(yearStart).filter((e) => !e.deleted).toArray(), [yearStart])
+  const expenses = useLiveQuery(() => db.expenses.where('date').aboveOrEqual(yearStart).filter((e) => !e.deleted && !e.shopClosed).toArray(), [yearStart])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])

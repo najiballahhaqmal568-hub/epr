@@ -12,6 +12,8 @@ import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
+import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
+import CategoryManager from '../src/pages/expenses/CategoryManager'
 import {
   addSale,
   addPurchase,
@@ -67,6 +69,7 @@ import { pageOrder, familyPages } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
+import { dailyExpenseItems, dailyReminderItems, setShopClosed } from '../src/lib/dailyExpenses'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -581,6 +584,77 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       } finally {
         creditorRoot.unmount()
         creditorHost.remove()
+      }
+    }
+  },
+  {
+    name: 'مصارف روزانه — روز باز، عقب‌مانده و روز بسته',
+    run: async () => {
+      const day1 = Date.parse('2026-08-10T12:00:00')
+      const day2 = Date.parse('2026-08-11T12:00:00')
+      const day3 = Date.parse('2026-08-12T19:00:00')
+      const catId = (await db.expenseCategories.add({
+        name: 'چای صبح',
+        dailyEnabled: true,
+        dailyFrom: day1,
+        dailyDefaultAmount: 50,
+        dailyDefaultPaymentMode: 'cash'
+      })) as number
+      await seedCash(1000)
+
+      let missing = await dailyExpenseItems(day3)
+      eq('سه روز باز سه یادآوری دارد', missing.length, 3)
+      is('مبلغ پیشنهادی ذخیره است', missing[0].category.dailyDefaultAmount, 50)
+
+      await addExpense({ date: day1, type: 'business', categoryId: catId, categoryName: 'چای صبح', amount: 60 } as Expense)
+      missing = await dailyExpenseItems(day3)
+      eq('ثبت مبلغ واقعی روز اول را کامل کرد', missing.length, 2)
+
+      const cashBeforeClose = await cashBalance()
+      const profitBeforeClose = await profitAndLoss()
+      await setShopClosed(day2, true)
+      missing = await dailyExpenseItems(day3)
+      eq('روز بسته از عقب‌مانده حذف شد', missing.length, 1)
+      eq('روز بسته صندوق را تغییر نداد', await cashBalance(), cashBeforeClose)
+      eq('روز بسته مفاد را تغییر نداد', await profitAndLoss(), profitBeforeClose)
+
+      const beforeHour = await dailyReminderItems(Date.parse('2026-08-12T10:00:00'), 18)
+      eq('پیش از ساعت یادآوری امروز هشدار نمی‌آید', beforeHour.length, 0)
+      const afterHour = await dailyReminderItems(day3, 18)
+      eq('بعد از ساعت یادآوری امروز ظاهر می‌شود', afterHour.length, 1)
+
+      await setShopClosed(day3, true)
+      eq('بستن امروز یادآوری را خاموش کرد', (await dailyExpenseItems(day3)).length, 0)
+      await setShopClosed(day3, false)
+      eq('بازکردن دوبارهٔ روز یادآوری را برگرداند', (await dailyExpenseItems(day3)).length, 1)
+
+      await addExpense({ date: day3, type: 'business', categoryId: catId, categoryName: 'چای صبح', amount: 75 } as Expense)
+      eq('ثبت امروز همهٔ عقب‌مانده‌ها را تکمیل کرد', (await dailyExpenseItems(day3)).length, 0)
+      eq('مبلغ روزانه ثابت نماند و مبلغ واقعی ثبت شد', (await db.expenses.filter((e) => e.categoryId === catId && e.date === day3).first())!.amount, 75)
+
+      const listHost = document.createElement('div')
+      document.body.append(listHost)
+      const listRoot = createRoot(listHost)
+      try {
+        listRoot.render(createElement(DailyExpenseChecklist))
+        await waitUntil(() => listHost.textContent?.includes('مصارف روزانه') === true)
+        is('چک‌لیست می‌گوید ثبت خودکار نیست', listHost.textContent?.includes('ثبت خودکار نیست'), true)
+        is('دکمه روز بسته دارد', listHost.textContent?.includes('امروز دکان بسته است'), true)
+      } finally {
+        listRoot.unmount()
+        listHost.remove()
+      }
+
+      const catHost = document.createElement('div')
+      document.body.append(catHost)
+      const catRoot = createRoot(catHost)
+      try {
+        catRoot.render(createElement(CategoryManager, { onClose: () => undefined }))
+        await waitUntil(() => catHost.textContent?.includes('روزانه ✓') === true)
+        is('مدیریت کتگوری نشان روزانه دارد', catHost.textContent?.includes('روزانه ✓'), true)
+      } finally {
+        catRoot.unmount()
+        catHost.remove()
       }
     }
   },

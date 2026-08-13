@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Expense } from '../../db'
+import { db, type Expense, type ExpenseCategory } from '../../db'
 import { addExpense, addPartnerWithdrawal } from '../../lib/ops'
 import { parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { TYPE_LABELS, type ExpenseMode } from './labels'
 
-export function NewExpenseModal({ onClose }: { onClose: () => void }) {
+export function NewExpenseModal({ onClose, preset }: { onClose: () => void; preset?: { date: number; category: ExpenseCategory } }) {
   const [mode, setMode] = useState<ExpenseMode>('business')
-  const [categoryId, setCategoryId] = useState<number | ''>('')
+  const [categoryId, setCategoryId] = useState<number | ''>(preset?.category.id ?? '')
   const [partnerId, setPartnerId] = useState<number | ''>('')
-  const [amount, setAmount] = useState('')
-  const [paymentMode, setPaymentMode] = useState<'cash' | 'credit' | 'mixed'>('cash')
+  const [amount, setAmount] = useState(preset?.category.dailyDefaultAmount ? String(preset.category.dailyDefaultAmount) : '')
+  const [paymentMode, setPaymentMode] = useState<'cash' | 'credit' | 'mixed'>(preset?.category.dailyDefaultPaymentMode ?? 'cash')
   const [cashPart, setCashPart] = useState('')
   const [creditorId, setCreditorId] = useState<number | ''>('')
   const [newCreditor, setNewCreditor] = useState('')
@@ -55,7 +55,7 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
       } else {
         catId = undefined
       }
-      const e: Expense = { date: Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
+      const e: Expense = { date: preset ? preset.date + 12 * 60 * 60 * 1000 : Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
       if (mode === 'business') {
         const cashPaid = paymentMode === 'cash' ? amt : paymentMode === 'credit' ? 0 : parseNum(cashPart)
         const creditAmount = amt - cashPaid
@@ -78,7 +78,7 @@ export function NewExpenseModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="ثبت مصرف" onClose={onClose}>
+    <Modal title={preset ? `ثبت مصرف روزانه — ${preset.category.name}` : 'ثبت مصرف'} onClose={onClose}>
       <div className={`mb-1 grid gap-1 ${modes.length > 4 ? 'grid-cols-3' : 'grid-cols-4'}`}>
         {modes.map((m) => (
           <button
