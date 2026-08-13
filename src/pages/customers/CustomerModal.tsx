@@ -70,7 +70,7 @@ export function CustomerModal({
             <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
           </Field>
           <p className="-mt-2 mb-3 text-xs text-slate-400">
-            با وعده، این طلب در «پول آینده» و در یادآوری قرضداران حساب می‌شود.
+            با وعده، این طلب در یادآوری قرضداران حساب می‌شود.
           </p>
         </>
       )}

@@ -4,8 +4,6 @@ import { db, saleCashPaid, type Sale, type Variant } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear } from '../lib/format'
 import { useSyncStatus, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
-import CashForecastCard from '../components/CashForecastCard'
-import { LowCashBanner } from '../components/CashFlowChart'
 import { reorderProducts } from '../lib/reorder'
 
 function SyncChip() {
@@ -189,9 +187,6 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
           </div>
         </button>
       </div>
-
-      <LowCashBanner onGo={() => goTo('expenses')} />
-      {!isStaff && <CashForecastCard />}
 
       {overdue.length > 0 && (
         <Card onClick={() => goTo('customers')}>

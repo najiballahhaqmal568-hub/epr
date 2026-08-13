@@ -5,7 +5,6 @@ import { reconcile, transferCash, boxOf, SHOP_BOX } from '../../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
 import { buildCashLedger } from '../../lib/ledger'
-import CashForecastCard from '../../components/CashForecastCard'
 import CashFlowChart, { LowCashBanner } from '../../components/CashFlowChart'
 import { MOVE_LABELS } from './labels'
 
@@ -205,8 +204,6 @@ export function CashView() {
           ⇄ انتقال پول بین جاها (دکان ← خانه ← صراف)
         </button>
       )}
-
-      <CashForecastCard />
 
       <Card>
         <p className="mb-2 font-bold text-slate-700">راپور امروز — {box}</p>
