@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, type Sale, type Purchase, type Expense, type ReturnDoc, type Variant } from '../src/db'
+import { db, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -70,6 +70,7 @@ import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
 import { dailyExpenseItems, dailyReminderItems, setShopClosed } from '../src/lib/dailyExpenses'
+import { productReorderInfo } from '../src/lib/reorder'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -201,6 +202,37 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'حد خرید کارتنی — همهٔ رنگ‌ها و سایزهای یک جنس یکجا حساب شود',
+    run: async () => {
+      const product: Product = { id: 1, name: 'بوت چرمی', pairsPerCarton: 8, reorderAtCartons: 1, createdAt: 1 }
+      const make = (size: string, color: string, stockQty: number): Variant => ({
+        id: Number(size) + (color === 'سیاه' ? 0 : 100),
+        productId: 1,
+        size,
+        color,
+        stockQty,
+        purchasePrice: 500,
+        retailPrice: 900,
+        wholesalePrice: 800,
+        lowStock: 2
+      })
+
+      const nine = productReorderInfo(product, [make('40', 'سیاه', 2), make('41', 'نصواری', 7)])
+      eq('دو رنگ یکجا ۹ جفت است', nine.stockPairs, 9)
+      is('بیشتر از یک کارتن هشدار ندارد', nine.needsReorder, false)
+
+      const eight = productReorderInfo(product, [make('40', 'سیاه', 0), make('41', 'نصواری', 8)])
+      is('در یک کارتن هشدار می‌دهد', eight.needsReorder, true)
+      eq('حد یک کارتن ۸ جفت است', eight.thresholdPairs, 8)
+
+      const defaultCarton = productReorderInfo({ id: 2, name: 'جنس عادی', createdAt: 1 }, [
+        { ...make('42', 'سیاه', 12), id: 42, productId: 2 }
+      ])
+      eq('جنس قدیمی بدون تنظیم، پیش‌فرض ۱۲ جفت است', defaultCarton.pairsPerCarton, 12)
+      is('پیش‌فرض در یک درجن هشدار می‌دهد', defaultCarton.needsReorder, true)
+    }
+  },
   {
     name: 'تنظیم ناقص سرور — حساب و همگام‌سازی در مرورگر پنهان نشود',
     run: async () => {

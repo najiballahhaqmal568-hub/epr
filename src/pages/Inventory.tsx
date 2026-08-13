@@ -11,6 +11,7 @@ import ProductModal from './inventory/ProductModal'
 import MergeProductsModal from './inventory/MergeProductsModal'
 import { findDuplicateGroups } from '../lib/merge'
 import type { ProductDraft } from './inventory/helpers'
+import { pairsPerCartonOf, productReorderInfo, reorderProducts } from '../lib/reorder'
 
 type SortKey = 'name' | 'added' | 'newest' | 'oldest' | 'value'
 
@@ -89,7 +90,7 @@ export default function Inventory() {
     return tie
   })
 
-  const reorderCount = variants?.filter((v) => v.stockQty <= v.lowStock).length ?? 0
+  const reorderCount = reorderProducts(products ?? [], variants ?? []).length
   // ارزش کل گدام — همان عددی که در راپورها و ویزارد شروع سال می‌آید
   const valueOf = (list: Variant[]) => list.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
   // وقتی جستجو فعال است، مجموع همان چیزی است که در فهرست دیده می‌شود —
@@ -194,7 +195,8 @@ export default function Inventory() {
           const totalStock = vs.reduce((s, v) => s + v.stockQty, 0)
           // ارزش این جنس به قیمت تمام‌شده — همان تعریفی که «ارزش جنس گدام» در راپورها دارد
           const value = valueOf(vs)
-          const low = vs.some((v) => v.stockQty <= v.lowStock)
+          const reorder = productReorderInfo(p, vs)
+          const low = reorder.needsReorder
           return (
             <Card key={p.id}>
               <div className="flex items-center gap-3" onClick={() => setEditing(p)}>
@@ -220,10 +222,15 @@ export default function Inventory() {
                     value > 0 && <p className="text-xs font-bold text-slate-600">ارزش: {fmtMoney(value)}</p>
                   )}
                   {(() => {
-                    const pairs = p.carton?.items.reduce((s, it) => s + it.qty, 0) ?? 0
-                    return pairs > 0 ? <p className="text-xs text-slate-400">≈ {fmtNum(Math.floor(totalStock / pairs))} کارتن ({fmtNum(pairs)}تایی)</p> : null
+                    const pairs = pairsPerCartonOf(p)
+                    return (
+                      <p className="text-xs text-slate-400">
+                        {fmtNum(Math.floor(totalStock / pairs))} کارتن
+                        {totalStock % pairs > 0 ? ` و ${fmtNum(totalStock % pairs)} جفت` : ''} ({fmtNum(pairs)}تایی)
+                      </p>
+                    )
                   })()}
-                  {low && <p className="text-xs text-red-600">موجودی کم!</p>}
+                  {low && <p className="text-xs text-red-600">خرید مجدد: {fmtNum(reorder.reorderCartons)} کارتن یا کمتر مانده!</p>}
                   {(() => {
                     // کهنه‌ترین خرید در بین سایزهای موجود — سن جنس در گدام
                     const dates = vs.filter((v) => v.stockQty > 0).map((v) => v.lastPurchaseAt ?? 0)
@@ -243,10 +250,11 @@ export default function Inventory() {
                     key={v.id}
                     onClick={() => setAdjusting({ v, p })}
                     className={`rounded-lg px-2 py-0.5 text-xs ${
-                      v.stockQty <= v.lowStock ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'
+                      v.stockQty <= 0 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'
                     }`}
                   >
                     {v.size} {v.color} : {fmtNum(v.stockQty)}
+                    {v.stockQty <= 0 ? ' · تمام' : ''}
                   </button>
                 ))}
               </div>

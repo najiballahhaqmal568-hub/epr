@@ -27,6 +27,10 @@ export interface Product extends Synced {
   category?: string
   photo?: string
   carton?: CartonDef
+  /** ظرفیت کارتن برای هشدار خرید؛ اگر ثبت نشده باشد ۱۲ جفت حساب می‌شود. */
+  pairsPerCarton?: number
+  /** وقتی چند کارتن یا کمتر ماند هشدار بدهد؛ پیش‌فرض یک کارتن. */
+  reorderAtCartons?: number
   createdAt: number
 }
 
@@ -40,7 +44,7 @@ export interface Variant extends Synced {
   retailPrice: number
   wholesalePrice: number
   stockQty: number
-  /** حد سفارش مجدد */
+  /** @deprecated هشدار خرید اکنون برای کل جنس و براساس کارتن حساب می‌شود. */
   lowStock: number
   /** آخرین باری که این سایز خریداری/رسید شد — برای سن جنس در گدام */
   lastPurchaseAt?: number

@@ -33,7 +33,7 @@ export function CartonWizardModal({
   const [wholesale, setWholesale] = useState(defaults?.wholesale || String(first?.wholesalePrice || ''))
   const [cartons, setCartons] = useState('')
   const savedPairs = product?.carton?.items.reduce((s, it) => s + it.qty, 0) ?? 0
-  const [capacity, setCapacity] = useState(savedPairs ? String(savedPairs) : '')
+  const [capacity, setCapacity] = useState(savedPairs ? String(savedPairs) : '12')
   const [rows, setRows] = useState<{ variantId?: number; size: string; color: string; qty: string }[]>(
     product
       ? variants.map((v) => ({
@@ -113,7 +113,9 @@ export function CartonWizardModal({
       }
       if (saveTemplate && items.length) {
         await db.products.update(pid, {
-          carton: { ...(product?.carton?.price ? { price: product.carton.price } : {}), items }
+          carton: { ...(product?.carton?.price ? { price: product.carton.price } : {}), items },
+          pairsPerCarton: cap,
+          reorderAtCartons: product?.reorderAtCartons ?? 1
         })
       }
       onApply(lines)
@@ -189,7 +191,7 @@ export function CartonWizardModal({
             className="mb-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-4 text-center text-3xl font-bold"
             inputMode="numeric"
             autoFocus
-            placeholder="۸"
+            placeholder="۱۲"
             value={capacity}
             onChange={(e) => setCapacity(e.target.value)}
           />

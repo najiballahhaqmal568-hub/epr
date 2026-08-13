@@ -23,7 +23,7 @@ await page.waitForSelector('text=نام بوت', { timeout: 10000 })
 
 await page.fill('input[placeholder="مثلاً بوت چرمی مردانه"]', 'کوهستان')
 const rowInputs = page.locator('input[inputmode="numeric"]')
-// ترتیب فیلدهای عددیِ یک ردیف: خرید، موجودی، پرچون، عمده، حد کم، کارتن
+// ترتیب فیلدهای عددیِ یک ردیف: خرید، موجودی، پرچون، عمده، کارتن؛ سپس تنظیم کارتنیِ کل جنس
 await page.locator('input[placeholder="۴۲"]').first().fill('42')
 await rowInputs.nth(0).fill('500')
 await rowInputs.nth(1).fill('24')

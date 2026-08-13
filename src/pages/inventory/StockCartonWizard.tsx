@@ -27,7 +27,7 @@ export function StockCartonWizard({
   const [retail, setRetail] = useState('')
   const [wholesale, setWholesale] = useState('')
   const [cartons, setCartons] = useState('')
-  const [capacity, setCapacity] = useState('')
+  const [capacity, setCapacity] = useState('12')
   const [rows, setRows] = useState<{ size: string; qty: string }[]>([
     { size: '', qty: '' },
     { size: '', qty: '' },
@@ -67,6 +67,8 @@ export function StockCartonWizard({
         brand: brand.trim(),
         photo,
         carton: { items },
+        pairsPerCarton: cap,
+        reorderAtCartons: 1,
         createdAt: Date.now()
       })) as number
       for (const it of items) {
@@ -184,7 +186,7 @@ export function StockCartonWizard({
             className="mb-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-4 text-center text-3xl font-bold"
             inputMode="numeric"
             autoFocus
-            placeholder="۸"
+            placeholder="۱۲"
             value={capacity}
             onChange={(e) => setCapacity(e.target.value)}
           />

@@ -5,6 +5,7 @@ import { addVariant, setOpeningStock, setPurchaseCost } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { emptyVariant, downscalePhoto, type VariantForm, type ProductDraft } from './helpers'
+import { DEFAULT_PAIRS_PER_CARTON, DEFAULT_REORDER_CARTONS, pairsPerCartonOf, reorderCartonsOf } from '../../lib/reorder'
 
 export function ProductModal({
   product,
@@ -50,6 +51,12 @@ export function ProductModal({
         ]
   )
   const [cartonPrice, setCartonPrice] = useState(product?.carton?.price ? String(product.carton.price) : '')
+  const [pairsPerCarton, setPairsPerCarton] = useState(
+    String(product ? pairsPerCartonOf(product) : DEFAULT_PAIRS_PER_CARTON)
+  )
+  const [reorderCartons, setReorderCartons] = useState(
+    String(product ? reorderCartonsOf(product) : DEFAULT_REORDER_CARTONS)
+  )
   const [showBulk, setShowBulk] = useState(false)
   const [bulkFrom, setBulkFrom] = useState('')
   const [bulkTo, setBulkTo] = useState('')
@@ -93,6 +100,8 @@ export function ProductModal({
     if (!name.trim()) return setError('نام بوت را بنویسید')
     const valid = forms.filter((f) => f.size.trim())
     if (!valid.length) return setError('حداقل یک سایز اضافه کنید')
+    if (parseNum(pairsPerCarton) <= 0) return setError('تعداد جفت در هر کارتن را درست بنویسید')
+    if (parseNum(reorderCartons) <= 0) return setError('حد خرید مجدد کارتنی را درست بنویسید')
     // جنسی که موجودی دارد باید قیمت خرید داشته باشد — وگرنه در ارزش گدام،
     // در دارایی خالص و در مفاد صفر حساب می‌شود و کسی خبردار نمی‌شود.
     const noCost = valid.find((f) => parseNum(f.stockQty) > 0 && parseNum(f.purchasePrice) <= 0)
@@ -106,7 +115,15 @@ export function ProductModal({
       const carton = cartonItems.length
         ? { ...(parseNum(cartonPrice) > 0 ? { price: parseNum(cartonPrice) } : {}), items: cartonItems }
         : undefined
-      const pData = { name: name.trim(), brand: brand.trim(), category: category.trim(), photo, carton }
+      const pData = {
+        name: name.trim(),
+        brand: brand.trim(),
+        category: category.trim(),
+        photo,
+        carton,
+        pairsPerCarton: Math.round(parseNum(pairsPerCarton)),
+        reorderAtCartons: Math.round(parseNum(reorderCartons))
+      }
       if (productId) await db.products.update(productId, pData)
       else productId = (await db.products.add({ ...pData, createdAt: Date.now() })) as number
 
@@ -227,9 +244,6 @@ export function ProductModal({
             <Field label="قیمت عمده">
               <input className={inputCls} inputMode="numeric" value={f.wholesalePrice} onChange={(e) => setForm(i, { wholesalePrice: e.target.value })} />
             </Field>
-            <Field label="حد خرید مجدد">
-              <input className={inputCls} inputMode="numeric" value={f.lowStock} onChange={(e) => setForm(i, { lowStock: e.target.value })} />
-            </Field>
             <Field label="در هر کارتن (اختیاری)">
               <input className={inputCls} inputMode="numeric" value={f.cartonQty} onChange={(e) => setForm(i, { cartonQty: e.target.value })} placeholder="۰" />
             </Field>
@@ -247,6 +261,21 @@ export function ProductModal({
       >
         ＋ افزودن سایز دیگر
       </button>
+
+      <div className="mb-4 rounded-xl bg-red-50 p-3">
+        <p className="mb-2 text-sm font-bold text-red-800">⚠️ حد خرید مجدد برای کل جنس</p>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="هر کارتن چند جفت؟">
+            <input className={inputCls} inputMode="numeric" value={pairsPerCarton} onChange={(e) => setPairsPerCarton(e.target.value)} placeholder="۱۲" />
+          </Field>
+          <Field label="در چند کارتن هشدار بدهد؟">
+            <input className={inputCls} inputMode="numeric" value={reorderCartons} onChange={(e) => setReorderCartons(e.target.value)} placeholder="۱" />
+          </Field>
+        </div>
+        <p className="text-xs text-slate-500">
+          همهٔ رنگ‌ها و سایزهای این جنس یکجا حساب می‌شود. پیش‌فرض: یک کارتن ۱۲ جفتی.
+        </p>
+      </div>
       {!showBulk ? (
         <button
           className="mb-4 w-full rounded-xl border border-dashed border-amber-500 py-2 text-amber-700"

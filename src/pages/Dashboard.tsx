@@ -6,6 +6,7 @@ import { useSyncStatus, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
 import CashForecastCard from '../components/CashForecastCard'
 import { LowCashBanner } from '../components/CashFlowChart'
+import { reorderProducts } from '../lib/reorder'
 
 function SyncChip() {
   const s = useSyncStatus()
@@ -102,11 +103,11 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
     .filter((c) => c.balance > 0 && c.promiseDate && c.promiseDate < dayStart)
     .sort((a, b) => (a.promiseDate ?? 0) - (b.promiseDate ?? 0))
 
-  const lowStock =
-    variants?.filter((v) => v.stockQty <= v.lowStock).map((v) => ({
-      v,
-      p: products?.find((p) => p.id === v.productId)
-    })) ?? []
+  const lowStock = reorderProducts(products ?? [], variants ?? [])
+  const outOfStockSizes = (variants ?? [])
+    .filter((variant) => variant.stockQty <= 0)
+    .map((variant) => ({ variant, product: (products ?? []).find((product) => product.id === variant.productId) }))
+    .filter((row) => row.product)
 
   return (
     <div className="p-4">
@@ -209,12 +210,24 @@ export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => vo
       {lowStock.length > 0 && (
         <Card onClick={() => goTo('inventory')}>
           <p className="mb-2 font-bold text-red-600">⚠️ موجودی کم</p>
-          {lowStock.slice(0, 8).map(({ v, p }) => (
-            <div key={v.id} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
-              <span>
-                {p?.name} — {v.size} {v.color}
+          {lowStock.slice(0, 8).map((info) => (
+            <div key={info.product.id} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
+              <span>{info.product.name}</span>
+              <span className="font-bold text-red-600">
+                {fmtNum(info.stockPairs)} جفت باقی · حد {fmtNum(info.reorderCartons)} کارتن
               </span>
-              <span className="font-bold text-red-600">{fmtNum(v.stockQty)} باقی</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {outOfStockSizes.length > 0 && (
+        <Card onClick={() => goTo('inventory')}>
+          <p className="mb-2 font-bold text-amber-600">سایزهای تمام‌شده</p>
+          {outOfStockSizes.slice(0, 8).map(({ variant, product }) => (
+            <div key={variant.id} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
+              <span>{product!.name} — سایز {variant.size} {variant.color}</span>
+              <span className="font-bold text-amber-600">تمام</span>
             </div>
           ))}
         </Card>

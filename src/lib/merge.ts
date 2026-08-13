@@ -157,6 +157,14 @@ export async function mergeProducts(targetId: number, sourceIds: number[]): Prom
         target.carton = src.carton
         await db.products.update(targetId, { carton: src.carton })
       }
+      if (!target.pairsPerCarton && src?.pairsPerCarton) {
+        target.pairsPerCarton = src.pairsPerCarton
+        await db.products.update(targetId, { pairsPerCarton: src.pairsPerCarton })
+      }
+      if (!target.reorderAtCartons && src?.reorderAtCartons) {
+        target.reorderAtCartons = src.reorderAtCartons
+        await db.products.update(targetId, { reorderAtCartons: src.reorderAtCartons })
+      }
       if (!target.photo && src?.photo) {
         target.photo = src.photo
         await db.products.update(targetId, { photo: src.photo })

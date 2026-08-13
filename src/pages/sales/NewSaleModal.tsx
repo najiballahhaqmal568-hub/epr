@@ -523,7 +523,7 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
                   <div key={v.id} className="mb-1 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
                     <span className="text-sm font-bold text-slate-800">
                       {v.size} <span className="font-normal text-slate-500">{v.color}</span>
-                      <span className={`block text-xs font-normal ${v.stockQty <= v.lowStock ? 'text-red-600' : 'text-slate-400'}`}>
+                      <span className={`block text-xs font-normal ${v.stockQty <= 0 ? 'text-red-600' : 'text-slate-400'}`}>
                         {fmtNum(v.stockQty)} موجود
                       </span>
                     </span>
@@ -591,7 +591,7 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
                     {v.size} <span className="text-sm font-normal text-slate-500">{v.color}</span>
                   </span>
                   <span className="text-left text-sm">
-                    <span className={`block font-bold ${v.stockQty <= v.lowStock ? 'text-red-600' : 'text-teal-700'}`}>
+                    <span className={`block font-bold ${v.stockQty <= 0 ? 'text-red-600' : 'text-teal-700'}`}>
                       {v.stockQty <= 0 ? 'ناموجود' : `${fmtNum(v.stockQty)} موجود`}
                     </span>
                     <span className="text-slate-500">{fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}</span>
