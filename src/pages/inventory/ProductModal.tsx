@@ -96,11 +96,19 @@ export function ProductModal({
   const setForm = (i: number, patch: Partial<VariantForm>) =>
     setForms((fs) => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)))
 
+  // اگر شماره‌بندی داخل کارتن نوشته شده، ظرفیت باید دقیقاً مجموع همان شماره‌بندی باشد؛
+  // دو عدد جدا برای یک کارتن می‌تواند هشدار خرید را غلط کند.
+  const cartonCompositionPairs = forms.reduce(
+    (sum, form) => sum + (form.size.trim() ? parseNum(form.cartonQty) : 0),
+    0
+  )
+  const effectivePairsPerCarton = cartonCompositionPairs > 0 ? cartonCompositionPairs : parseNum(pairsPerCarton)
+
   async function save() {
     if (!name.trim()) return setError('نام بوت را بنویسید')
     const valid = forms.filter((f) => f.size.trim())
     if (!valid.length) return setError('حداقل یک سایز اضافه کنید')
-    if (parseNum(pairsPerCarton) <= 0) return setError('تعداد جفت در هر کارتن را درست بنویسید')
+    if (effectivePairsPerCarton <= 0) return setError('تعداد جفت در هر کارتن را درست بنویسید')
     if (parseNum(reorderCartons) <= 0) return setError('حد خرید مجدد کارتنی را درست بنویسید')
     // جنسی که موجودی دارد باید قیمت خرید داشته باشد — وگرنه در ارزش گدام،
     // در دارایی خالص و در مفاد صفر حساب می‌شود و کسی خبردار نمی‌شود.
@@ -121,7 +129,7 @@ export function ProductModal({
         category: category.trim(),
         photo,
         carton,
-        pairsPerCarton: Math.round(parseNum(pairsPerCarton)),
+        pairsPerCarton: Math.round(effectivePairsPerCarton),
         reorderAtCartons: Math.round(parseNum(reorderCartons))
       }
       if (productId) await db.products.update(productId, pData)
@@ -266,14 +274,23 @@ export function ProductModal({
         <p className="mb-2 text-sm font-bold text-red-800">⚠️ حد خرید مجدد برای کل جنس</p>
         <div className="grid grid-cols-2 gap-2">
           <Field label="هر کارتن چند جفت؟">
-            <input className={inputCls} inputMode="numeric" value={pairsPerCarton} onChange={(e) => setPairsPerCarton(e.target.value)} placeholder="۱۲" />
+            <input
+              className={inputCls}
+              inputMode="numeric"
+              value={cartonCompositionPairs > 0 ? String(cartonCompositionPairs) : pairsPerCarton}
+              disabled={cartonCompositionPairs > 0}
+              onChange={(e) => setPairsPerCarton(e.target.value)}
+              placeholder="۱۲"
+            />
           </Field>
           <Field label="در چند کارتن هشدار بدهد؟">
             <input className={inputCls} inputMode="numeric" value={reorderCartons} onChange={(e) => setReorderCartons(e.target.value)} placeholder="۱" />
           </Field>
         </div>
         <p className="text-xs text-slate-500">
-          همهٔ رنگ‌ها و سایزهای این جنس یکجا حساب می‌شود. پیش‌فرض: یک کارتن ۱۲ جفتی.
+          {cartonCompositionPairs > 0
+            ? `از شماره‌بندی داخل کارتن حساب شد: ${fmtNum(cartonCompositionPairs)} جفت.`
+            : 'همهٔ رنگ‌ها و سایزهای این جنس یکجا حساب می‌شود. پیش‌فرض: یک کارتن ۱۲ جفتی.'}
         </p>
       </div>
       {!showBulk ? (
@@ -319,7 +336,7 @@ export function ProductModal({
       )}
 
       {(() => {
-        const pairs = forms.reduce((s, f) => s + (f.size.trim() ? parseNum(f.cartonQty) : 0), 0)
+        const pairs = cartonCompositionPairs
         if (pairs <= 0) return null
         return (
           <div className="mb-4 rounded-xl bg-amber-50 p-3">
