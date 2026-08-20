@@ -180,6 +180,36 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
   const ledger = buildLenderLedger(payments ?? [], l.id!, lenderSales ?? [])
   const summary = summarizeLenderAccount(payments ?? [], l.id!)
   const goodsTotal = goodsLines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)
+  const openingCount = parseNum(qty)
+  const openingPrice = parseNum(agreedPrice)
+  const openingDraftStarted = manualOpeningGoods
+    ? Boolean(oldProductName.trim() || oldSize.trim() || oldColor.trim() || agreedPrice.trim())
+    : variantId !== '' || Boolean(agreedPrice.trim())
+  const openingDraftLine: OpeningLenderGoodsLine | null = (() => {
+    if (!Number.isInteger(openingCount) || openingCount <= 0 || openingPrice <= 0) return null
+    if (manualOpeningGoods) {
+      if (!oldProductName.trim() || !oldSize.trim() || !oldColor.trim()) return null
+      return {
+        productName: oldProductName.trim(),
+        size: oldSize.trim(),
+        color: oldColor.trim(),
+        qty: openingCount,
+        unitPrice: openingPrice
+      }
+    }
+    const selected = allOptions?.find((option) => option.variantId === variantId)
+    if (!selected) return null
+    return {
+      variantId: selected.variantId,
+      productName: selected.productName,
+      size: selected.size,
+      color: selected.color,
+      qty: openingCount,
+      unitPrice: openingPrice
+    }
+  })()
+  const openingGoodsCanSubmit =
+    goodsLines.length > 0 ? !openingDraftStarted || openingDraftLine !== null : openingDraftLine !== null
 
   const reset = () => {
     setAmount('')
@@ -802,7 +832,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             disabled={
               openingAction === 'cashRepayment' || openingAction === 'cashLoan'
                 ? parseNum(amount) <= 0
-                : goodsLines.length === 0
+                : !openingGoodsCanSubmit
             }
             onClick={async () => {
               try {
@@ -816,10 +846,19 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
                     openingAction
                   )
                 } else {
+                  const linesToSave = [...goodsLines]
+                  if (openingDraftLine) linesToSave.push(openingDraftLine)
+                  else if (openingDraftStarted) {
+                    throw new Error(
+                      manualOpeningGoods
+                        ? 'مدل، سایز، رنگ، تعداد صحیح و قیمت توافقی قبلی را کامل کنید'
+                        : 'جنس، تعداد صحیح و قیمت توافقی قبلی را کامل کنید'
+                    )
+                  }
                   await addOpeningLenderGoods(
                     l.id!,
                     l.name,
-                    goodsLines,
+                    linesToSave,
                     fromDateInput(dateStr),
                     note,
                     openingAction

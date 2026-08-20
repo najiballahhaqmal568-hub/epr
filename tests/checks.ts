@@ -113,6 +113,21 @@ async function waitUntil(check: () => boolean, timeoutMs = 2000): Promise<void> 
   throw new Error('رابط کاربری در وقت تعیین‌شده آماده نشد')
 }
 
+async function waitUntilAsync(check: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    if (await check()) return
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error('نتیجهٔ ذخیره‌سازی در وقت تعیین‌شده آماده نشد')
+}
+
+function fillInput(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  setter?.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
 async function makeVariant(over: Partial<Variant> = {}): Promise<number> {
   const productId = (await db.products.add({ name: 'اسپرتکس' })) as number
   return (await db.variants.add({
@@ -2360,6 +2375,62 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
           Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.includes('مشخصات کفش قدیمی را دستی')),
           true
         )
+      } finally {
+        root.unmount()
+        host.remove()
+      }
+    }
+  },
+  {
+    name: 'فورم سند قبلی — معلومات کامل را بدون دکمهٔ افزودن مستقیماً ثبت کند',
+    run: async () => {
+      const lenderId = (await db.suppliers.add({ name: 'نورالله', balance: 10000, kind: 'lender' })) as number
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(LendersView))
+        await waitUntil(() => host.textContent?.includes('نورالله') === true)
+        const lenderName = Array.from(host.querySelectorAll('p')).find((node) => node.textContent?.includes('نورالله'))
+        ;(lenderName?.parentElement?.parentElement?.parentElement as HTMLElement | null)?.click()
+        await waitUntil(() => host.textContent?.includes('سند قبلی — قبل از استفاده از اپ') === true)
+        Array.from(host.querySelectorAll('button'))
+          .find((button) => button.textContent?.includes('سند قبلی — قبل از استفاده از اپ'))
+          ?.click()
+        await waitUntil(() =>
+          Array.from(host.querySelectorAll('select')).some((select) =>
+            Array.from(select.options).some((option) => option.value === 'goodsSettlement')
+          )
+        )
+        const actionSelect = Array.from(host.querySelectorAll('select')).find((select) =>
+          Array.from(select.options).some((option) => option.value === 'goodsSettlement')
+        )!
+        actionSelect.value = 'goodsSettlement'
+        actionSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        await waitUntil(() => host.textContent?.includes('مدل کفش قبلی') === true)
+
+        const inputOf = (label: string) =>
+          Array.from(host.querySelectorAll('label')).find((node) => node.textContent?.includes(label))?.querySelector('input') as HTMLInputElement
+        fillInput(inputOf('مدل کفش قبلی'), 'اسکچرز زنانه')
+        fillInput(inputOf('سایز قبلی'), '۳۹')
+        fillInput(inputOf('رنگ قبلی'), 'خاکی')
+        fillInput(inputOf('تعداد قبلی'), '2')
+        fillInput(inputOf('قیمت توافقی قبلی'), '655')
+        await waitUntil(() => inputOf('قیمت توافقی قبلی').value === '655')
+
+        const submit = Array.from(host.querySelectorAll('button')).find((button) =>
+          button.textContent?.includes('ثبت سند قبلی بدون تغییر صندوق و گدام')
+        )!
+        is('با معلومات کامل دکمهٔ ثبت مستقیم فعال است', submit.disabled, false)
+        submit.click()
+        await waitUntilAsync(async () => (await db.payments.filter((payment) => payment.partyId === lenderId && payment.lenderOpening === true).count()) === 1)
+
+        const saved = (await db.payments.filter((payment) => payment.partyId === lenderId && payment.lenderOpening === true).first())!
+        is('مدل پُرشده مستقیم در سند ذخیره شد', saved.goodsLines?.[0].productName, 'اسکچرز زنانه')
+        eq('جمع دو جوړه ثبت شد', saved.amount, 1310)
+        eq('فقط حساب قرض‌دهنده کم شد', (await db.suppliers.get(lenderId))!.balance, 8690)
+        eq('فروش امروزی ساخته نشد', await db.sales.count(), 0)
+        eq('صندوق تغییر نکرد', await cashBalance(), 0)
       } finally {
         root.unmount()
         host.remove()
