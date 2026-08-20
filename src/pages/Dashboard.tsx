@@ -1,26 +1,39 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { netWorth } from '../lib/networth'
 import { db, saleCashPaid, type Sale, type Variant } from '../db'
-import { fmtNum, fmtMoney, fmtDateShort, startOfDay, startOfMonth, startOfYear } from '../lib/format'
-import { useSyncStatus, syncNow } from '../lib/sync'
-import { Card } from '../components/ui'
+import { netWorth } from '../lib/networth'
+import { fmtMoney, fmtNum, startOfDay } from '../lib/format'
 import { reorderProducts } from '../lib/reorder'
+import { syncNow, useSyncStatus } from '../lib/sync'
 
 function SyncChip() {
-  const s = useSyncStatus()
-  if (s.state === 'off') return null
+  const status = useSyncStatus()
+  if (status.state === 'off') return null
+
   const label =
-    s.state === 'syncing' ? '⏳ همگام‌سازی...' : s.state === 'offline' ? '📴 آفلاین' : s.state === 'error' ? '⚠️ خطای سرور' : '☁️ همگام'
+    status.state === 'syncing'
+      ? 'در حال همگام‌سازی'
+      : status.state === 'offline'
+        ? 'آفلاین'
+        : status.state === 'error'
+          ? 'خطای همگام‌سازی'
+          : 'همگام است'
+
   return (
     <button
       onClick={() => {
-        if (s.state === 'error' && s.message) window.alert(`خطای همگام‌سازی:\n${s.message}`)
+        if (status.state === 'error' && status.message) window.alert(`خطای همگام‌سازی:\n${status.message}`)
         void syncNow()
       }}
-      aria-label="sync"
-      title={s.message}
-      className={`rounded-full px-2 py-1 text-xs font-bold ${
-        s.state === 'ok' ? 'bg-teal-50 text-teal-700' : s.state === 'error' ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'
+      aria-label="وضعیت همگام‌سازی"
+      title={status.message}
+      className={`rounded-full px-3 py-1.5 text-xs font-bold ${
+        status.state === 'ok'
+          ? 'bg-teal-50 text-teal-700'
+          : status.state === 'error'
+            ? 'bg-red-50 text-red-600'
+            : status.state === 'offline'
+              ? 'bg-amber-50 text-amber-700'
+              : 'bg-slate-100 text-slate-600'
       }`}
     >
       {label}
@@ -28,214 +41,152 @@ function SyncChip() {
   )
 }
 
-export default function Dashboard({ goTo, isStaff }: { goTo: (tab: string) => void; isStaff?: boolean }) {
+export default function Dashboard({
+  goTo,
+  isStaff,
+  pendingExpenseCount,
+  debtCount,
+  debtTotal
+}: {
+  goTo: (tab: string) => void
+  isStaff?: boolean
+  pendingExpenseCount: number
+  debtCount: number
+  debtTotal: number
+}) {
   const dayStart = startOfDay()
-  const monthStart = startOfMonth()
-  const yearStart = startOfYear()
-
-  const sales = useLiveQuery(() => db.sales.where('date').aboveOrEqual(yearStart).filter((s) => !s.deleted).toArray(), [yearStart])
-  const expenses = useLiveQuery(() => db.expenses.where('date').aboveOrEqual(yearStart).filter((e) => !e.deleted && !e.shopClosed).toArray(), [yearStart])
-  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
-  const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
-  const customers = useLiveQuery(() => db.customers.filter((c) => !c.deleted).toArray(), [])
-  const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
-  const returns = useLiveQuery(() => db.returns.where('date').aboveOrEqual(yearStart).filter((r) => !r.deleted).toArray(), [yearStart])
-  const unpaidLanding =
-    useLiveQuery(
-      async () =>
-        (await db.purchases.filter((p) => !p.deleted && Boolean(p.landingCost)).toArray()).reduce(
-          (s, p) => s + (p.landingUnpaid ?? (p.landingPaid === false ? (p.landingCost ?? 0) : 0)),
-          0
-        ),
-      []
-    ) ?? 0
+  const sales = useLiveQuery(
+    () => db.sales.where('date').aboveOrEqual(dayStart).filter((row) => !row.deleted).toArray(),
+    [dayStart]
+  )
+  const returns = useLiveQuery(
+    () => db.returns.where('date').aboveOrEqual(dayStart).filter((row) => !row.deleted && row.kind === 'customer').toArray(),
+    [dayStart]
+  )
+  const variants = useLiveQuery(() => db.variants.filter((row) => !row.deleted).toArray(), [])
+  const products = useLiveQuery(() => db.products.filter((row) => !row.deleted).toArray(), [])
+  const customers = useLiveQuery(() => db.customers.filter((row) => !row.deleted).toArray(), [])
+  const worth = useLiveQuery(() => netWorth(), [])
 
   const variantMap = new Map<number, Variant>()
-  variants?.forEach((v) => variantMap.set(v.id!, v))
-
-  // قیمت خرید ثبت‌شده در خود فاکتور — تا مفاد گذشته با تغییر قیمت عوض نشود
-  const costOf = (l: { variantId: number; unitCost?: number }) => l.unitCost ?? variantMap.get(l.variantId)?.purchasePrice ?? 0
+  variants?.forEach((variant) => variantMap.set(variant.id!, variant))
+  const costOf = (line: { variantId: number; unitCost?: number }) =>
+    line.unitCost ?? variantMap.get(line.variantId)?.purchasePrice ?? 0
   const grossProfit = (list: Sale[]) =>
     list.reduce(
-      (sum, sale) => sum + sale.lines.reduce((s, l) => s + (l.unitPrice - costOf(l)) * l.qty, 0) - (sale.discount ?? 0),
+      (sum, sale) =>
+        sum + sale.lines.reduce((lineSum, line) => lineSum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0),
       0
     )
+  const returnedProfit = (returns ?? []).reduce(
+    (sum, row) => sum + row.lines.reduce((lineSum, line) => lineSum + (line.unitPrice - (line.unitCost ?? 0)) * line.qty, 0),
+    0
+  )
 
-  const todaySales = sales?.filter((s) => s.date >= dayStart) ?? []
-  const monthSales = sales?.filter((s) => s.date >= monthStart) ?? []
-
-  // مرجوعی مشتری، مفاد همان فروش را پس می‌گیرد
-  const returnProfit = (from: number) =>
-    (returns ?? [])
-      .filter((r) => r.kind === 'customer' && r.date >= from)
-      .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0)
-
-  const todayTotal = todaySales.reduce((s, x) => s + x.total, 0)
-  const todayCash = todaySales.reduce((s, x) => s + saleCashPaid(x), 0)
-  const todayProfit = grossProfit(todaySales) - returnProfit(dayStart)
-
-  const monthExpenses = expenses?.filter((e) => e.date >= monthStart && e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
-  const yearExpenses = expenses?.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
-  const monthNet = grossProfit(monthSales) - returnProfit(monthStart) - monthExpenses
-  const yearNet = grossProfit(sales ?? []) - returnProfit(yearStart) - yearExpenses
-
-  const nw = useLiveQuery(() => netWorth(), [])
-  const cashBalance = nw?.cash ?? 0
-  // پول در چند جا نگه داشته می‌شود — تفکیک روی داشبورد
-  const boxMap = new Map<string, number>()
-  movements?.forEach((m) => {
-    const b = m.box?.trim() || 'دکان'
-    boxMap.set(b, (boxMap.get(b) ?? 0) + m.amount)
-  })
-  const boxRows = [...boxMap.entries()].sort((a, b) => (a[0] === 'دکان' ? -1 : b[0] === 'دکان' ? 1 : b[1] - a[1]))
-  // همهٔ اجزای دارایی از یک جا می‌آید تا با ویزارد شروع سال و صفحهٔ شرکا فرق نکند
-  const stockCount = nw?.pairs ?? 0
-  const stockValue = nw?.stock ?? 0
-  const receivable = nw?.receivables ?? 0
-  const payable = nw?.payables ?? 0
-  // قرض ما از اشخاص (قرض‌دهنده) — جدا دیده شود، چون سرمایه نیست و باید پس داده شود
-  const loans = nw?.loans ?? 0
-  const suppCredit = nw?.supplierCredits ?? 0
-
-  const overdue = (customers ?? [])
-    .filter((c) => c.balance > 0 && c.promiseDate && c.promiseDate < dayStart)
-    .sort((a, b) => (a.promiseDate ?? 0) - (b.promiseDate ?? 0))
-
+  const todaySales = sales ?? []
+  const todayTotal = todaySales.reduce((sum, row) => sum + row.total, 0)
+  const todayCash = todaySales.reduce((sum, row) => sum + saleCashPaid(row), 0)
+  const todayProfit = grossProfit(todaySales) - returnedProfit
   const lowStock = reorderProducts(products ?? [], variants ?? [])
-  const outOfStockSizes = (variants ?? [])
-    .filter((variant) => variant.stockQty <= 0)
-    .map((variant) => ({ variant, product: (products ?? []).find((product) => product.id === variant.productId) }))
-    .filter((row) => row.product)
+  const overdueCount = (customers ?? []).filter(
+    (row) => row.balance > 0 && Boolean(row.promiseDate) && row.promiseDate! < dayStart
+  ).length
+  const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0
 
   return (
     <div className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-800">داشبورد</h1>
-        <div className="flex items-center gap-2">
-          <SyncChip />
-          {!isStaff && (
-            <button onClick={() => goTo('reports')} className="rounded-full bg-teal-50 px-3 py-1.5 text-sm font-bold text-teal-800">
-              📊 راپورها
-            </button>
-          )}
-          <button onClick={() => goTo('settings')} className="rounded-full bg-slate-100 px-3 py-1.5 text-lg" aria-label="تنظیمات">
-            ⚙️
-          </button>
-        </div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-900">خانه</h1>
+        <SyncChip />
       </div>
 
       {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
-        <div className="mb-3 rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 p-4">
-          <p className="mb-2 font-bold text-teal-800">👋 خوش آمدید! برای شروع:</p>
-          <p className="mb-1 text-sm text-slate-700">۱. در «گدام» اجناس‌تان را با سایز و قیمت ثبت کنید</p>
-          <p className="mb-1 text-sm text-slate-700">۲. پول صندوق را در «مصارف ← صندوق ← تصفیه» بگذارید</p>
-          <p className="mb-1 text-sm text-slate-700">۳. قرض مشتریان و تأمین‌کنندگان را ثبت کنید</p>
-          <p className="mb-1 text-sm font-bold text-teal-800">
-            ۴. بعد «تنظیمات ← 🎬 شروع سال مالی» را بزنید تا سرمایه و مفاد از روز اول درست باشد
-          </p>
-          <p className="text-sm text-slate-700">۵. حالا فروش را شروع کنید</p>
+        <div className="mb-3 rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 p-4 text-sm text-slate-700">
+          <p className="mb-2 font-bold text-teal-800">برای شروع فروشگاه:</p>
+          <p>۱. اجناس و قیمت‌ها را در گدام ثبت کنید.</p>
+          <p>۲. موجودی صندوق را در مصارف و صندوق تصفیه کنید.</p>
+          <p>۳. حساب‌های قبلی مشتریان و تأمین‌کنندگان را ثبت کنید.</p>
         </div>
       )}
-      <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white">
-        <p className="text-sm opacity-80">فروش امروز</p>
-        <p className="text-3xl font-bold">{fmtMoney(todayTotal)}</p>
-        <div className="mt-2 flex gap-4 text-sm">
-          <span>نقد: {fmtMoney(todayCash)}</span>
-          <span>مفاد: {fmtMoney(todayProfit)}</span>
+
+      <button
+        onClick={() => goTo('sales-new')}
+        className="mb-2 w-full rounded-2xl bg-teal-700 py-4 text-lg font-bold text-white shadow-sm active:bg-teal-800"
+      >
+        فروش جدید
+      </button>
+      <div className="mb-4 grid grid-cols-2 gap-2">
+        <button onClick={() => goTo('purchases-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
+          خرید جدید
+        </button>
+        <button onClick={() => goTo('expenses-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
+          مصرف جدید
+        </button>
+      </div>
+
+      <div className="mb-4 rounded-2xl bg-teal-800 p-4 text-white shadow-sm">
+        <p className="text-sm text-teal-100">فروش امروز</p>
+        <p className="mt-1 text-3xl font-bold">{fmtMoney(todayTotal)}</p>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-teal-50">
           <span>{fmtNum(todaySales.length)} فروش</span>
+          <span>نقد: {fmtMoney(todayCash)}</span>
+          {!isStaff && <span>مفاد: {fmtMoney(todayProfit)}</span>}
         </div>
       </div>
 
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        <div className="rounded-xl bg-white p-3 shadow-sm">
-          <p className="text-sm text-slate-500">مفاد خالص این ماه</p>
-          <p className={`text-lg font-bold ${monthNet >= 0 ? 'text-teal-700' : 'text-red-600'}`}>{fmtMoney(monthNet)}</p>
-          <p className="text-xs text-slate-400">مصارف ماه: {fmtMoney(monthExpenses)}</p>
+      <section className="mb-4">
+        <h2 className="mb-2 text-lg font-bold text-slate-800">کارهای امروز</h2>
+        {!hasTasks && <div className="rounded-2xl bg-teal-50 p-3 text-sm font-bold text-teal-700">کار ضروری ثبت‌نشده ندارید.</div>}
+        <div className="space-y-2">
+          {pendingExpenseCount > 0 && (
+            <button onClick={() => goTo('expenses')} className="w-full rounded-2xl bg-amber-100 p-3 text-right text-amber-900">
+              <span className="block font-bold">{fmtNum(pendingExpenseCount)} مصرف روزانه ثبت نشده</span>
+              <span className="text-xs">برای ثبت، اینجا بزنید.</span>
+            </button>
+          )}
+          {lowStock.length > 0 && (
+            <button onClick={() => goTo('inventory')} className="w-full rounded-2xl bg-red-50 p-3 text-right text-red-700">
+              <span className="block font-bold">{fmtNum(lowStock.length)} جنس برای خرید مجدد</span>
+              <span className="text-xs">موجودی آن‌ها به حد تعیین‌شده رسیده است.</span>
+            </button>
+          )}
+          {debtCount > 0 && (
+            <button onClick={() => goTo('accounts')} className="w-full rounded-2xl bg-blue-50 p-3 text-right text-blue-800">
+              <span className="block font-bold">{fmtNum(debtCount)} مشتری قرضدار — {fmtMoney(debtTotal)}</span>
+              <span className="text-xs">{overdueCount > 0 ? `${fmtNum(overdueCount)} وعده گذشته است.` : 'حساب‌های مشتریان را ببینید.'}</span>
+            </button>
+          )}
         </div>
-        <div className="rounded-xl bg-white p-3 shadow-sm">
-          <p className="text-sm text-slate-500">مفاد خالص امسال</p>
-          <p className={`text-lg font-bold ${yearNet >= 0 ? 'text-teal-700' : 'text-red-600'}`}>{fmtMoney(yearNet)}</p>
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-slate-800">خلاصهٔ حساب</h2>
+          {!isStaff && (
+            <button onClick={() => goTo('reports')} className="text-sm font-bold text-teal-700">
+              راپور کامل
+            </button>
+          )}
         </div>
-        <button onClick={() => goTo('expenses')} className="rounded-xl bg-white p-3 text-right shadow-sm">
-          <p className="text-sm text-slate-500">{boxRows.length > 1 ? 'پول کل' : 'صندوق'}</p>
-          <p className="text-lg font-bold text-slate-800">{fmtMoney(cashBalance)}</p>
-          {boxRows.length > 1 &&
-            boxRows.map(([name, bal]) => (
-              <p key={name} className="text-xs text-slate-400">
-                {name}: {fmtMoney(bal)}
-              </p>
-            ))}
-        </button>
-        <button onClick={() => goTo('inventory')} className="rounded-xl bg-white p-3 text-right shadow-sm">
-          <p className="text-sm text-slate-500">موجودی گدام</p>
-          <p className="text-lg font-bold text-slate-800">{fmtNum(stockCount)} جوړه</p>
-          <p className="text-xs text-slate-400">ارزش: {fmtMoney(stockValue)}</p>
-        </button>
-        <button onClick={() => goTo('customers')} className="col-span-2 rounded-xl bg-white p-3 text-right shadow-sm">
-          <div className="flex justify-between">
-            <div>
-              <p className="text-sm text-slate-500">طلب از مشتریان</p>
-              <p className="text-lg font-bold text-red-600">{fmtMoney(receivable)}</p>
-            </div>
-            <div className="text-left">
-              <p className="text-sm text-slate-500">قرض ما به تأمین‌کنندگان</p>
-              <p className="text-lg font-bold text-amber-600">{fmtMoney(payable)}</p>
-              {loans > 0 && <p className="text-xs font-bold text-purple-700">قرض ما از اشخاص: {fmtMoney(loans)}</p>}
-              {suppCredit > 0 && <p className="text-xs font-bold text-teal-700">طلب ما (پیشکی): {fmtMoney(suppCredit)}</p>}
-              {unpaidLanding > 0 && <p className="text-xs font-bold text-amber-600">مصارف رسیدن پرداخت‌نشده: {fmtMoney(unpaidLanding)}</p>}
-            </div>
-          </div>
-        </button>
-      </div>
-
-      {overdue.length > 0 && (
-        <Card onClick={() => goTo('customers')}>
-          <p className="mb-2 font-bold text-red-600">⏰ وعده‌های گذشته ({fmtNum(overdue.length)})</p>
-          {overdue.slice(0, 5).map((c) => (
-            <div key={c.id} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
-              <span>
-                {c.name} <span className="text-slate-400">({fmtDateShort(c.promiseDate!)})</span>
-              </span>
-              <span className="font-bold text-red-600">{fmtMoney(c.balance)}</span>
-            </div>
-          ))}
-        </Card>
-      )}
-
-      {lowStock.length > 0 && (
-        <Card onClick={() => goTo('inventory')}>
-          <p className="mb-2 font-bold text-red-600">⚠️ موجودی کم</p>
-          {lowStock.slice(0, 8).map((info) => (
-            <div key={info.product.id} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
-              <span>{info.product.name}</span>
-              <span className="font-bold text-red-600">
-                {fmtNum(info.stockPairs)} جفت باقی · حد {fmtNum(info.reorderCartons)} کارتن
-              </span>
-            </div>
-          ))}
-        </Card>
-      )}
-
-      {outOfStockSizes.length > 0 && (
-        <Card onClick={() => goTo('inventory')}>
-          <p className="mb-2 font-bold text-amber-600">سایزهای تمام‌شده</p>
-          {outOfStockSizes.slice(0, 8).map(({ variant, product }) => (
-            <div key={variant.id} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
-              <span>{product!.name} — سایز {variant.size} {variant.color}</span>
-              <span className="font-bold text-amber-600">تمام</span>
-            </div>
-          ))}
-        </Card>
-      )}
-
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <button onClick={() => goTo('sales')} className="rounded-xl bg-teal-50 p-4 text-center font-bold text-teal-800">
-          🧾 فروش جدید
-        </button>
-        <button onClick={() => goTo('purchases')} className="rounded-xl bg-amber-50 p-4 text-center font-bold text-amber-800">
-          📦 خرید جدید
-        </button>
-      </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => goTo('accounts')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+            <span className="block text-sm text-slate-500">طلب از مشتریان</span>
+            <span className="block text-lg font-bold text-red-600">{fmtMoney(worth?.receivables ?? 0)}</span>
+          </button>
+          <button onClick={() => goTo('expenses')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+            <span className="block text-sm text-slate-500">صندوق</span>
+            <span className="block text-lg font-bold text-slate-800">{fmtMoney(worth?.cash ?? 0)}</span>
+          </button>
+          <button onClick={() => goTo('inventory')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+            <span className="block text-sm text-slate-500">موجودی گدام</span>
+            <span className="block text-lg font-bold text-teal-700">{fmtNum(worth?.pairs ?? 0)} جوړه</span>
+          </button>
+          <button onClick={() => goTo('accounts')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+            <span className="block text-sm text-slate-500">قرض ما</span>
+            <span className="block text-lg font-bold text-amber-700">{fmtMoney(worth?.payables ?? 0)}</span>
+          </button>
+        </div>
+      </section>
     </div>
   )
 }

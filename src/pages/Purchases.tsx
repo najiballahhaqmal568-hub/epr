@@ -3,7 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Purchase, type Supplier } from '../db'
 import { receivePurchase, payLanding, landingUnpaidOf } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
-import { Fab, Empty, Card } from '../components/ui'
+import { inputCls, Fab, Empty, Card } from '../components/ui'
+import { reorderProducts } from '../lib/reorder'
 import CandidatesView from './purchases/Candidates'
 import LandingCostModal from './purchases/LandingCostModal'
 import SupplierDetailModal from './purchases/SupplierDetailModal'
@@ -12,58 +13,183 @@ import { NewSupplierModal, PaySupplierModal } from './purchases/SupplierModals'
 import NewPurchaseModal from './purchases/NewPurchaseModal'
 import LendersView from './purchases/LendersView'
 
-export default function Purchases() {
-  const [view, setView] = useState<'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'>('history')
-  const [showNew, setShowNew] = useState(false)
+export type PurchaseView = 'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'
+type PurchaseFilter = 'all' | 'debt' | 'transit'
+
+export default function Purchases({
+  initialView = 'history',
+  openNew = false,
+  onBack,
+  onOpenReorder,
+  onOpenAccounts
+}: {
+  initialView?: PurchaseView
+  openNew?: boolean
+  onBack?: () => void
+  onOpenReorder?: () => void
+  onOpenAccounts?: () => void
+}) {
+  const [view, setView] = useState<PurchaseView>(initialView)
+  const [showNew, setShowNew] = useState(openNew)
   const [showNewSupplier, setShowNewSupplier] = useState<'supplier' | 'sarraf' | null>(null)
   const [payingSupplier, setPayingSupplier] = useState<number | null>(null)
   const [returningTo, setReturningTo] = useState<Supplier | null>(null)
   const [returningPurchase, setReturningPurchase] = useState<Purchase | null>(null)
   const [detail, setDetail] = useState<Supplier | null>(null)
   const [showLanding, setShowLanding] = useState(false)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<PurchaseFilter>('all')
+  const [showFilters, setShowFilters] = useState(false)
 
   const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
+  const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
+  const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner' && s.kind !== 'lender' && s.kind !== 'expenseCreditor')
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
+  const lenders = suppliers?.filter((s) => s.kind === 'lender')
+  const reorderCount = reorderProducts(products ?? [], variants ?? []).length
+  const vendorDebt = (vendors ?? []).reduce((sum, supplier) => sum + Math.max(0, supplier.balance), 0)
+  const lenderDebt = (lenders ?? []).reduce((sum, supplier) => sum + Math.max(0, supplier.balance), 0)
+
+  const shownPurchases = (purchases ?? []).filter((purchase) => {
+    const term = search.trim().toLowerCase()
+    const matchesSearch =
+      !term ||
+      `${purchase.supplierName} ${purchase.lines.map((line) => `${line.productName} ${line.size} ${line.color}`).join(' ')}`
+        .toLowerCase()
+        .includes(term)
+    if (!matchesSearch) return false
+    const remainder = purchase.total - purchase.paid - (purchase.sarrafAmount ?? 0)
+    if (filter === 'debt') return remainder > 0
+    if (filter === 'transit') return purchase.received === false
+    return true
+  })
 
   const tabCls = (v: string) =>
     `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
 
   return (
     <div className="p-4">
-      <h1 className="mb-3 text-xl font-bold text-slate-800">خرید</h1>
-      <div className="mb-3 flex gap-2">
-        <button onClick={() => setView('history')} className={tabCls('history')}>
-          خریدها
-        </button>
-        <button onClick={() => setView('suppliers')} className={tabCls('suppliers')}>
-          تأمین‌کنندگان
-        </button>
-        <button onClick={() => setView('sarrafs')} className={tabCls('sarrafs')}>
-          صراف‌ها
-        </button>
-        <button onClick={() => setView('lenders')} className={tabCls('lenders')}>
-          قرض‌دهنده‌ها
-        </button>
-        <button onClick={() => setView('candidates')} className={tabCls('candidates')}>
-          کاندیدها
-        </button>
-      </div>
+      {(view === 'history' || view === 'candidates') && (
+        <>
+          <h1 className="mb-3 text-xl font-bold text-slate-800">خرید</h1>
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <button onClick={onBack} className="rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700">
+              موجودی
+            </button>
+            <button onClick={() => setView('history')} className="rounded-xl bg-teal-700 py-2.5 text-sm font-bold text-white">
+              خرید
+            </button>
+            <button
+              onClick={onOpenReorder}
+              className={`rounded-xl py-2.5 text-sm font-bold ${reorderCount ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}
+            >
+              خرید مجدد {reorderCount > 0 && `(${fmtNum(reorderCount)})`}
+            </button>
+          </div>
+        </>
+      )}
 
-      {view === 'candidates' && <CandidatesView />}
+      {(view === 'suppliers' || view === 'sarrafs' || view === 'lenders') && (
+        <>
+          <div className="mb-3 flex items-center gap-2">
+            {onBack && (
+              <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600" aria-label="برگشت">
+                برگشت
+              </button>
+            )}
+            <h1 className="text-xl font-bold text-slate-800">حساب‌های خرید</h1>
+          </div>
+          <div className="mb-3 flex gap-2">
+            <button onClick={() => setView('suppliers')} className={tabCls('suppliers')}>تأمین‌کنندگان</button>
+            <button onClick={() => setView('sarrafs')} className={tabCls('sarrafs')}>صراف‌ها</button>
+            <button onClick={() => setView('lenders')} className={tabCls('lenders')}>قرض‌دهنده‌ها</button>
+          </div>
+        </>
+      )}
+
+      {view === 'candidates' && (
+        <>
+          <button onClick={() => setView('history')} className="mb-3 text-sm font-bold text-teal-700">
+            بازگشت به خریدهای اخیر
+          </button>
+          <CandidatesView />
+        </>
+      )}
       {view === 'lenders' && <LendersView />}
 
       {view === 'history' && (
         <>
           <button
-            onClick={() => setShowLanding(true)}
-            className="mb-3 w-full rounded-xl border-2 border-dashed border-amber-400 py-2.5 text-sm font-bold text-amber-700"
+            onClick={() => setShowNew(true)}
+            className="mb-3 w-full rounded-2xl bg-teal-700 py-4 text-lg font-bold text-white shadow-sm active:bg-teal-800"
           >
-            🚚 ثبت مصارف رسیدن (کرایه/حمالی/کمیشن)
+            ثبت خرید جدید
           </button>
-          {purchases?.length === 0 && <Empty text="هنوز خریدی ثبت نشده." />}
-          {purchases?.map((p) => {
+
+          {(vendorDebt > 0 || lenderDebt > 0) && (
+            <button
+              onClick={onOpenAccounts}
+              className="mb-3 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-right shadow-sm"
+            >
+              <span>
+                <span className="block text-xs text-slate-500">قرض خرید</span>
+                <span className="block text-xs font-bold text-teal-700">تأمین‌کنندگان و قرض‌دهندگان</span>
+              </span>
+              <span className="text-left">
+                <span className="block text-xl font-bold text-red-600">{fmtMoney(vendorDebt + lenderDebt)}</span>
+                <span className="text-xs text-slate-400">دیدن حساب‌ها</span>
+              </span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowLanding(true)}
+            className="mb-3 w-full rounded-xl border border-dashed border-amber-400 py-2.5 text-sm font-bold text-amber-700"
+          >
+            ثبت مصارف رسیدن (کرایه، حمالی یا کمیشن)
+          </button>
+
+          <div className="mb-2 flex gap-2">
+            <input
+              className={inputCls}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="جستجوی تأمین‌کننده یا جنس..."
+            />
+            <button
+              onClick={() => setShowFilters((value) => !value)}
+              aria-expanded={showFilters}
+              className={`shrink-0 rounded-xl px-4 text-sm font-bold ${showFilters ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'}`}
+            >
+              فلتر
+            </button>
+          </div>
+          {showFilters && (
+            <div className="mb-3 flex gap-2">
+              {([
+                ['all', 'همه'],
+                ['debt', 'قرض‌دار'],
+                ['transit', 'در راه']
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  onClick={() => setFilter(id)}
+                  className={`rounded-full px-4 py-1.5 text-xs font-bold ${filter === id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="mb-2 mt-4 flex items-center justify-between">
+            <h2 className="font-bold text-slate-800">خریدهای اخیر</h2>
+            <span className="text-xs text-slate-400">{fmtNum(shownPurchases.length)} خرید</span>
+          </div>
+          {shownPurchases.length === 0 && <Empty text={purchases?.length ? 'خریدی با این جستجو یا فلتر پیدا نشد.' : 'هنوز خریدی ثبت نشده.'} />}
+          {shownPurchases.map((p) => {
             const hawala = p.sarrafAmount ?? 0
             const remainder = p.total - p.paid - hawala
             const pending = p.received === false
@@ -116,7 +242,20 @@ export default function Purchases() {
               </Card>
             )
           })}
-          <Fab onClick={() => setShowNew(true)} label="خرید جدید" />
+          <div className="mt-3 grid grid-cols-2 gap-2 pb-2">
+            <button
+              onClick={() => {
+                setSearch('')
+                setFilter('all')
+              }}
+              className="rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700"
+            >
+              همهٔ خریدها
+            </button>
+            <button onClick={() => setView('candidates')} className="rounded-xl bg-slate-100 py-2.5 text-sm font-bold text-slate-700">
+              کاندیدهای خرید
+            </button>
+          </div>
         </>
       )}
 

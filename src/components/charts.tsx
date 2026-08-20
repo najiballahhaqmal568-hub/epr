@@ -87,14 +87,16 @@ export function SplitBar({
 /** ستون‌های عمودی کوچک — برای ماه‌به‌ماه */
 export function ColumnChart({
   rows,
-  fmt
+  fmt,
+  compact = false
 }: {
   rows: { label: string; value: number; second?: number }[]
   fmt: (n: number) => string
+  compact?: boolean
 }) {
   const max = Math.max(1, ...rows.map((r) => Math.max(r.value, r.second ?? 0)))
   return (
-    <div className="overflow-x-auto">
+    <div className={compact ? 'overflow-hidden' : 'overflow-x-auto'}>
       <div className="flex min-w-full items-end gap-1.5" style={{ height: 120 }}>
         {rows.map((r) => (
           <div key={r.label} className="flex min-w-[38px] flex-1 flex-col items-center justify-end gap-0.5">

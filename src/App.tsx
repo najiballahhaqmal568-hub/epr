@@ -6,10 +6,12 @@ import Reports from './pages/Reports'
 import Dashboard from './pages/Dashboard'
 import Sales from './pages/Sales'
 import Inventory from './pages/Inventory'
-import Purchases from './pages/Purchases'
+import Purchases, { type PurchaseView } from './pages/Purchases'
 import Customers from './pages/Customers'
 import Expenses from './pages/Expenses'
-import Settings from './pages/Settings'
+import Accounts from './pages/Accounts'
+import More from './pages/More'
+import Settings, { type SettingsSection } from './pages/Settings'
 import Login from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import { useExpenseReminder } from './lib/useExpenseReminder'
@@ -20,28 +22,82 @@ import { getSupa, getProfile, getServerConfig, isPasswordRecoveryUrl, type Profi
 import { startSync, syncNow } from './lib/sync'
 
 const tabs = [
-  { id: 'dashboard', label: 'داشبورد', icon: '🏠' },
-  { id: 'sales', label: 'فروش', icon: '🧾' },
-  { id: 'inventory', label: 'گدام', icon: '👞' },
-  { id: 'purchases', label: 'خرید', icon: '📦' },
-  { id: 'expenses', label: 'مصارف', icon: '💵' },
-  { id: 'customers', label: 'مشتریان', icon: '👥' }
+  { id: 'dashboard', label: 'خانه' },
+  { id: 'sales', label: 'فروش' },
+  { id: 'inventory', label: 'گدام' },
+  { id: 'accounts', label: 'حساب‌ها' },
+  { id: 'more', label: 'بیشتر' }
 ] as const
 
-type TabId = (typeof tabs)[number]['id'] | 'settings' | 'reports'
+type NavTabId = (typeof tabs)[number]['id']
+type TabId = NavTabId | 'purchases' | 'expenses' | 'customers' | 'settings' | 'reports'
 
 export default function App() {
+  const uiPreview = import.meta.env.DEV && new URLSearchParams(window.location.search).has('ui-preview')
   const [tab, setTab] = useState<TabId>('dashboard')
+  const [openNewSale, setOpenNewSale] = useState(false)
+  const [openNewPurchase, setOpenNewPurchase] = useState(false)
+  const [openNewExpense, setOpenNewExpense] = useState(false)
+  const [purchaseView, setPurchaseView] = useState<PurchaseView>('history')
+  const [purchaseBack, setPurchaseBack] = useState<'inventory' | 'accounts'>('inventory')
+  const [openInventoryReorder, setOpenInventoryReorder] = useState(false)
+  const [expensesBack, setExpensesBack] = useState<'dashboard' | 'accounts' | 'more'>('more')
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('all')
   const [unlocked, setUnlocked] = useState(false)
   const [pinError, setPinError] = useState('')
   // auth: 'none' = بدون سرور، 'anon' = سرور هست ولی وارد نشده
-  const [auth, setAuth] = useState<'loading' | 'none' | 'anon' | Profile>('loading')
+  const [auth, setAuth] = useState<'loading' | 'none' | 'anon' | Profile>(uiPreview ? 'none' : 'loading')
   // سشن سرور تمام شده ولی اپ باید باز بماند — دکان با انترنت کار نمی‌کند
   const [relogin, setRelogin] = useState(false)
   const [passwordRecovery, setPasswordRecovery] = useState(isPasswordRecoveryUrl)
   const reminder = useExpenseReminder()
   const debtReminder = useDebtReminder()
   const integrity = useIntegrityCheck()
+
+  const openPurchases = (view: PurchaseView, back: 'inventory' | 'accounts', startNew = false) => {
+    setPurchaseView(view)
+    setPurchaseBack(back)
+    setOpenNewPurchase(startNew)
+    setTab('purchases')
+  }
+
+  const goTo = (target: string) => {
+    if (target === 'sales-new') {
+      setOpenNewSale(true)
+      setTab('sales')
+      return
+    }
+    if (target === 'purchases-new') {
+      openPurchases('history', 'inventory', true)
+      return
+    }
+    if (target === 'expenses-new') {
+      setExpensesBack('dashboard')
+      setOpenNewExpense(true)
+      setTab('expenses')
+      return
+    }
+    if (target === 'purchases') {
+      openPurchases('history', 'inventory')
+      return
+    }
+    if (target === 'expenses') {
+      setExpensesBack('dashboard')
+      setOpenNewExpense(false)
+    }
+    setTab(target as TabId)
+  }
+
+  const activeNav: NavTabId =
+    tab === 'customers' ||
+    (tab === 'purchases' && purchaseBack === 'accounts') ||
+    (tab === 'expenses' && expensesBack === 'accounts')
+      ? 'accounts'
+      : tab === 'expenses' || tab === 'settings' || tab === 'reports'
+        ? 'more'
+        : tab === 'purchases'
+          ? 'inventory'
+          : tab
 
   const serverCfg = useLiveQuery(async () => Boolean(await getServerConfig()), [])
 
@@ -61,6 +117,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     async function check() {
+      if (uiPreview) return
       if (serverCfg === undefined || passwordRecovery) return
       if (!serverCfg) {
         setAuth('none')
@@ -124,7 +181,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [serverCfg, passwordRecovery])
+  }, [serverCfg, passwordRecovery, uiPreview])
 
   const cachedProfile = useLiveQuery(
     async () => ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null,
@@ -229,7 +286,7 @@ export default function App() {
           </button>
         </div>
       )}
-      {(reminder.show || debtReminder.show || integrity.show) && (
+      {(integrity.show || (tab !== 'dashboard' && (reminder.show || debtReminder.show))) && (
         <div className="pointer-events-none fixed right-0 left-0 bottom-36 z-50 mx-auto flex max-w-lg flex-col gap-2 px-3">
           {integrity.show && (
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-purple-700 p-3 text-white shadow-lg">
@@ -250,7 +307,7 @@ export default function App() {
               </button>
             </div>
           )}
-          {debtReminder.show && (
+          {tab !== 'dashboard' && debtReminder.show && (
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-red-600 p-3 text-white shadow-lg">
               <span className="flex-1 text-sm font-bold">
                 ⏰ {fmtNum(debtReminder.count)} مشتری قرضدار — {fmtMoney(debtReminder.total)}. امروز تقاضا کنید!
@@ -269,12 +326,13 @@ export default function App() {
               </button>
             </div>
           )}
-          {reminder.show && (
+          {tab !== 'dashboard' && reminder.show && (
             <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-amber-500 p-3 text-white shadow-lg">
               <span className="flex-1 text-sm font-bold">💵 {fmtNum(reminder.count)} مصرف روزانه ثبت نشده است!</span>
               <button
                 className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
                 onClick={() => {
+                  setExpensesBack('more')
                   setTab('expenses')
                 }}
               >
@@ -290,25 +348,84 @@ export default function App() {
       {readOnly && (
         <div className="bg-purple-600 px-4 py-1.5 text-center text-xs font-bold text-white">👁️ حالت فقط مشاهده (شریک) — تغییر ارقام ممکن نیست</div>
       )}
-      {tab === 'dashboard' && <Dashboard goTo={(t) => setTab(t as TabId)} isStaff={isStaff} />}
-      {tab === 'sales' && <Sales isStaff={isStaff} />}
-      {tab === 'inventory' && <Inventory />}
-      {tab === 'purchases' && <Purchases />}
-      {tab === 'expenses' && <Expenses />}
-      {tab === 'customers' && <Customers />}
-      {tab === 'settings' && <Settings onBack={() => setTab('dashboard')} isStaff={isStaff || readOnly} onLogout={() => setAuth('anon')} />}
-      {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('dashboard')} />}
+      {tab === 'dashboard' && (
+        <Dashboard
+          goTo={goTo}
+          isStaff={isStaff}
+          pendingExpenseCount={reminder.show ? reminder.count : 0}
+          debtCount={debtReminder.show ? debtReminder.count : 0}
+          debtTotal={debtReminder.show ? debtReminder.total : 0}
+        />
+      )}
+      {tab === 'sales' && <Sales isStaff={isStaff} openNew={openNewSale} />}
+      {tab === 'inventory' && (
+        <Inventory
+          onOpenPurchases={() => openPurchases('history', 'inventory')}
+          openReorder={openInventoryReorder}
+          onReorderClosed={() => setOpenInventoryReorder(false)}
+        />
+      )}
+      {tab === 'accounts' && (
+        <Accounts
+          openCustomers={() => setTab('customers')}
+          openPurchases={(view) => openPurchases(view, 'accounts')}
+          openExpenses={() => {
+            setExpensesBack('accounts')
+            setOpenNewExpense(false)
+            setTab('expenses')
+          }}
+        />
+      )}
+      {tab === 'more' && (
+        <More
+          isStaff={isStaff}
+          goTo={(target) => {
+            if (target === 'expenses') {
+              setExpensesBack('more')
+              setOpenNewExpense(false)
+              setTab('expenses')
+              return
+            }
+            if (target === 'reports') {
+              setTab('reports')
+              return
+            }
+            setSettingsSection(target.slice('settings:'.length) as SettingsSection)
+            setTab('settings')
+          }}
+        />
+      )}
+      {tab === 'purchases' && (
+        <Purchases
+          initialView={purchaseView}
+          openNew={openNewPurchase}
+          onBack={() => setTab(purchaseBack)}
+          onOpenReorder={() => {
+            setOpenInventoryReorder(true)
+            setTab('inventory')
+          }}
+          onOpenAccounts={() => setTab('accounts')}
+        />
+      )}
+      {tab === 'expenses' && <Expenses openNew={openNewExpense} onBack={() => setTab(expensesBack)} />}
+      {tab === 'customers' && <Customers onBack={() => setTab('accounts')} />}
+      {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => setAuth('anon')} />}
+      {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('more')} />}
 
       <nav className="fixed bottom-0 right-0 left-0 z-40 mx-auto flex max-w-lg border-t border-slate-200 bg-white">
         {tabs.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex flex-1 flex-col items-center py-2 text-[11px] ${
-              tab === t.id ? 'font-bold text-teal-700' : 'text-slate-500'
+            aria-current={activeNav === t.id ? 'page' : undefined}
+            onClick={() => {
+              if (t.id === 'sales') setOpenNewSale(false)
+              setTab(t.id)
+            }}
+            onPointerUp={(event) => event.currentTarget.blur()}
+            className={`m-1 flex min-h-12 flex-1 items-center justify-center rounded-2xl px-1 py-2 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 focus-visible:ring-offset-2 ${
+              activeNav === t.id ? 'bg-teal-50 font-bold text-teal-800' : 'text-slate-500'
             }`}
           >
-            <span className="text-lg leading-6">{t.icon}</span>
             {t.label}
           </button>
         ))}

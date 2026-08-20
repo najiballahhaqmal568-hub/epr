@@ -18,7 +18,7 @@ const SORTS: { id: SortKey; label: string }[] = [
   { id: 'quiet', label: 'دیر آمده' }
 ]
 
-export default function Customers() {
+export default function Customers({ onBack }: { onBack?: () => void }) {
   const [view, setView] = useState<'retail' | 'wholesale'>('retail')
   const [showNew, setShowNew] = useState(false)
   const [selected, setSelected] = useState<Customer | null>(null)
@@ -150,7 +150,14 @@ export default function Customers() {
 
   return (
     <div className="p-4">
-      <h1 className="mb-3 text-xl font-bold text-slate-800">مشتریان</h1>
+      <div className="mb-3 flex items-center gap-2">
+        {onBack && (
+          <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600" aria-label="برگشت">
+            برگشت
+          </button>
+        )}
+        <h1 className="text-xl font-bold text-slate-800">مشتریان</h1>
+      </div>
       <div className="mb-3 flex gap-2">
         <button onClick={() => setView('retail')} className={tabCls('retail')}>
           دفتر پرچون

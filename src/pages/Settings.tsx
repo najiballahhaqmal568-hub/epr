@@ -11,19 +11,34 @@ import ReminderCard from './settings/ReminderCard'
 import IntegrityCard from './settings/IntegrityCard'
 import YearStartCard from './settings/YearStartCard'
 
+export type SettingsSection = 'all' | 'account' | 'backup' | 'reminders' | 'app' | 'year' | 'integrity' | 'danger'
+
 export default function Settings({
   onBack,
   isStaff,
-  onLogout
+  onLogout,
+  section = 'all'
 }: {
   onBack?: () => void
   isStaff?: boolean
   onLogout?: () => void
+  section?: SettingsSection
 }) {
   const mergeFileRef = useRef<HTMLInputElement>(null)
   const replaceFileRef = useRef<HTMLInputElement>(null)
   const [msg, setMsg] = useState('')
   const [restoreBusy, setRestoreBusy] = useState(false)
+  const show = (...sections: SettingsSection[]) => section === 'all' || sections.includes(section)
+  const titles: Record<SettingsSection, string> = {
+    all: 'تنظیمات',
+    account: 'همگام‌سازی و حساب کاربری',
+    backup: 'بکاپ و بازیابی',
+    reminders: 'یادآوری‌ها',
+    app: 'تنظیمات اپ',
+    year: 'شروع سال مالی',
+    integrity: 'کنترل حساب‌ها',
+    danger: 'منطقهٔ خطر'
+  }
 
   function downloadJson(json: string, filename: string) {
     const blob = new Blob([json], { type: 'application/json' })
@@ -86,21 +101,21 @@ export default function Settings({
       <div className="mb-3 flex items-center gap-2">
         {onBack && (
           <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
-            →
+            برگشت
           </button>
         )}
-        <h1 className="text-xl font-bold text-slate-800">تنظیمات</h1>
+        <h1 className="text-xl font-bold text-slate-800">{titles[section]}</h1>
       </div>
 
-      <AccountCard isStaff={isStaff} onLogout={onLogout} />
-      <FontSizeCard />
-      {!isStaff && <ServerCard />}
-      <ReminderCard />
-      {!isStaff && <YearStartCard />}
-      {!isStaff && <IntegrityCard />}
-      {!isStaff && <PinCard />}
+      {show('account') && <AccountCard isStaff={isStaff} onLogout={onLogout} />}
+      {show('account') && !isStaff && <ServerCard />}
+      {show('reminders') && <ReminderCard />}
+      {show('app') && <FontSizeCard />}
+      {show('app') && !isStaff && <PinCard />}
+      {show('year') && !isStaff && <YearStartCard />}
+      {show('integrity') && !isStaff && <IntegrityCard />}
 
-      {!isStaff && (
+      {show('backup') && !isStaff && (
         <>
           <Card>
             <p className="mb-1 font-bold text-slate-800">بکاپ اطلاعات</p>
@@ -161,7 +176,7 @@ export default function Settings({
         </>
       )}
 
-      {!isStaff && <DangerCard />}
+      {show('danger') && !isStaff && <DangerCard />}
 
       {msg && <p className="mt-3 rounded-xl bg-white p-3 text-sm">{msg}</p>}
 

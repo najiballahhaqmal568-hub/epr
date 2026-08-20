@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../../db'
 import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
-import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
+import { fmtMoney, fmtDate, fmtDateShort, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
@@ -41,44 +41,54 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   const mismatch = Math.abs(ledgerEnd - c.balance) > 0.5
 
   return (
-    <Modal title={c.name} onClose={onClose}>
-      <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
-        <p className="text-sm text-slate-500">{c.balance > 0 ? 'قرض مشتری' : c.balance < 0 ? 'بستانکاری مشتری' : 'حساب تصفیه است'}</p>
-        <p className={`text-2xl font-bold ${c.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(c.balance))}</p>
+    <Modal title={`حساب ${c.name}`} onClose={onClose}>
+      <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white shadow-sm">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-sm text-teal-100">{c.balance > 0 ? 'قرض مشتری به دکان' : c.balance < 0 ? 'طلب مشتری از دکان' : 'حساب تصفیه است'}</p>
+            <p className="mt-1 text-2xl font-bold">{fmtMoney(Math.abs(c.balance))}</p>
+          </div>
+          {c.promiseDate && c.balance > 0 && (
+            <div className="rounded-xl bg-white/15 px-3 py-2 text-left">
+              <p className="text-[11px] text-teal-100">وعدهٔ پرداخت</p>
+              <p className="text-sm font-bold">{fmtDateShort(c.promiseDate)}</p>
+            </div>
+          )}
+        </div>
         {c.bookPage?.trim() && (
-          <p className="mt-1 text-xs font-bold text-slate-500">
+          <p className="mt-2 text-xs font-bold text-teal-100">
             📖 دفتر {(c.type ?? 'retail') === 'retail' ? 'پرچون' : 'عمده'} — آخرین صفحه: {c.bookPage.trim()}
           </p>
         )}
       </div>
 
       {pages.some((p) => p.page) && (
-        <div className="mb-3 rounded-xl border border-slate-200 p-3">
-          <p className="mb-2 text-sm font-bold text-slate-700">📖 قرض هر صفحهٔ دفتر</p>
-          {pages.map((p) => (
-            <div key={p.page ?? '—'} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
-              <span className={p.page ? 'text-slate-700' : 'text-amber-700'}>
-                {p.page ? `صفحهٔ ${p.page}` : 'بی‌صفحه'}
-              </span>
-              <span className={`font-bold ${p.total > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(p.total)}</span>
+        <details className="mb-3 rounded-xl border border-slate-200 bg-white p-3">
+          <summary className="cursor-pointer text-sm font-bold text-slate-700">📖 دیدن قرض هر صفحهٔ دفتر</summary>
+          <div className="mt-2 border-t border-slate-100 pt-2">
+            {pages.map((p) => (
+              <div key={p.page ?? '—'} className="flex justify-between border-b border-slate-100 py-1 text-sm last:border-0">
+                <span className={p.page ? 'text-slate-700' : 'text-amber-700'}>{p.page ? `صفحهٔ ${p.page}` : 'بی‌صفحه'}</span>
+                <span className={`font-bold ${p.total > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(p.total)}</span>
+              </div>
+            ))}
+            <div className="mt-1 flex justify-between border-t border-slate-200 pt-1 text-sm">
+              <span className="font-bold text-slate-500">مجموع</span>
+              <span className="font-bold text-slate-800">{fmtMoney(pages.reduce((s, p) => s + p.total, 0))}</span>
             </div>
-          ))}
-          <div className="mt-1 flex justify-between border-t border-slate-200 pt-1 text-sm">
-            <span className="font-bold text-slate-500">مجموع</span>
-            <span className="font-bold text-slate-800">{fmtMoney(pages.reduce((s, p) => s + p.total, 0))}</span>
           </div>
-        </div>
+        </details>
       )}
 
-      <div className="mb-4 flex gap-2">
-        <button className="flex-1 rounded-xl bg-teal-700 py-2 font-bold text-white" onClick={() => setShowPay(true)}>
-          دریافت پول
+      <div className="mb-4 grid grid-cols-3 gap-2">
+        <button className="rounded-xl bg-teal-50 px-2 py-3 font-bold text-teal-800" onClick={() => setShowPay(true)}>
+          <span className="text-xs">دریافت پول</span>
         </button>
-        <button className="flex-1 rounded-xl bg-amber-100 py-2 font-bold text-amber-800" onClick={() => setShowDebt(true)}>
-          قرض قبلی
+        <button className="rounded-xl bg-amber-50 px-2 py-3 font-bold text-amber-800" onClick={() => setShowDebt(true)}>
+          <span className="text-xs">قرض قبلی</span>
         </button>
-        <button className="flex-1 rounded-xl bg-slate-100 py-2 font-bold text-slate-700" onClick={() => setShowEdit(true)}>
-          ویرایش
+        <button className="rounded-xl bg-slate-100 px-2 py-3 font-bold text-slate-700" onClick={() => setShowEdit(true)}>
+          <span className="text-xs">ویرایش حساب</span>
         </button>
       </div>
 
@@ -138,9 +148,9 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         </div>
       )}
 
-      <div className="mb-2 flex items-baseline justify-between">
-        <p className="font-bold text-slate-700">دفتر حساب — این عدد از کجا آمد</p>
-        <span className="text-xs text-slate-400">قرض بعد از هر سند</span>
+      <div className="mb-2 flex items-baseline justify-between border-t border-slate-100 pt-3">
+        <p className="font-bold text-slate-800">دفتر حساب</p>
+        <span className="text-xs text-slate-400">تازه‌ترین سند اول</span>
       </div>
       {mismatch && (
         <p className="mb-2 rounded-xl bg-amber-50 p-2 text-xs font-bold text-amber-800">
@@ -148,7 +158,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         </p>
       )}
       {[...ledger].reverse().map((r) => (
-        <div key={r.key} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
+        <div key={r.key} className="mb-2 rounded-xl border border-slate-100 bg-white p-3 text-sm shadow-sm">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               {/* بوت اول می‌آید — «از بابت چه قرضدار است» */}
@@ -176,7 +186,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                 {r.delta > 0 ? '+' : '−'}
                 {fmtMoney(Math.abs(r.delta))}
               </p>
-              <p className="text-xs text-slate-500">قرض شد: {fmtMoney(r.balance)}</p>
+              <p className="text-xs text-slate-500">مانده: {fmtMoney(r.balance)}</p>
               {/* فقط سندهای دستی (دریافت پول و قرض قبلی) — فروش و مرجوعی از راه خودشان پاک می‌شوند */}
               {r.source?.table === 'payments' && (
                 <button

@@ -71,6 +71,7 @@ import { addPartner, startYear, settleYear, listPartners, totalCapital, remainin
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
 import { dailyExpenseItems, dailyReminderItems, setShopClosed } from '../src/lib/dailyExpenses'
 import { productReorderInfo } from '../src/lib/reorder'
+import { deleteSaleDraft, readSaleDrafts, saleDraftTotal, saveSaleDraft } from '../src/lib/saleDrafts'
 
 // ── ابزار آزمایش ────────────────────────────────────────────────
 type Check = { name: string; ok: boolean; got: unknown; want: unknown }
@@ -202,6 +203,37 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'فروش معطل — فقط پیش‌نویس محلی است و هیچ اثر مالی ندارد',
+    run: async () => {
+      localStorage.removeItem('epr_sale_drafts_v1')
+      const input = {
+        saleType: 'retail' as const,
+        customerId: undefined,
+        lines: [{ variantId: 7, productName: 'بوت ساده', size: '42', color: 'سیاه', qty: 2, unitPrice: 900 }],
+        paidStr: '',
+        paidTouched: false,
+        discountStr: '۱۰۰',
+        promise: '',
+        bookPage: ''
+      }
+
+      const first = saveSaleDraft(input)
+      eq('یک پیش‌نویس ذخیره شد', readSaleDrafts().length, 1)
+      eq('مجموع با تخفیف فارسی درست است', saleDraftTotal(first), 1700)
+      eq('هیچ فروش واقعی ساخته نشد', await db.sales.count(), 0)
+      eq('هیچ سند صندوق ساخته نشد', await db.cashMovements.count(), 0)
+
+      const updated = saveSaleDraft({ ...input, lines: [{ ...input.lines[0], qty: 3 }] }, first)
+      is('ویرایش همان شناسه را نگه می‌دارد', updated.id, first.id)
+      eq('ویرایش پیش‌نویس تکثیر نمی‌شود', readSaleDrafts().length, 1)
+      eq('مجموع ویرایش‌شده درست است', saleDraftTotal(updated), 2600)
+
+      deleteSaleDraft(first.id)
+      eq('حذف محلی پیش‌نویس کار می‌کند', readSaleDrafts().length, 0)
+      eq('بعد از حذف هم فروش واقعی ساخته نشد', await db.sales.count(), 0)
+    }
+  },
   {
     name: 'حد خرید کارتنی — همهٔ رنگ‌ها و سایزهای یک جنس یکجا حساب شود',
     run: async () => {

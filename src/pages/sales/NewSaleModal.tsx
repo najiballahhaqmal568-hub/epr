@@ -3,20 +3,32 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
 import { addSale } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
+import { saveSaleDraft, type SaleDraft } from '../../lib/saleDrafts'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
-export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSaved?: (sale: Sale) => void }) {
-  const [saleType, setSaleType] = useState<'retail' | 'wholesale'>('retail')
-  const [customerId, setCustomerId] = useState<number | ''>('')
+export function NewSaleModal({
+  onClose,
+  onSaved,
+  onHeld,
+  draft
+}: {
+  onClose: () => void
+  onSaved?: (sale: Sale) => void
+  onHeld?: (draft: SaleDraft) => void
+  draft?: SaleDraft
+}) {
+  const [saleType, setSaleType] = useState<'retail' | 'wholesale'>(draft?.saleType ?? 'retail')
+  const [customerId, setCustomerId] = useState<number | ''>(draft?.customerId ?? '')
   const [custSearch, setCustSearch] = useState('')
   const [showCust, setShowCust] = useState(false)
-  const [lines, setLines] = useState<SaleLine[]>([])
-  const [paidStr, setPaidStr] = useState('')
-  const [paidTouched, setPaidTouched] = useState(false)
-  const [discountStr, setDiscountStr] = useState('')
-  const [promise, setPromise] = useState('')
+  const [lines, setLines] = useState<SaleLine[]>(draft?.lines ?? [])
+  const [paidStr, setPaidStr] = useState(draft?.paidStr ?? '')
+  const [paidTouched, setPaidTouched] = useState(draft?.paidTouched ?? false)
+  const [discountStr, setDiscountStr] = useState(draft?.discountStr ?? '')
+  const [showDiscount, setShowDiscount] = useState(Boolean(draft?.discountStr))
+  const [promise, setPromise] = useState(draft?.promise ?? '')
   // صفحهٔ دفتر فزیکی — با انتخاب مشتری، صفحهٔ فعلی خودش پیشنهاد می‌شود
-  const [bookPage, setBookPage] = useState('')
+  const [bookPage, setBookPage] = useState(draft?.bookPage ?? '')
   const [pageTouched, setPageTouched] = useState(false)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
@@ -148,6 +160,29 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
     setSearch('')
   }
 
+  function hold() {
+    if (!lines.length) return setError('برای معطل‌کردن، حداقل یک جنس انتخاب کنید')
+    try {
+      const held = saveSaleDraft(
+        {
+          saleType,
+          customerId: customerId || undefined,
+          lines,
+          paidStr,
+          paidTouched,
+          discountStr,
+          promise,
+          bookPage
+        },
+        draft
+      )
+      onHeld?.(held)
+      onClose()
+    } catch {
+      setError('پیش‌نویس در این دستگاه ذخیره نشد؛ فضای مرورگر را بررسی کنید')
+    }
+  }
+
   async function save() {
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
     if (remainder > 0 && !customerId) {
@@ -169,7 +204,8 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
       bookPage: remainder > 0 && bookPage.trim() ? bookPage.trim() : undefined
     }
     try {
-      await addSale(sale)
+      const id = await addSale(sale)
+      sale.id = id
       // صفحهٔ فعلیِ مشتری همان صفحه‌ای می‌شود که تازه در آن نوشتیم،
       // تا فروش بعدی خودش همان را پیشنهاد کند
       if (sale.bookPage && customer?.id && customer.bookPage?.trim() !== sale.bookPage) {
@@ -406,9 +442,27 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
           <span>مجموع اجناس</span>
           <span>{fmtMoney(subtotal)}</span>
         </div>
-        <Field label="تخفیف (اختیاری)">
-          <input className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
-        </Field>
+        {showDiscount ? (
+          <Field label="تخفیف (اختیاری)">
+            <div className="flex gap-2">
+              <input className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
+              <button
+                type="button"
+                className="shrink-0 rounded-xl bg-white px-3 text-sm font-bold text-slate-500"
+                onClick={() => {
+                  setDiscountStr('')
+                  setShowDiscount(false)
+                }}
+              >
+                حذف
+              </button>
+            </div>
+          </Field>
+        ) : (
+          <button type="button" onClick={() => setShowDiscount(true)} className="my-2 text-sm font-bold text-teal-700">
+            ＋ افزودن تخفیف
+          </button>
+        )}
         <div className="flex items-center justify-between font-bold text-slate-800">
           <span>قابل پرداخت{discount > 0 ? ` (با ${fmtMoney(discount)} تخفیف)` : ''}</span>
           <span className="text-xl">{fmtMoney(total)}</span>
@@ -450,16 +504,23 @@ export function NewSaleModal({ onClose, onSaved }: { onClose: () => void; onSave
       </div>
 
       {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
-      <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-3 border-t border-slate-200 bg-white p-3 pb-4">
+      <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">قابل پرداخت</p>
           <p className="text-2xl font-bold text-teal-700">{fmtMoney(total)}</p>
           {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
         </div>
         <button
+          onClick={hold}
+          disabled={!lines.length}
+          className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800 active:bg-amber-100 disabled:opacity-40"
+        >
+          ⏸ معطل
+        </button>
+        <button
           onClick={save}
           disabled={!lines.length}
-          className="rounded-xl bg-teal-700 px-8 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
+          className="rounded-xl bg-teal-700 px-5 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
         >
           ثبت فروش
         </button>

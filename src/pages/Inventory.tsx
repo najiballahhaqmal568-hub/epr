@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Product, type Variant } from '../db'
 import { fmtNum, fmtMoney, ageLabel } from '../lib/format'
@@ -25,7 +25,15 @@ const SORTS: { id: SortKey; label: string }[] = [
 
 /** عکس را کوچک می‌کند تا دیتابیس و بکاپ سنگین نشود */
 
-export default function Inventory() {
+export default function Inventory({
+  onOpenPurchases,
+  openReorder = false,
+  onReorderClosed
+}: {
+  onOpenPurchases?: () => void
+  openReorder?: boolean
+  onReorderClosed?: () => void
+}) {
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Product | 'new' | null>(null)
   const [showWizard, setShowWizard] = useState(false)
@@ -33,13 +41,19 @@ export default function Inventory() {
   const [showReorder, setShowReorder] = useState(false)
   const [showStocktake, setShowStocktake] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
+  const [showTools, setShowTools] = useState(false)
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null)
   const [draft, setDraft] = useState<ProductDraft | null>(null)
   // چیدمان انتخابی یادش می‌ماند تا هر بار دوباره انتخاب نشود
-  const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('stockSort') as SortKey) || 'name')
+  const [sort, setSort] = useState<SortKey>(() => (localStorage.getItem('stockSort') as SortKey) || 'newest')
   const chooseSort = (k: SortKey) => {
     setSort(k)
     localStorage.setItem('stockSort', k)
   }
+
+  useEffect(() => {
+    if (openReorder) setShowReorder(true)
+  }, [openReorder])
 
   const products = useLiveQuery(() => db.products.orderBy('name').filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
@@ -93,15 +107,11 @@ export default function Inventory() {
   const reorderCount = reorderProducts(products ?? [], variants ?? []).length
   // ارزش کل گدام — همان عددی که در راپورها و ویزارد شروع سال می‌آید
   const valueOf = (list: Variant[]) => list.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
-  // وقتی جستجو فعال است، مجموع همان چیزی است که در فهرست دیده می‌شود —
-  // وگرنه آدم عددِ کلِ گدام را با چند جنسِ فلترشده مقایسه می‌کند و گیج می‌شود
-  const shownIds = new Set((filtered ?? []).map((p) => p.id!))
-  const shownVariants = (variants ?? []).filter((v) => shownIds.has(v.productId))
   const searching = search.trim().length > 0
-  const totalValue = valueOf(shownVariants)
-  const totalPairs = shownVariants.reduce((s, v) => s + v.stockQty, 0)
+  const totalValue = valueOf(variants ?? [])
+  const totalPairs = (variants ?? []).reduce((s, v) => s + v.stockQty, 0)
   // موجودی دارد ولی قیمت خرید ندارد → در ارزش گدام و در مفاد اصلاً حساب نمی‌شود
-  const noPrice = shownVariants.filter((v) => v.stockQty > 0 && v.purchasePrice <= 0)
+  const noPrice = (variants ?? []).filter((v) => v.stockQty > 0 && v.purchasePrice <= 0)
   const noPriceIds = new Set(noPrice.map((v) => v.productId))
   const noPricePairs = noPrice.reduce((s, v) => s + v.stockQty, 0)
   // یک جنس که چند بار ثبت شده (کارتنی/جوړه‌ای/بوجی) — باید یکجا شود
@@ -110,42 +120,76 @@ export default function Inventory() {
 
   return (
     <div className="p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-800">گدام</h1>
-        <div className="flex gap-2">
+      <h1 className="mb-3 text-xl font-bold text-slate-800">گدام</h1>
+
+      <section className="mb-3 rounded-3xl bg-teal-800 p-5 text-white shadow-sm">
+        <p className="text-sm text-teal-100">موجودی گدام</p>
+        <p className="mt-1 text-3xl font-bold">{fmtNum(totalPairs)} جوړه</p>
+        <p className="mt-1 text-sm text-teal-100">ارزش به قیمت خرید: {fmtMoney(totalValue)}</p>
+        {noPricePairs > 0 && <p className="mt-1 text-xs font-bold text-amber-200">{fmtNum(noPricePairs)} جوړه هنوز قیمت خرید ندارد</p>}
+      </section>
+
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        <button className="rounded-xl bg-teal-700 py-2.5 text-sm font-bold text-white">موجودی</button>
+        <button
+          onClick={onOpenPurchases}
+          disabled={!onOpenPurchases}
+          className="rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700 disabled:opacity-50"
+        >
+          خرید
+        </button>
+        <button
+          onClick={() => setShowReorder(true)}
+          className={`rounded-xl py-2.5 text-sm font-bold ${reorderCount ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}
+        >
+          خرید مجدد {reorderCount > 0 && `(${fmtNum(reorderCount)})`}
+        </button>
+      </div>
+
+      <div className="mb-2 flex gap-2">
+        <input
+          className={inputCls}
+          placeholder="جستجو نام، برند یا کود..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button
+          onClick={() => setShowTools((value) => !value)}
+          aria-expanded={showTools}
+          className={`shrink-0 rounded-xl px-4 text-sm font-bold ${showTools ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'}`}
+        >
+          ابزارها
+        </button>
+      </div>
+
+      {showTools && (
+        <section className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <p className="mb-2 text-sm font-bold text-slate-700">ابزارهای گدام</p>
+          <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowStocktake(true)} className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-800">
-            📋 شمارش
+            شمارش موجودی
           </button>
           {/* همیشه در دسترس — چون نام‌های کاملاً متفاوت خودکار پیدا نمی‌شوند */}
           <button onClick={() => setShowMerge(true)} className="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-600">
-            🔗 یکجا کردن
+            یکجا کردن جنس تکراری
           </button>
-          <button onClick={() => setShowReorder(true)} className={`rounded-full px-3 py-1 text-sm font-bold ${reorderCount ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
-            خرید مجدد {reorderCount > 0 && `(${fmtNum(reorderCount)})`}
-          </button>
-        </div>
-      </div>
-      <input
-        className={inputCls}
-        placeholder="جستجو نام، برند یا کود..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-
-      <div className="mt-2 flex gap-1 overflow-x-auto pb-1">
-        <span className="shrink-0 self-center text-xs text-slate-400">چیدمان:</span>
-        {SORTS.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => chooseSort(o.id)}
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
-              sort === o.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+          </div>
+          <p className="mb-1 mt-3 text-xs font-bold text-slate-500">چیدمان فهرست</p>
+          <div className="flex gap-1 overflow-x-auto pb-1">
+            {SORTS.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => chooseSort(o.id)}
+                className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                  sort === o.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {dupGroups.length > 0 && (
         <button
@@ -175,20 +219,11 @@ export default function Inventory() {
         </div>
       )}
 
-      {totalPairs > 0 && (
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-800 p-3 text-white">
-          <span className="text-sm opacity-80">{searching ? 'مجموع آنچه پیدا شد' : 'مجموع گدام'}</span>
-          <span className="text-left">
-            <span className="text-lg font-bold">{fmtMoney(totalValue)}</span>
-            <span className="block text-xs opacity-80">
-              {fmtNum(totalPairs)} جوړه · به قیمت خرید
-              {noPricePairs > 0 && ` (${fmtNum(noPricePairs)} جوړه بی‌قیمت شمرده نشده)`}
-            </span>
-          </span>
-        </div>
-      )}
-
       <div className="mt-3">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="font-bold text-slate-800">{searching ? 'نتیجهٔ جستجو' : 'موجودی اخیر'}</h2>
+          <span className="text-xs text-slate-400">{fmtNum(sorted.length)} جنس</span>
+        </div>
         {sorted.length === 0 && <Empty text="هنوز جنسی ثبت نشده. با دکمه + بوت جدید اضافه کنید." />}
         {sorted.map((p) => {
           const vs = byProduct.get(p.id!) ?? []
@@ -199,13 +234,13 @@ export default function Inventory() {
           const low = reorder.needsReorder
           return (
             <Card key={p.id}>
-              <div className="flex items-center gap-3" onClick={() => setEditing(p)}>
-                {p.photo ? (
-                  <img src={p.photo} alt="" className="h-12 w-12 rounded-lg object-cover" />
-                ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-xl">👞</div>
-                )}
-                <div className="flex-1">
+              <button
+                type="button"
+                onClick={() => setExpandedProductId((id) => (id === p.id ? null : p.id!))}
+                className="flex w-full items-center gap-3 text-right"
+                aria-expanded={expandedProductId === p.id}
+              >
+                <div className="min-w-0 flex-1">
                   <p className="font-bold text-slate-800">
                     {p.name}
                     {dupIds.has(p.id!) && <span className="mr-1 text-xs font-normal text-amber-600">🔗 تکراری</span>}
@@ -214,8 +249,8 @@ export default function Inventory() {
                     {p.brand} {p.category && `· ${p.category}`}
                   </p>
                 </div>
-                <div className="text-left">
-                  <p className={`font-bold ${low ? 'text-red-600' : 'text-teal-700'}`}>{fmtNum(totalStock)} جوړه</p>
+                <div className="shrink-0 text-left">
+                  <p className="font-bold text-teal-700">{fmtNum(totalStock)} جوړه</p>
                   {vs.some((v) => v.stockQty > 0 && v.purchasePrice <= 0) ? (
                     <p className="text-xs font-bold text-red-600">⚠️ قیمت خرید ندارد</p>
                   ) : (
@@ -243,21 +278,28 @@ export default function Inventory() {
                     ) : null
                   })()}
                 </div>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {vs.map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => setAdjusting({ v, p })}
-                    className={`rounded-lg px-2 py-0.5 text-xs ${
-                      v.stockQty <= 0 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {v.size} {v.color} : {fmtNum(v.stockQty)}
-                    {v.stockQty <= 0 ? ' · تمام' : ''}
+              </button>
+              {expandedProductId === p.id && (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <div className="flex flex-wrap gap-1">
+                    {vs.map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={() => setAdjusting({ v, p })}
+                        className={`rounded-lg px-2 py-1 text-xs ${
+                          v.stockQty <= 0 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {v.size} {v.color}: {fmtNum(v.stockQty)}
+                        {v.stockQty <= 0 ? ' · تمام' : ''}
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setEditing(p)} className="mt-2 text-sm font-bold text-teal-700">
+                    ویرایش مشخصات جنس
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
             </Card>
           )
         })}
@@ -287,7 +329,14 @@ export default function Inventory() {
         />
       )}
       {adjusting && <AdjustModal variant={adjusting.v} product={adjusting.p} onClose={() => setAdjusting(null)} />}
-      {showReorder && <ReorderModal onClose={() => setShowReorder(false)} />}
+      {showReorder && (
+        <ReorderModal
+          onClose={() => {
+            setShowReorder(false)
+            onReorderClosed?.()
+          }}
+        />
+      )}
       {showStocktake && <StocktakeModal onClose={() => setShowStocktake(false)} />}
       {showMerge && <MergeProductsModal onClose={() => setShowMerge(false)} />}
     </div>
