@@ -332,6 +332,73 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
   })
 }
 
+/**
+ * اصلاح قیمت‌های یک فاکتور خرید.
+ *
+ * تعداد گدام و پول پرداخت‌شده دست‌نخورده می‌ماند؛ مجموع فاکتور، قرض
+ * تأمین‌کننده و قیمت تمام‌شده از روی قیمت‌های درست دوباره ساخته می‌شود.
+ * اگر بعد از ورود این خرید از همان جنس فروش شده باشد، اصلاح رد می‌شود چون
+ * قیمت خریدِ ثبت‌شده در فاکتور فروش باید جداگانه قابل توضیح بماند.
+ */
+export async function correctPurchasePrices(purchaseId: number, unitCosts: number[]): Promise<void> {
+  return db.transaction(
+    'rw',
+    [db.purchases, db.variants, db.suppliers, db.sales, db.adjustments, db.returns],
+    async () => {
+      const purchase = await db.purchases.get(purchaseId)
+      if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
+      if (unitCosts.length !== purchase.lines.length) throw new Error('قیمت تمام اجناس این خرید را بنویسید')
+
+      const lines = purchase.lines.map((line, index) => {
+        const unitCost = afn(unitCosts[index])
+        if (unitCost <= 0) throw new Error('قیمت خرید باید بیشتر از صفر باشد')
+        return { ...line, unitCost }
+      })
+      const total = afn(lines.reduce((sum, line) => sum + line.qty * line.unitCost, 0))
+      const hawala = purchase.sarrafAmount ?? 0
+      const committed = purchase.paid + hawala
+      if (total < committed) {
+        throw new Error(
+          `مجموع درست خرید ${total} افغانی است، اما ${committed} افغانی قبلاً پرداخت/حواله ثبت شده. اول اضافه‌پرداخت را با تأمین‌کننده تصفیه کنید.`
+        )
+      }
+
+      if (purchase.received !== false) {
+        const arrivedAt = purchase.received === true ? (purchase.receivedAt ?? purchase.date) : purchase.date
+        const variantIds = new Set(lines.map((line) => line.variantId))
+        const laterSale = await db.sales
+          .where('date')
+          .aboveOrEqual(arrivedAt)
+          .filter((sale) => !sale.deleted && sale.lines.some((line) => variantIds.has(line.variantId)))
+          .first()
+        if (laterSale) {
+          throw new Error('بعد از این خرید از همین جنس فروش ثبت شده است؛ برای حفظ مفاد فاکتورهای گذشته، قیمت این خرید خودکار تغییر نمی‌کند.')
+        }
+        const laterReturn = await db.returns
+          .where('date')
+          .aboveOrEqual(arrivedAt)
+          .filter((ret) => !ret.deleted && ret.lines.some((line) => variantIds.has(line.variantId)))
+          .first()
+        if (laterReturn) {
+          throw new Error('بعد از این خرید برای همین جنس مرجوعی ثبت شده است؛ اول سند مرجوعی را بررسی کنید.')
+        }
+      }
+
+      const oldDebt = Math.max(0, purchase.total - purchase.paid - hawala)
+      const newDebt = Math.max(0, total - purchase.paid - hawala)
+      const debtDelta = newDebt - oldDebt
+      if (debtDelta !== 0) {
+        const supplier = await db.suppliers.get(purchase.supplierId)
+        if (!supplier || supplier.deleted) throw new Error('تأمین‌کنندهٔ این خرید یافت نشد')
+        await db.suppliers.update(purchase.supplierId, { balance: supplier.balance + debtDelta })
+      }
+
+      await db.purchases.update(purchaseId, { lines, total })
+      await applyRebuiltCosts()
+    }
+  )
+}
+
 /** اثر دقیق سند پرداخت بر صندوق؛ سندهای جدید ذخیره می‌کنند و سندهای قدیمی با قاعدهٔ سازگار خوانده می‌شوند. */
 function paymentCashDelta(payment: Payment, partyKind?: Supplier['kind']): number {
   if (typeof payment.cashDelta === 'number') return afn(payment.cashDelta)

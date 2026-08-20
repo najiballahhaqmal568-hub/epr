@@ -12,6 +12,7 @@ import { PurchaseReturnModal, SupplierReturnModal } from './purchases/ReturnModa
 import { NewSupplierModal, PaySupplierModal } from './purchases/SupplierModals'
 import NewPurchaseModal from './purchases/NewPurchaseModal'
 import LendersView from './purchases/LendersView'
+import PurchasePriceCorrectionModal from './purchases/PurchasePriceCorrectionModal'
 
 export type PurchaseView = 'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'
 type PurchaseFilter = 'all' | 'debt' | 'transit'
@@ -35,6 +36,7 @@ export default function Purchases({
   const [payingSupplier, setPayingSupplier] = useState<number | null>(null)
   const [returningTo, setReturningTo] = useState<Supplier | null>(null)
   const [returningPurchase, setReturningPurchase] = useState<Purchase | null>(null)
+  const [correctingPurchase, setCorrectingPurchase] = useState<Purchase | null>(null)
   const [detail, setDetail] = useState<Supplier | null>(null)
   const [showLanding, setShowLanding] = useState(false)
   const [search, setSearch] = useState('')
@@ -235,8 +237,18 @@ export default function Purchases({
                     ✓ جنس رسید — به گدام اضافه شود
                   </button>
                 ) : (
-                  <button className="mt-1 text-xs font-bold text-amber-700" onClick={() => setReturningPurchase(p)}>
-                    مرجوعی به تأمین‌کننده
+                  <div className="mt-2 flex gap-4">
+                    <button className="text-xs font-bold text-amber-700" onClick={() => setReturningPurchase(p)}>
+                      مرجوعی به تأمین‌کننده
+                    </button>
+                    <button className="text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
+                      اصلاح قیمت خرید
+                    </button>
+                  </div>
+                )}
+                {pending && (
+                  <button className="mt-2 text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
+                    اصلاح قیمت خرید
                   </button>
                 )}
               </Card>
@@ -343,6 +355,7 @@ export default function Purchases({
       {payingSupplier != null && <PaySupplierModal supplierId={payingSupplier} onClose={() => setPayingSupplier(null)} />}
       {returningTo && <SupplierReturnModal supplier={returningTo} onClose={() => setReturningTo(null)} />}
       {returningPurchase && <PurchaseReturnModal purchase={returningPurchase} onClose={() => setReturningPurchase(null)} />}
+      {correctingPurchase && <PurchasePriceCorrectionModal purchase={correctingPurchase} onClose={() => setCorrectingPurchase(null)} />}
       {detail && <SupplierDetailModal supplier={detail} onClose={() => setDetail(null)} />}
       {showLanding && <LandingCostModal onClose={() => setShowLanding(false)} />}
     </div>

@@ -21,6 +21,7 @@ import {
   payLanding,
   landingUnpaidOf,
   receivePurchase,
+  correctPurchasePrices,
   addCustomerReturn,
   addSupplierReturn,
   addExchange,
@@ -60,7 +61,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
-import { applyDocEffects, shouldResetForGeneration } from '../src/lib/sync'
+import { applyDocEffects, applyRemoteRow, shouldResetForGeneration } from '../src/lib/sync'
 import { dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
@@ -734,6 +735,107 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('بعد از رسید، گدام پر شد', await stockOf(vId), 20)
       eq('قیمت تمام‌شده', await costOf(vId), 500)
       is('خرید به حالت رسیده رفت', (await db.purchases.get(pid))!.received, true)
+    }
+  },
+  {
+    name: 'اصلاح قیمت خرید — گدام ثابت و قرض تأمین‌کننده درست شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 20, 500, { paid: 0 }))
+
+      await correctPurchasePrices(pid, [600])
+
+      const purchase = (await db.purchases.get(pid))!
+      eq('تعداد گدام تغییر نکرد', await stockOf(vId), 20)
+      eq('قیمت تمام‌شده اصلاح شد', await costOf(vId), 600)
+      eq('قیمت فی جوړه در فاکتور اصلاح شد', purchase.lines[0].unitCost, 600)
+      eq('مجموع فاکتور اصلاح شد', purchase.total, 12000)
+      eq('قرض تأمین‌کننده به اندازهٔ تفاوت اصلاح شد', (await db.suppliers.get(supId))!.balance, 12000)
+      eq('صندوق تغییر نکرد', await cashBalance(), 0)
+      eq('کنترل حساب‌ها اختلافی پیدا نکرد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'اصلاح قیمت جنس در راه — هنگام رسیدن قیمت درست وارد گدام شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { received: false, paid: 0 }))
+
+      await correctPurchasePrices(pid, [650])
+      eq('پیش از رسید گدام تغییر نکرد', await stockOf(vId), 0)
+      eq('قرض با قیمت درست شد', (await db.suppliers.get(supId))!.balance, 6500)
+
+      await receivePurchase(pid)
+      eq('تعداد درست وارد گدام شد', await stockOf(vId), 10)
+      eq('قیمت درست وارد گدام شد', await costOf(vId), 650)
+    }
+  },
+  {
+    name: 'اصلاح قیمت خرید — بعد از فروش، مفاد گذشته بی‌صدا عوض نشود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      await addSale(sell(vId, 1, 900))
+
+      await throws('اصلاح قیمت بعد از فروش رد شود', () => correctPurchasePrices(pid, [600]))
+      eq('قیمت فاکتور دست‌نخورده ماند', (await db.purchases.get(pid))!.lines[0].unitCost, 500)
+      eq('قرض دست‌نخورده ماند', (await db.suppliers.get(supId))!.balance, 5000)
+      eq('قیمت گدام دست‌نخورده ماند', await costOf(vId), 500)
+    }
+  },
+  {
+    name: 'اصلاح قیمت خرید — جمع کمتر از پرداخت قبلی رد شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(5000)
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+
+      await throws('اضافه‌پرداخت بدون تصفیه ساخته نشود', () => correctPurchasePrices(pid, [400]))
+      eq('جمع فاکتور دست‌نخورده ماند', (await db.purchases.get(pid))!.total, 5000)
+      eq('قیمت گدام دست‌نخورده ماند', await costOf(vId), 500)
+      eq('صندوق دوباره تغییر نکرد', await cashBalance(), 0)
+    }
+  },
+  {
+    name: 'همگام‌سازی اصلاح قیمت خرید — موبایل دوم همان حساب را بسازد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      const original = (await db.purchases.get(pid))!
+      const corrected: Purchase = {
+        ...original,
+        lines: original.lines.map((line) => ({ ...line, unitCost: 600 })),
+        total: 6000
+      }
+
+      await applyRemoteRow('purchases', {
+        uuid: original.uuid!,
+        deleted: false,
+        data: corrected as unknown as Record<string, unknown>
+      })
+
+      eq('موجودی موبایل دوم دوباره اضافه نشد', await stockOf(vId), 10)
+      eq('قیمت تمام‌شده در موبایل دوم اصلاح شد', await costOf(vId), 600)
+      eq('قرض تأمین‌کننده در موبایل دوم اصلاح شد', (await db.suppliers.get(supId))!.balance, 6000)
+      eq('قیمت فاکتور در موبایل دوم اصلاح شد', (await db.purchases.get(pid))!.lines[0].unitCost, 600)
+
+      await applyRemoteRow('purchases', { uuid: original.uuid!, deleted: false, data: corrected as unknown as Record<string, unknown> })
+      eq('رسیدن دوبارهٔ همان نسخه موجودی را دو برابر نکرد', await stockOf(vId), 10)
+      eq('رسیدن دوبارهٔ همان نسخه قرض را دو برابر نکرد', (await db.suppliers.get(supId))!.balance, 6000)
+
+      await applyRemoteRow('purchases', { uuid: original.uuid!, deleted: true, data: corrected as unknown as Record<string, unknown> })
+      await applyRemoteRow('purchases', { uuid: original.uuid!, deleted: true, data: corrected as unknown as Record<string, unknown> })
+      eq('سند حذف‌شده حتی با تکرار، موجودی ندارد', await stockOf(vId), 0)
+      eq('سند حذف‌شده حتی با تکرار، قرض ندارد', (await db.suppliers.get(supId))!.balance, 0)
+
+      await applyRemoteRow('purchases', { uuid: original.uuid!, deleted: false, data: corrected as unknown as Record<string, unknown> })
+      eq('بازگردانی سند یک‌بار موجودی را برگرداند', await stockOf(vId), 10)
+      eq('بازگردانی سند یک‌بار قرض را برگرداند', (await db.suppliers.get(supId))!.balance, 6000)
     }
   },
   {

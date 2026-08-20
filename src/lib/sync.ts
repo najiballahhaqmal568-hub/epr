@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { applyRebuiltCosts } from './costing'
 import { effectsOf, type DocTable } from './effects'
-import { db, syncFlags, newUuid, SYNC_TABLES, landingSarrafOwed, type SyncTable, type Purchase } from '../db'
+import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Purchase } from '../db'
 import { getSupa, getProfile } from './supa'
 
 /** نام جدول‌ها در سرور (snake_case) */
@@ -237,7 +237,7 @@ async function pullTable(table: SyncTable, deviceId: string, generation: number)
   return applied
 }
 
-async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: boolean; data: Record<string, unknown> }) {
+export async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: boolean; data: Record<string, unknown> }) {
   const rec = await decodeRefs(table, row.data)
   rec.uuid = row.uuid
   rec.deleted = row.deleted
@@ -264,34 +264,19 @@ async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: bo
           const wasDeleted = Boolean(rec.deleted)
           await db.table(table).add(rec)
           if (!wasDeleted) await applyDocEffects(table, rec, false)
+        } else if (table === 'purchases') {
+          const inc = rec as unknown as Purchase
+          const merged = { ...(existing as Purchase), ...inc, id: existing.id, uuid: existing.uuid }
+          // خرید اکنون می‌تواند قیمت اصلاح‌شده داشته باشد. اثر سند قبلی را برمی‌گردانیم
+          // و اثر نسخهٔ تازه را اعمال می‌کنیم تا قرض تأمین‌کننده در موبایل دوم هم درست بماند.
+          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
+          await db.table(table).update(existing.id, merged)
+          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
+          await applyRebuiltCosts()
         } else if (row.deleted && !existing.deleted) {
           await db.table(table).update(existing.id, { deleted: true })
           await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-        } else if (table === 'purchases') {
-          // رسیدِ جنس (موجودی از سند تعدیل می‌آید) و
-          // مصارف رسیدن بعد از تحویل ثبت/پرداخت می‌شود — سهم آن در قیمت تمام‌شده اینجا اعمال می‌گردد
-          const inc = rec as unknown as Purchase
-          const oldLanding = (existing as Purchase).landingCost ?? 0
-          const newLanding = inc.landingCost ?? 0
-          if (newLanding !== oldLanding) {
-            const deltaSarraf = landingSarrafOwed(inc as unknown as Purchase) - landingSarrafOwed(existing as Purchase)
-            if (deltaSarraf > 0 && typeof inc.landingSarrafId === 'number') {
-              const sf = await db.suppliers.get(inc.landingSarrafId)
-              if (sf) await db.suppliers.update(inc.landingSarrafId, { balance: sf.balance + deltaSarraf })
-            }
-          }
-          await db.table(table).update(existing.id, {
-            ...(inc.received !== false ? { received: true, receivedAt: inc.receivedAt ?? Date.now() } : {}),
-            landingCost: newLanding || undefined,
-            landingUnpaid: inc.landingUnpaid,
-            landingVia: inc.landingVia,
-            landingPaid: inc.landingPaid,
-            landingSarrafId: inc.landingSarrafId,
-            landingSarrafName: inc.landingSarrafName,
-            landingSarrafAmount: inc.landingSarrafAmount
-          })
-          // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
-          await applyRebuiltCosts()
         }
       }
     } finally {
