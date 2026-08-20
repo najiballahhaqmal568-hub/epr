@@ -49,8 +49,9 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
     [supplierId]
   )
   const [amount, setAmount] = useState('')
-  const [via, setVia] = useState<'cash' | 'sarraf' | 'lender'>('cash')
+  const [via, setVia] = useState<'cash' | 'sarraf' | 'mixed' | 'lender'>('cash')
   const [sarrafId, setSarrafId] = useState<number | ''>('')
+  const [cashPart, setCashPart] = useState('')
   const [lenderId, setLenderId] = useState<number | ''>('')
   const [error, setError] = useState('')
   if (!supplier) return null
@@ -74,14 +75,15 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
       )}
       {!isSarraf && ((sarrafs?.length ?? 0) > 0 || (lenders?.length ?? 0) > 0) && (
         <Field label="طریق پرداخت">
-          <select className={inputCls} value={via} onChange={(e) => setVia(e.target.value as 'cash' | 'sarraf' | 'lender')}>
+          <select className={inputCls} value={via} onChange={(e) => setVia(e.target.value as 'cash' | 'sarraf' | 'mixed' | 'lender')}>
             <option value="cash">نقد از صندوق</option>
             {(sarrafs?.length ?? 0) > 0 && <option value="sarraf">حواله از طریق صراف</option>}
+            {(sarrafs?.length ?? 0) > 0 && <option value="mixed">ترکیبی — صندوق و صراف</option>}
             {(lenders?.length ?? 0) > 0 && <option value="lender">قرض‌دهنده مستقیم فروشنده را پرداخت کرد</option>}
           </select>
         </Field>
       )}
-      {via === 'sarraf' && (
+      {(via === 'sarraf' || via === 'mixed') && (
         <>
           <Field label="صراف *">
             <select className={inputCls} value={sarrafId} onChange={(e) => setSarrafId(e.target.value ? Number(e.target.value) : '')}>
@@ -93,7 +95,22 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
               ))}
             </select>
           </Field>
-          <p className="mb-2 text-xs text-amber-600">پول از صندوق کم نمی‌شود؛ قرض شما به صراف زیاد می‌شود.</p>
+          {via === 'mixed' ? (
+            <>
+              <Field label="مبلغ از صندوق *">
+                <input className={inputCls} inputMode="numeric" value={cashPart} onChange={(e) => setCashPart(e.target.value)} />
+              </Field>
+              {parseNum(amount) > 0 && parseNum(cashPart) > 0 && parseNum(cashPart) < parseNum(amount) && (
+                <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+                  <div className="flex justify-between"><span>از صندوق</span><b>{fmtMoney(parseNum(cashPart))}</b></div>
+                  <div className="mt-1 flex justify-between text-amber-700"><span>از صراف</span><b>{fmtMoney(parseNum(amount) - parseNum(cashPart))}</b></div>
+                </div>
+              )}
+              <p className="mb-2 text-xs text-amber-600">سهم صندوق کم می‌شود؛ سهم صراف ابتدا از طلب شما نزد او کم و فقط مازاد آن قرض می‌شود.</p>
+            </>
+          ) : (
+            <p className="mb-2 text-xs text-amber-600">پول از صندوق کم نمی‌شود؛ مبلغ ابتدا از طلب شما نزد صراف کم و فقط مازاد آن قرض می‌شود.</p>
+          )}
         </>
       )}
       {via === 'lender' && (
@@ -113,19 +130,26 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
       )}
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <PrimaryBtn
-        disabled={parseNum(amount) <= 0 || (via === 'sarraf' && !sarrafId) || (via === 'lender' && !lenderId)}
+        disabled={
+          parseNum(amount) <= 0 ||
+          ((via === 'sarraf' || via === 'mixed') && !sarrafId) ||
+          (via === 'mixed' && (parseNum(cashPart) <= 0 || parseNum(cashPart) >= parseNum(amount))) ||
+          (via === 'lender' && !lenderId)
+        }
         onClick={async () => {
           try {
-            const sf = via === 'sarraf' ? sarrafs?.find((s) => s.id === sarrafId) : undefined
+            const sf = via === 'sarraf' || via === 'mixed' ? sarrafs?.find((s) => s.id === sarrafId) : undefined
             const lender = via === 'lender' ? lenders?.find((l) => l.id === lenderId) : undefined
+            const total = parseNum(amount)
+            const sarrafAmount = via === 'mixed' ? total - parseNum(cashPart) : total
             await addPayment({
               date: Date.now(),
               partyType: 'supplier',
               partyId: supplierId,
               partyName: supplier.name,
-              amount: parseNum(amount),
+              amount: total,
               ...(sf
-                ? { via: 'sarraf' as const, sarrafId: sf.id!, sarrafName: sf.name }
+                ? { via: 'sarraf' as const, sarrafId: sf.id!, sarrafName: sf.name, sarrafAmount }
                 : lender
                   ? { via: 'lender' as const, lenderId: lender.id!, lenderName: lender.name }
                   : { via: 'cash' as const })

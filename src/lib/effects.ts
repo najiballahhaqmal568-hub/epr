@@ -61,7 +61,7 @@ export function effectsOf(table: DocTable, doc: unknown): Effect[] {
     // مبلغ منفی = «قرض قبلی»، پس همین یک قاعده هر دو حالت را می‌گیرد
     out.push(p.partyType === 'customer' ? debt(p.partyId, -p.amount) : owed(p.partyId, -p.amount))
     // پرداخت از راه صراف: قرض ما به تأمین‌کننده کم و به صراف زیاد می‌شود
-    if (p.via === 'sarraf') out.push(owed(p.sarrafId, p.amount))
+    if (p.via === 'sarraf') out.push(owed(p.sarrafId, p.sarrafAmount ?? p.amount))
     // قرض‌دهنده مستقیماً فروشنده را پرداخته: قرض فروشنده کم و قرض قرض‌دهنده زیاد می‌شود
     if (p.via === 'lender') out.push(owed(p.lenderId, p.amount))
   } else if (table === 'expenses') {

@@ -690,11 +690,15 @@ export async function addPayment(payment: Payment): Promise<number> {
       await db.suppliers.update(payment.partyId, { balance: s.balance - payment.amount })
       if (payment.via === 'sarraf') {
         if (!payment.sarrafId) throw new Error('صراف را انتخاب کنید')
-        // حواله: پول از صندوق نمی‌رود؛ قرض ما به صراف زیاد می‌شود
+        const sarrafAmount = afn(payment.sarrafAmount ?? payment.amount)
+        if (sarrafAmount <= 0 || sarrafAmount > payment.amount) throw new Error('سهم صراف باید بیشتر از صفر و بیشتر از مبلغ کل نباشد')
+        // سهم صراف ابتدا از طلب/موجودی ما نزد او کم می‌شود و فقط مازاد آن قرض می‌گردد.
+        // باقی مبلغ همان لحظه از صندوق پرداخت می‌شود؛ هر دو بخش در یک سند می‌مانند.
         const sf = await db.suppliers.get(payment.sarrafId)
         if (!sf || sf.deleted || sf.kind !== 'sarraf') throw new Error('صراف یافت نشد')
-        payment.cashDelta = 0
-        await db.suppliers.update(payment.sarrafId, { balance: sf.balance + payment.amount })
+        payment.sarrafAmount = sarrafAmount
+        payment.cashDelta = -(payment.amount - sarrafAmount)
+        await db.suppliers.update(payment.sarrafId, { balance: sf.balance + sarrafAmount })
       } else if (payment.via === 'lender') {
         if (!payment.lenderId) throw new Error('قرض‌دهنده را انتخاب کنید')
         // قرض‌دهنده پول را مستقیم به فروشنده داده؛ صندوق اصلاً دست نمی‌خورد.
@@ -813,6 +817,10 @@ export async function deletePaymentImpact(
   if (p.via === 'lender' && p.lenderId) {
     const lender = await db.suppliers.get(p.lenderId)
     if (lender) related = { partyName: lender.name, before: lender.balance, after: lender.balance - p.amount }
+  } else if (p.via === 'sarraf' && p.sarrafId) {
+    const sarraf = await db.suppliers.get(p.sarrafId)
+    const sarrafAmount = p.sarrafAmount ?? p.amount
+    if (sarraf) related = { partyName: sarraf.name, before: sarraf.balance, after: sarraf.balance - sarrafAmount }
   }
   const linkedSale = p.groupUuid
     ? await db.sales.filter((s) => !s.deleted && s.groupUuid === p.groupUuid).first()

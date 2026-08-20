@@ -16,6 +16,7 @@ import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
 import CategoryManager from '../src/pages/expenses/CategoryManager'
 import PurchasePriceCorrectionModal from '../src/pages/purchases/PurchasePriceCorrectionModal'
 import PurchaseCancelModal from '../src/pages/purchases/PurchaseCancelModal'
+import { PaySupplierModal } from '../src/pages/purchases/SupplierModals'
 import {
   addSale,
   addPurchase,
@@ -1206,6 +1207,126 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await addPayment({ date: Date.now(), partyType: 'supplier', partyId: sarrafId, partyName: 'صراف', amount: 4000 })
       eq('قرض صراف بعد از پرداخت', (await db.suppliers.get(sarrafId))!.balance, 6000)
       eq('صندوق', await cashBalance(), 14000)
+    }
+  },
+  {
+    name: 'پرداخت ترکیبی فروشنده — صندوق و طلب نزد صراف را در یک سند حساب کند',
+    run: async () => {
+      const supplierId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف احمد', balance: 0, kind: 'sarraf' })) as number
+      await seedCash(10000)
+      await addOpeningDebt('supplier', supplierId, 'تأمین‌کننده', 5000)
+      await addPayment({
+        date: Date.now(),
+        partyType: 'supplier',
+        partyId: sarrafId,
+        partyName: 'صراف احمد',
+        amount: 2000,
+        via: 'cash'
+      })
+
+      await addPayment({
+        date: Date.now(),
+        partyType: 'supplier',
+        partyId: supplierId,
+        partyName: 'تأمین‌کننده',
+        amount: 5000,
+        via: 'sarraf',
+        sarrafId,
+        sarrafName: 'صراف احمد',
+        sarrafAmount: 3000
+      })
+
+      eq('قرض فروشنده به اندازهٔ کل پرداخت کم شد', (await db.suppliers.get(supplierId))!.balance, 0)
+      eq('دو هزار طلب نزد صراف مصرف و فقط هزار قرض شد', (await db.suppliers.get(sarrafId))!.balance, 1000)
+      eq('صندوق فقط سهم دو هزار خود را داد', await cashBalance(), 6000)
+      const mixed = (await db.payments.filter((p) => p.partyId === supplierId && p.via === 'sarraf' && !p.deleted).first())!
+      eq('سهم صراف داخل همان سند ذخیره شد', mixed.sarrafAmount ?? 0, 3000)
+      eq('اثر صندوق داخل همان سند ذخیره شد', mixed.cashDelta ?? 0, -2000)
+      const encoded = await encodeRefs('payments', mixed as unknown as Record<string, unknown>)
+      eq('سهم صراف داخل دادهٔ ارسالی سرور ماند', Number(encoded.sarrafAmount), 3000)
+      const decoded = await decodeRefs('payments', encoded)
+      eq('موبایل دوم سهم صراف را از سرور دریافت کرد', Number(decoded.sarrafAmount), 3000)
+      eq('موبایل دوم صراف درست را شناخت', Number(decoded.sarrafId), sarrafId)
+
+      await db.suppliers.update(supplierId, { balance: 0 })
+      await db.suppliers.update(sarrafId, { balance: 0 })
+      const docs = await db.payments.filter((p) => !p.deleted).toArray()
+      for (const payment of docs) await applyDocEffects('payments', payment as unknown as Record<string, unknown>, false)
+      eq('موبایل دوم قرض فروشنده را درست بازسازی کرد', (await db.suppliers.get(supplierId))!.balance, 0)
+      eq('موبایل دوم حساب صراف را درست بازسازی کرد', (await db.suppliers.get(sarrafId))!.balance, 1000)
+
+      const impact = (await deletePaymentImpact(mixed.id!))!
+      eq('پیش‌نمایش حذف سهم صندوق را برمی‌گرداند', impact.cash, 2000)
+      eq('پیش‌نمایش حذف حساب صراف را به طلب قبلی برمی‌گرداند', impact.related?.after ?? 0, -2000)
+      await deletePayment(mixed.id!)
+      eq('حذف، قرض فروشنده را برگرداند', (await db.suppliers.get(supplierId))!.balance, 5000)
+      eq('حذف، طلب قبلی نزد صراف را برگرداند', (await db.suppliers.get(sarrafId))!.balance, -2000)
+      eq('حذف، سهم نقدی را به صندوق برگرداند', await cashBalance(), 8000)
+
+      await throws('سهم صراف بیشتر از مبلغ کل ثبت نشود', () =>
+        addPayment({
+          date: Date.now(),
+          partyType: 'supplier',
+          partyId: supplierId,
+          partyName: 'تأمین‌کننده',
+          amount: 1000,
+          via: 'sarraf',
+          sarrafId,
+          sarrafName: 'صراف احمد',
+          sarrafAmount: 1200
+        })
+      )
+      eq('سند ناقص قرض فروشنده را تغییر نداد', (await db.suppliers.get(supplierId))!.balance, 5000)
+      eq('سند ناقص حساب صراف را تغییر نداد', (await db.suppliers.get(sarrafId))!.balance, -2000)
+      eq('سند ناقص صندوق را تغییر نداد', await cashBalance(), 8000)
+      is('کنترول حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'فورم پرداخت فروشنده — گزینهٔ ترکیبی سهم صندوق و صراف را ثبت کند',
+    run: async () => {
+      const supplierId = (await db.suppliers.add({ name: 'شیخ', balance: 5000, kind: 'supplier' })) as number
+      const sarrafId = (await db.suppliers.add({ name: 'صراف احمد', balance: -2000, kind: 'sarraf' })) as number
+      await seedCash(10000)
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(PaySupplierModal, { supplierId, onClose: () => undefined }))
+        await waitUntil(() => host.textContent?.includes('پرداخت به شیخ') === true)
+        const amountInput = Array.from(host.querySelectorAll('label')).find((label) => label.textContent?.includes('مبلغ پرداختی'))?.querySelector('input') as HTMLInputElement
+        fillInput(amountInput, '5000')
+        const method = Array.from(host.querySelectorAll('select')).find((select) =>
+          Array.from(select.options).some((option) => option.value === 'mixed')
+        )!
+        method.value = 'mixed'
+        method.dispatchEvent(new Event('change', { bubbles: true }))
+        await waitUntil(() => host.textContent?.includes('مبلغ از صندوق') === true)
+
+        const sarrafSelect = Array.from(host.querySelectorAll('select')).find((select) =>
+          Array.from(select.options).some((option) => option.value === String(sarrafId))
+        )!
+        sarrafSelect.value = String(sarrafId)
+        sarrafSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        const cashInput = Array.from(host.querySelectorAll('label')).find((label) => label.textContent?.includes('مبلغ از صندوق'))?.querySelector('input') as HTMLInputElement
+        fillInput(cashInput, '2000')
+        await waitUntil(() => host.textContent?.includes('از صراف') === true)
+
+        const submit = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('ثبت پرداخت'))!
+        is('دکمه با دو سهم درست فعال شد', submit.disabled, false)
+        submit.click()
+        await waitUntilAsync(async () => (await db.payments.filter((p) => p.partyId === supplierId && p.via === 'sarraf').count()) === 1)
+        const saved = (await db.payments.filter((p) => p.partyId === supplierId && p.via === 'sarraf').first())!
+        eq('فورم کل پرداخت را ذخیره کرد', saved.amount, 5000)
+        eq('فورم سهم صراف را ذخیره کرد', saved.sarrafAmount ?? 0, 3000)
+        eq('فورم سهم صندوق را ذخیره کرد', -(saved.cashDelta ?? 0), 2000)
+        eq('فورم فقط هزار قرض جدید صراف ساخت', (await db.suppliers.get(sarrafId))!.balance, 1000)
+        eq('فورم دو هزار از صندوق کم کرد', await cashBalance(), 8000)
+      } finally {
+        root.unmount()
+        host.remove()
+      }
     }
   },
   {

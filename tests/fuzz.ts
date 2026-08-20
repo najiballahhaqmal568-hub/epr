@@ -278,14 +278,15 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         if (!s || s.balance <= 0) return
         const amount = int(1, Math.floor(s.balance))
         const viaSarraf = rand() < 0.3
-        if (!viaSarraf && (await boxBalances()).total < amount) return
+        const sarrafAmount = viaSarraf ? (rand() < 0.5 ? amount : int(1, amount)) : 0
+        if ((await boxBalances()).total < amount - sarrafAmount) return
         await addPayment({
           date: Date.now(),
           partyType: 'supplier',
           partyId: s.id!,
           partyName: s.name,
           amount,
-          ...(viaSarraf ? { via: 'sarraf' as const, sarrafId: sarrafs[0] } : {})
+          ...(viaSarraf ? { via: 'sarraf' as const, sarrafId: sarrafs[0], sarrafAmount } : {})
         })
       }
     },

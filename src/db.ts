@@ -225,6 +225,8 @@ export interface Payment extends Synced {
   via?: 'cash' | 'sarraf' | 'lender' | 'opening' | 'goods'
   sarrafId?: number
   sarrafName?: string
+  /** سهم همین پرداخت که صراف داده است؛ باقی مبلغ از صندوق پرداخت شده. اسناد قدیمیِ صراف بدون این فیلد کاملاً صرافی‌اند. */
+  sarrafAmount?: number
   /** وقتی قرض‌دهنده مستقیماً فروشنده را پرداخت کرده است */
   lenderId?: number
   lenderName?: string

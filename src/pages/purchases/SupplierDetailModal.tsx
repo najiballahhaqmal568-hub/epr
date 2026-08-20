@@ -55,17 +55,25 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
       // بیلانس اولیه / قرض قبلی: قرض ما را بالا برده است
       events.push({ date: p.date, label: p.note ?? 'قرض قبلی', amount: -p.amount, plus: true })
     } else {
+      const sarrafAmount = p.via === 'sarraf' ? (p.sarrafAmount ?? p.amount) : 0
+      const cashAmount = p.amount - sarrafAmount
       events.push({
         date: p.date,
-        label: p.via === 'sarraf' ? `پرداخت از طریق صراف ${p.sarrafName ?? ''}` : 'پرداخت نقدی',
-        sub: p.note,
+        label: p.via === 'sarraf'
+          ? cashAmount > 0
+            ? `پرداخت ترکیبی با ${p.sarrafName ?? 'صراف'}`
+            : `پرداخت از طریق صراف ${p.sarrafName ?? ''}`
+          : 'پرداخت نقدی',
+        sub: cashAmount > 0 && sarrafAmount > 0
+          ? `صندوق ${fmtMoney(cashAmount)} · صراف ${fmtMoney(sarrafAmount)}${p.note ? ` · ${p.note}` : ''}`
+          : p.note,
         amount: p.amount,
         plus: false
       })
     }
   })
   sarrafPays?.forEach((p) => {
-    events.push({ date: p.date, label: `حواله برای ${p.partyName}`, amount: p.amount, plus: true })
+    events.push({ date: p.date, label: `حواله برای ${p.partyName}`, amount: p.sarrafAmount ?? p.amount, plus: true })
   })
   returns?.forEach((r) => {
     if (r.settlement === 'reduceDebt') {
