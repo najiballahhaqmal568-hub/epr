@@ -19,6 +19,7 @@ import {
   addSale,
   addPurchase,
   correctPurchase,
+  correctPurchasePrices,
   cancelPurchase,
   receivePurchase,
   addCustomerReturn,
@@ -170,7 +171,10 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         const unitCost = Math.max(1, line.unitCost + int(-100, 100))
         const total = qty * unitCost
         if (total < purchase.paid + (purchase.sarrafAmount ?? 0)) return
-        await correctPurchase(purchase.id!, [{ variantId: line.variantId, qty, unitCost }])
+        // اصلاح فقط قیمت باید حتی بعد از فروش کار کند؛ تغییر تعداد/جنس همان
+        // محافظ قبلی را دارد و ممکن است عمداً جلو گرفته شود.
+        if (rand() < 0.6) await correctPurchasePrices(purchase.id!, purchase.lines.map((item, index) => (index === 0 ? unitCost : item.unitCost)))
+        else await correctPurchase(purchase.id!, [{ variantId: line.variantId, qty, unitCost }])
       }
     },
     {

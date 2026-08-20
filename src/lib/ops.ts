@@ -1,4 +1,4 @@
-import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
+import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
@@ -608,20 +608,60 @@ export async function cancelPurchase(purchaseId: number): Promise<void> {
 }
 
 /**
- * اصلاح قیمت‌های یک فاکتور خرید.
+ * اصلاح قیمت‌های یک فاکتور خرید، حتی اگر بعد از آن فروش شده باشد.
  *
- * تعداد گدام و پول پرداخت‌شده دست‌نخورده می‌ماند؛ مجموع فاکتور، قرض
- * تأمین‌کننده و قیمت تمام‌شده از روی قیمت‌های درست دوباره ساخته می‌شود.
- * اگر بعد از ورود این خرید از همان جنس فروش شده باشد، اصلاح رد می‌شود چون
- * قیمت خریدِ ثبت‌شده در فاکتور فروش باید جداگانه قابل توضیح بماند.
+ * تعداد گدام، پول پرداخت‌شده، فروش و حساب مشتری دست‌نخورده می‌ماند. تفاوت
+ * قیمت از لحظهٔ ورود خرید در میانگین وزنی پخش می‌شود و فقط unitCost فروش‌های
+ * بعدی (و مرجوعی وابسته) را اصلاح می‌کند؛ بنابراین راپور مفاد با قیمت واقعی
+ * ساخته می‌شود و هم‌زمان سندهای اصلاح‌شده برای موبایل‌های دیگر نیز صف می‌شوند.
  */
 export async function correctPurchasePrices(purchaseId: number, unitCosts: number[]): Promise<void> {
-  const purchase = await db.purchases.get(purchaseId)
-  if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
-  if (unitCosts.length !== purchase.lines.length) throw new Error('قیمت تمام اجناس این خرید را بنویسید')
-  return correctPurchase(
-    purchaseId,
-    purchase.lines.map((line, index) => ({ variantId: line.variantId, qty: line.qty, unitCost: unitCosts[index] }))
+  return db.transaction(
+    'rw',
+    [db.purchases, db.variants, db.suppliers, db.sales, db.adjustments, db.returns],
+    async () => {
+      const purchase = await db.purchases.get(purchaseId)
+      if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
+      if (unitCosts.length !== purchase.lines.length) throw new Error('قیمت تمام اجناس این خرید را بنویسید')
+      const costs = unitCosts.map(afn)
+      if (costs.some((cost) => cost <= 0)) throw new Error('قیمت خرید هر جنس باید بیشتر از صفر باشد')
+
+      const lines = purchase.lines.map((line, index) => ({ ...line, unitCost: costs[index] }))
+      const total = afn(lines.reduce((sum, line) => sum + line.qty * line.unitCost, 0))
+      const committed = purchase.paid + (purchase.sarrafAmount ?? 0)
+      if (total < committed) {
+        throw new Error(
+          `مجموع درست خرید ${total} افغانی است، اما ${committed} افغانی قبلاً پرداخت/حواله ثبت شده. این خرید را باطل و دوباره درست ثبت کنید.`
+        )
+      }
+      if (total === purchase.total && lines.every((line, index) => line.unitCost === purchase.lines[index].unitCost)) return
+
+      const live = <T extends { deleted?: boolean }>(rows: T[]) => rows.filter((row) => !row.deleted)
+      const [sales, purchases, adjustments, returns] = await Promise.all([
+        db.sales.toArray().then(live),
+        db.purchases.toArray().then(live),
+        db.adjustments.toArray().then(live),
+        db.returns.toArray().then(live)
+      ])
+      const revision = historicalCostRevision(purchaseId, costs, sales, purchases, adjustments, returns)
+
+      // قیمت به تعداد گدام کاری ندارد؛ فقط تفاوت قرضِ خودِ تأمین‌کننده عوض می‌شود.
+      // این روش برخلاف برگرداندن/اعمال دوبارهٔ کل خرید، در گدام کم‌موجودی نیز
+      // هیچ وضعیت منفیِ موقتی نمی‌سازد.
+      const hawala = purchase.sarrafAmount ?? 0
+      const oldDebt = Math.max(0, purchase.total - purchase.paid - hawala)
+      const newDebt = Math.max(0, total - purchase.paid - hawala)
+      if (Math.abs(newDebt - oldDebt) > 0.005) {
+        const supplier = await db.suppliers.get(purchase.supplierId)
+        if (!supplier || supplier.deleted) throw new Error('تأمین‌کنندهٔ این خرید یافت نشد')
+        await db.suppliers.update(purchase.supplierId, { balance: supplier.balance + newDebt - oldDebt })
+      }
+
+      await db.purchases.update(purchaseId, { lines, total })
+      for (const [saleId, revisedLines] of revision.sales) await db.sales.update(saleId, { lines: revisedLines })
+      for (const [returnId, revisedLines] of revision.returns) await db.returns.update(returnId, { lines: revisedLines })
+      await applyRebuiltCosts()
+    }
   )
 }
 

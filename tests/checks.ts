@@ -955,17 +955,71 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
-    name: 'اصلاح قیمت خرید — بعد از فروش، مفاد گذشته بی‌صدا عوض نشود',
+    name: 'اصلاح قیمت خرید بعد از فروش — مفاد را اصلاح و گدام و پول را ثابت نگه دارد',
     run: async () => {
       const supId = await newSupplier()
       const vId = await makeVariant()
       const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
-      await addSale(sell(vId, 1, 900))
+      const saleId = await addSale(sell(vId, 1, 900))
+      const cashBefore = await cashBalance()
 
-      await throws('اصلاح قیمت بعد از فروش رد شود', () => correctPurchasePrices(pid, [600]))
-      eq('قیمت فاکتور دست‌نخورده ماند', (await db.purchases.get(pid))!.lines[0].unitCost, 500)
-      eq('قرض دست‌نخورده ماند', (await db.suppliers.get(supId))!.balance, 5000)
-      eq('قیمت گدام دست‌نخورده ماند', await costOf(vId), 500)
+      await correctPurchasePrices(pid, [600])
+
+      eq('قیمت فاکتور اصلاح شد', (await db.purchases.get(pid))!.lines[0].unitCost, 600)
+      eq('قرض تأمین‌کننده اصلاح شد', (await db.suppliers.get(supId))!.balance, 6000)
+      eq('قیمت خرید در فروش گذشته اصلاح شد', (await db.sales.get(saleId))!.lines[0].unitCost!, 600)
+      eq('مفاد فروش گذشته با قیمت درست شد', await profitAndLoss(), 300)
+      eq('تعداد گدام تغییر نکرد', await stockOf(vId), 9)
+      eq('صندوق تغییر نکرد', await cashBalance(), cashBefore)
+      eq('قیمت موجودی باقی‌مانده درست شد', await costOf(vId), 600)
+      eq('کنترل حساب‌ها اختلافی پیدا نکرد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'اصلاح قیمت خرید بعد از چند رویداد — تفاوت را با میانگین وزنی روی فروش‌های بعدی پخش کند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const firstPurchase = await addPurchase(buy(supId, vId, 10, 500, { paid: 0, date: 1000 }))
+      const firstSale = await addSale(sell(vId, 4, 900, { date: 2000 }))
+      await addPurchase(buy(supId, vId, 10, 700, { paid: 0, date: 3000 }))
+      const secondSale = await addSale(sell(vId, 2, 900, { date: 4000 }))
+
+      await correctPurchasePrices(firstPurchase, [600])
+
+      eq('فروش پیش از خرید دوم قیمت ۶۰۰ گرفت', (await db.sales.get(firstSale))!.lines[0].unitCost!, 600)
+      eq('فروش بعد از خرید دوم میانگین ۶۶۲.۵ گرفت', (await db.sales.get(secondSale))!.lines[0].unitCost!, 662.5)
+      eq('قیمت موجودی باقی‌مانده میانگین ۶۶۲.۵ شد', await costOf(vId), 662.5)
+      eq('تعداد موجودی همان ۱۴ جوړه ماند', await stockOf(vId), 14)
+      eq('مفاد هر دو فروش با قیمت‌های درست شد', await profitAndLoss(), 1675)
+    }
+  },
+  {
+    name: 'اصلاح قیمت خرید بعد از مرجوعی — قیمت فروش و مرجوعی را یکسان اصلاح کند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0, date: 1000 }))
+      const saleId = await addSale(sell(vId, 2, 900, { date: 2000 }))
+      const sale = (await db.sales.get(saleId))!
+      const returnId = await addCustomerReturn({
+        date: 3000,
+        kind: 'customer',
+        partyName: 'مشتری نقدی',
+        refId: saleId,
+        saleType: sale.saleType,
+        lines: [{ ...sale.lines[0], qty: 1, restock: true }],
+        reason: 'مرجوعی آزمایشی',
+        settlement: 'cashRefund',
+        amount: 900
+      })
+
+      await correctPurchasePrices(pid, [600])
+
+      eq('قیمت فروش اصلاح شد', (await db.sales.get(saleId))!.lines[0].unitCost!, 600)
+      eq('قیمت مرجوعی وابسته نیز اصلاح شد', (await db.returns.get(returnId))!.lines[0].unitCost!, 600)
+      eq('فقط مفاد یک جوړهٔ باقی‌مانده حساب شد', await profitAndLoss(), 300)
+      eq('موجودی فزیکی دست‌نخورده ماند', await stockOf(vId), 9)
     }
   },
   {
@@ -1018,6 +1072,55 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await applyRemoteRow('purchases', { uuid: original.uuid!, deleted: false, data: corrected as unknown as Record<string, unknown> })
       eq('بازگردانی سند یک‌بار موجودی را برگرداند', await stockOf(vId), 10)
       eq('بازگردانی سند یک‌بار قرض را برگرداند', (await db.suppliers.get(supId))!.balance, 6000)
+    }
+  },
+  {
+    name: 'همگام‌سازی مفاد اصلاح‌شده — فروش و مرجوعی در موبایل دوم بدون تغییر گدام تازه شوند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await addPurchase(buy(supId, vId, 10, 500, { paid: 0, date: 1000 }))
+      const saleId = await addSale(sell(vId, 2, 900, { date: 2000 }))
+      const originalSale = (await db.sales.get(saleId))!
+      const returnId = await addCustomerReturn({
+        date: 3000,
+        kind: 'customer',
+        partyName: 'مشتری نقدی',
+        refId: saleId,
+        lines: [{ ...originalSale.lines[0], qty: 1, restock: true }],
+        reason: 'مرجوعی آزمایشی',
+        settlement: 'cashRefund',
+        amount: 900
+      })
+      const originalReturn = (await db.returns.get(returnId))!
+      const cashBefore = await cashBalance()
+
+      const encoded = await encodeRefs('returns', originalReturn as unknown as Record<string, unknown>)
+      is('مرجوعی با uuid به فروش اصلی وصل شد', encoded.saleUuid, originalSale.uuid)
+      const decoded = await decodeRefs('returns', encoded)
+      eq('uuid فروش در موبایل به id محلی برگشت', decoded.refId as number, saleId)
+
+      const correctedSale = { ...originalSale, lines: originalSale.lines.map((line) => ({ ...line, unitCost: 600 })) }
+      await applyRemoteRow('sales', {
+        uuid: originalSale.uuid!,
+        deleted: false,
+        data: correctedSale as unknown as Record<string, unknown>
+      })
+      const correctedReturn = { ...originalReturn, lines: originalReturn.lines.map((line) => ({ ...line, unitCost: 600 })) }
+      await applyRemoteRow('returns', {
+        uuid: originalReturn.uuid!,
+        deleted: false,
+        data: correctedReturn as unknown as Record<string, unknown>
+      })
+
+      eq('قیمت فروش در موبایل دوم تازه شد', (await db.sales.get(saleId))!.lines[0].unitCost!, 600)
+      eq('قیمت مرجوعی در موبایل دوم تازه شد', (await db.returns.get(returnId))!.lines[0].unitCost!, 600)
+      eq('گدام با به‌روزرسانی سندها تغییر نکرد', await stockOf(vId), 9)
+      eq('صندوق با به‌روزرسانی سندها تغییر نکرد', await cashBalance(), cashBefore)
+
+      await applyRemoteRow('sales', { uuid: originalSale.uuid!, deleted: false, data: correctedSale as unknown as Record<string, unknown> })
+      await applyRemoteRow('returns', { uuid: originalReturn.uuid!, deleted: false, data: correctedReturn as unknown as Record<string, unknown> })
+      eq('تکرار پیام همگام‌سازی گدام را تغییر نداد', await stockOf(vId), 9)
     }
   },
   {

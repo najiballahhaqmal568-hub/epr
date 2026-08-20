@@ -109,6 +109,10 @@ export async function encodeRefs(table: SyncTable, rec: Record<string, unknown>)
     const kind = (out.partyType ?? out.kind) as string
     await enc('partyId', kind === 'customer' ? 'customers' : 'suppliers', 'partyUuid')
   }
+  if (table === 'returns') {
+    const kind = out.kind as string
+    await enc('refId', kind === 'customer' ? 'sales' : 'purchases', kind === 'customer' ? 'saleUuid' : 'purchaseUuid')
+  }
   if (table === 'payments') {
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
     await enc('lenderId', 'suppliers', 'lenderUuid')
@@ -155,6 +159,10 @@ export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>)
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string
     await dec('partyUuid', kind === 'customer' ? 'customers' : 'suppliers', 'partyId')
+  }
+  if (table === 'returns') {
+    const kind = out.kind as string
+    await dec(kind === 'customer' ? 'saleUuid' : 'purchaseUuid', kind === 'customer' ? 'sales' : 'purchases', 'refId')
   }
   if (table === 'payments') {
     await dec('sarrafUuid', 'suppliers', 'sarrafId')
@@ -279,6 +287,15 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
           await db.table(table).update(existing.id, merged)
           if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
           // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
+          await applyRebuiltCosts()
+        } else if (table === 'sales' || table === 'returns') {
+          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
+          // اصلاح قیمت خرید می‌تواند فقط unitCost فروش و مرجوعی وابسته را عوض کند.
+          // اثر گدام/قرض را برمی‌گردانیم و نسخهٔ تازه را اعمال می‌کنیم؛ چون در
+          // اصلاح قیمت این اثرها برابر اند، تعداد و حساب‌ها خالصاً صفر تغییر می‌کنند.
+          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
+          await db.table(table).update(existing.id, merged)
+          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
           await applyRebuiltCosts()
         } else if (row.deleted && !existing.deleted) {
           await db.table(table).update(existing.id, { deleted: true })

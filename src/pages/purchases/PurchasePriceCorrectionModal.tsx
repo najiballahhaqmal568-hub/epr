@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Product, type Purchase, type PurchaseLine } from '../../db'
-import { correctPurchase } from '../../lib/ops'
+import { correctPurchase, correctPurchasePrices } from '../../lib/ops'
 import { fmtMoney, fmtNum, parseNum } from '../../lib/format'
 import QtyControl from '../../components/QtyControl'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
@@ -45,6 +45,13 @@ export default function PurchasePriceCorrectionModal({ purchase, onClose }: { pu
         const old = purchase.lines[index]
         return !old || line.variantId !== old.variantId || line.qty !== old.qty || line.unitCost !== old.unitCost
       }))
+  const structureChanged =
+    corrected.length !== purchase.lines.length ||
+    corrected.some((line, index) => {
+      const old = purchase.lines[index]
+      return !old || line.variantId !== old.variantId || line.qty !== old.qty
+    })
+  const priceOnly = changed && !structureChanged
 
   function addVariant(variantId: number) {
     const variant = variants?.find((item) => item.id === variantId)
@@ -73,10 +80,13 @@ export default function PurchasePriceCorrectionModal({ purchase, onClose }: { pu
     setSaving(true)
     setError('')
     try {
-      await correctPurchase(
-        purchase.id,
-        corrected.map((line) => ({ variantId: line.variantId, qty: line.qty, unitCost: line.unitCost }))
-      )
+      if (priceOnly) await correctPurchasePrices(purchase.id, corrected.map((line) => line.unitCost))
+      else {
+        await correctPurchase(
+          purchase.id,
+          corrected.map((line) => ({ variantId: line.variantId, qty: line.qty, unitCost: line.unitCost }))
+        )
+      }
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'اصلاح خرید انجام نشد')
@@ -89,6 +99,9 @@ export default function PurchasePriceCorrectionModal({ purchase, onClose }: { pu
     <Modal title={`اصلاح خرید — ${purchase.supplierName}`} onClose={onClose}>
       <div className="mb-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-900">
         جنس، سایز/رنگ، تعداد و قیمت خرید قابل اصلاح است. تأمین‌کننده، پرداخت نقدی و حواله ثابت می‌مانند. برای جایگزینی، جنس اشتباه را حذف و جنس درست را جستجو و اضافه کنید.
+      </div>
+      <div className="mb-3 rounded-xl bg-teal-50 p-3 text-sm leading-6 text-teal-900">
+        اگر بعد از این خرید فروش شده باشد، اصلاحِ فقط قیمت مجاز است: تعداد فروش، گدام، صندوق و حساب مشتری تغییر نمی‌کند؛ تنها قرض تأمین‌کننده، قیمت موجودی و مفاد راپورها اصلاح می‌شود. تغییر جنس یا تعداد بعد از فروش برای امنیت مسدود می‌ماند.
       </div>
 
       <Field label="جستجوی جنس برای افزودن یا جایگزینی">
@@ -156,7 +169,7 @@ export default function PurchasePriceCorrectionModal({ purchase, onClose }: { pu
       {error && <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm font-bold leading-6 text-red-700">{error}</p>}
 
       <PrimaryBtn onClick={() => void save()} disabled={!valid || !changed || saving}>
-        {saving ? 'در حال ثبت…' : changed ? 'ثبت اصلاح کامل خرید' : 'معلومات تغییر نکرده است'}
+        {saving ? 'در حال ثبت…' : priceOnly ? 'ثبت اصلاح قیمت خرید' : changed ? 'ثبت اصلاح کامل خرید' : 'معلومات تغییر نکرده است'}
       </PrimaryBtn>
     </Modal>
   )
