@@ -328,6 +328,8 @@ export type AdjustReason = 'damaged' | 'lost' | 'correction' | 'returnDamaged' |
 
 export interface Adjustment extends Synced {
   id?: number
+  /** سند خرید مربوط، برای رسیدنِ خرید در راه و اصلاح/ابطال امن آن */
+  refId?: number
   date: number
   variantId: number
   productName: string

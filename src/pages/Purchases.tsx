@@ -13,6 +13,7 @@ import { NewSupplierModal, PaySupplierModal } from './purchases/SupplierModals'
 import NewPurchaseModal from './purchases/NewPurchaseModal'
 import LendersView from './purchases/LendersView'
 import PurchasePriceCorrectionModal from './purchases/PurchasePriceCorrectionModal'
+import PurchaseCancelModal from './purchases/PurchaseCancelModal'
 
 export type PurchaseView = 'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'
 type PurchaseFilter = 'all' | 'debt' | 'transit'
@@ -37,6 +38,7 @@ export default function Purchases({
   const [returningTo, setReturningTo] = useState<Supplier | null>(null)
   const [returningPurchase, setReturningPurchase] = useState<Purchase | null>(null)
   const [correctingPurchase, setCorrectingPurchase] = useState<Purchase | null>(null)
+  const [cancellingPurchase, setCancellingPurchase] = useState<Purchase | null>(null)
   const [detail, setDetail] = useState<Supplier | null>(null)
   const [showLanding, setShowLanding] = useState(false)
   const [search, setSearch] = useState('')
@@ -237,19 +239,27 @@ export default function Purchases({
                     ✓ جنس رسید — به گدام اضافه شود
                   </button>
                 ) : (
-                  <div className="mt-2 flex gap-4">
+                  <div className="mt-2 flex flex-wrap gap-4">
                     <button className="text-xs font-bold text-amber-700" onClick={() => setReturningPurchase(p)}>
                       مرجوعی به تأمین‌کننده
                     </button>
                     <button className="text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
-                      اصلاح قیمت خرید
+                      اصلاح خرید
+                    </button>
+                    <button className="text-xs font-bold text-red-700" onClick={() => setCancellingPurchase(p)}>
+                      خرید اشتباهی
                     </button>
                   </div>
                 )}
                 {pending && (
-                  <button className="mt-2 text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
-                    اصلاح قیمت خرید
-                  </button>
+                  <div className="mt-2 flex gap-4">
+                    <button className="text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
+                      اصلاح خرید
+                    </button>
+                    <button className="text-xs font-bold text-red-700" onClick={() => setCancellingPurchase(p)}>
+                      خرید اشتباهی
+                    </button>
+                  </div>
                 )}
               </Card>
             )
@@ -356,6 +366,7 @@ export default function Purchases({
       {returningTo && <SupplierReturnModal supplier={returningTo} onClose={() => setReturningTo(null)} />}
       {returningPurchase && <PurchaseReturnModal purchase={returningPurchase} onClose={() => setReturningPurchase(null)} />}
       {correctingPurchase && <PurchasePriceCorrectionModal purchase={correctingPurchase} onClose={() => setCorrectingPurchase(null)} />}
+      {cancellingPurchase && <PurchaseCancelModal purchase={cancellingPurchase} onClose={() => setCancellingPurchase(null)} />}
       {detail && <SupplierDetailModal supplier={detail} onClose={() => setDetail(null)} />}
       {showLanding && <LandingCostModal onClose={() => setShowLanding(false)} />}
     </div>

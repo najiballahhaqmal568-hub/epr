@@ -18,6 +18,8 @@ import { db, type Sale, type Purchase, type Variant } from '../src/db'
 import {
   addSale,
   addPurchase,
+  correctPurchase,
+  cancelPurchase,
   receivePurchase,
   addCustomerReturn,
   addSupplierReturn,
@@ -155,6 +157,28 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         const pend = await db.purchases.filter((p) => !p.deleted && p.received === false).toArray()
         if (pend.length === 0) return
         await receivePurchase(pick(pend).id!)
+      }
+    },
+    {
+      name: 'اصلاح خرید',
+      run: async () => {
+        const purchases = await db.purchases.filter((purchase) => !purchase.deleted).toArray()
+        if (!purchases.length) return
+        const purchase = pick(purchases)
+        const line = purchase.lines[0]
+        const qty = Math.max(1, line.qty + int(-2, 2))
+        const unitCost = Math.max(1, line.unitCost + int(-100, 100))
+        const total = qty * unitCost
+        if (total < purchase.paid + (purchase.sarrafAmount ?? 0)) return
+        await correctPurchase(purchase.id!, [{ variantId: line.variantId, qty, unitCost }])
+      }
+    },
+    {
+      name: 'باطل‌کردن خرید اشتباهی',
+      run: async () => {
+        const purchases = await db.purchases.filter((purchase) => !purchase.deleted).toArray()
+        if (!purchases.length) return
+        await cancelPurchase(pick(purchases).id!)
       }
     },
     {

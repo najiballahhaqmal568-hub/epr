@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -316,6 +316,7 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
         })
       }
       await db.adjustments.add({
+        refId: purchaseId,
         date: Date.now(),
         variantId: line.variantId,
         productName: line.productName,
@@ -332,6 +333,280 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
   })
 }
 
+export interface PurchaseEditLine {
+  variantId: number
+  qty: number
+  unitCost: number
+}
+
+export interface PurchaseCancelImpact {
+  stockChanges: Array<Pick<PurchaseLine, 'variantId' | 'productName' | 'size' | 'color'> & { qtyChange: number }>
+  cashReturn: number
+  purchaseCashReturn: number
+  landingCashReturn: number
+  cashBox: string
+  supplierDebtDecrease: number
+  sarrafDebtDecrease: number
+  blockedReason?: string
+}
+
+async function canonicalPurchaseLines(lines: PurchaseEditLine[]): Promise<PurchaseLine[]> {
+  if (!lines.length) throw new Error('حداقل یک جنس در خرید باشد')
+  const seen = new Set<number>()
+  const out: PurchaseLine[] = []
+  for (const input of lines) {
+    const qty = afn(input.qty)
+    const unitCost = afn(input.unitCost)
+    if (qty <= 0) throw new Error('تعداد هر جنس باید بیشتر از صفر باشد')
+    if (unitCost <= 0) throw new Error('قیمت خرید هر جنس باید بیشتر از صفر باشد')
+    if (seen.has(input.variantId)) throw new Error('یک سایز و رنگ را دو بار اضافه نکنید')
+    seen.add(input.variantId)
+    const variant = await db.variants.get(input.variantId)
+    if (!variant || variant.deleted) throw new Error('یکی از اجناس یافت نشد')
+    const product = await db.products.get(variant.productId)
+    if (!product || product.deleted) throw new Error('نام یکی از اجناس یافت نشد')
+    out.push({
+      variantId: input.variantId,
+      productName: product.name,
+      size: variant.size,
+      color: variant.color,
+      qty,
+      unitCost
+    })
+  }
+  return out
+}
+
+function quantitiesByVariant(lines: Array<{ variantId: number; qty: number }>): Map<number, number> {
+  const out = new Map<number, number>()
+  for (const line of lines) out.set(line.variantId, (out.get(line.variantId) ?? 0) + line.qty)
+  return out
+}
+
+async function linkedPurchaseReceipts(purchase: Purchase): Promise<Adjustment[]> {
+  if (!purchase.id) return []
+  return db.adjustments
+    .filter((adjustment) => !adjustment.deleted && adjustment.reason === 'purchaseReceived' && adjustment.refId === purchase.id)
+    .toArray()
+}
+
+async function assertPurchaseCanChange(purchase: Purchase, nextVariantIds: number[]): Promise<Adjustment[]> {
+  if (purchase.received === false) return []
+  const arrivedAt = purchase.received === true ? (purchase.receivedAt ?? purchase.date) : purchase.date
+  const affected = new Set([...purchase.lines.map((line) => line.variantId), ...nextVariantIds])
+
+  const laterSale = await db.sales
+    .where('date')
+    .aboveOrEqual(arrivedAt)
+    .filter((sale) => !sale.deleted && sale.lines.some((line) => affected.has(line.variantId)))
+    .first()
+  if (laterSale) throw new Error('بعد از این خرید از همین جنس فروش ثبت شده است؛ اول آن فروش را بررسی کنید.')
+
+  const laterReturn = await db.returns
+    .where('date')
+    .aboveOrEqual(arrivedAt)
+    .filter((ret) => !ret.deleted && ret.lines.some((line) => affected.has(line.variantId)))
+    .first()
+  if (laterReturn) throw new Error('بعد از این خرید برای همین جنس مرجوعی ثبت شده است؛ اول آن سند را بررسی کنید.')
+
+  const laterAdjustment = await db.adjustments
+    .where('date')
+    .aboveOrEqual(arrivedAt)
+    .filter(
+      (adjustment) =>
+        !adjustment.deleted &&
+        adjustment.reason !== 'purchaseReceived' &&
+        affected.has(adjustment.variantId)
+    )
+    .first()
+  if (laterAdjustment) throw new Error('بعد از این خرید موجودی همین جنس تعدیل شده است؛ اول سند تعدیل را بررسی کنید.')
+
+  if (purchase.received !== true) return []
+  const receipts = await linkedPurchaseReceipts(purchase)
+  const expected = quantitiesByVariant(purchase.lines)
+  const actual = quantitiesByVariant(receipts.map((receipt) => ({ variantId: receipt.variantId, qty: receipt.qtyChange })))
+  const matches =
+    receipts.length > 0 &&
+    expected.size === actual.size &&
+    [...expected].every(([variantId, qty]) => actual.get(variantId) === qty)
+  if (!matches) {
+    throw new Error('این خرید از نسخهٔ قدیمی رسیده و سند رسید آن قابل تشخیص نیست؛ برای جلوگیری از خرابی گدام خودکار تغییر نمی‌کند.')
+  }
+  return receipts
+}
+
+async function applyLocalEffects(table: 'purchases' | 'adjustments', doc: Purchase | Adjustment, sign: 1 | -1): Promise<void> {
+  for (const effect of effectsOf(table, doc)) {
+    const row = await db.table(effect.table).get(effect.id!)
+    if (!row) throw new Error('حساب مربوط به سند یافت نشد')
+    const next = Number(row[effect.field] ?? 0) + effect.delta * sign
+    if (effect.field === 'stockQty' && next < 0) throw new Error('موجودی برای اصلاح یا ابطال این خرید کافی نیست')
+    await db.table(effect.table).update(effect.id!, { [effect.field]: next })
+  }
+}
+
+async function rebuildLastPurchaseDates(variantIds: Set<number>): Promise<void> {
+  if (!variantIds.size) return
+  const purchases = await db.purchases.filter((purchase) => !purchase.deleted && purchase.received !== false).toArray()
+  for (const variantId of variantIds) {
+    let latest = 0
+    for (const purchase of purchases) {
+      if (purchase.lines.some((line) => line.variantId === variantId)) {
+        latest = Math.max(latest, purchase.received === true ? (purchase.receivedAt ?? purchase.date) : purchase.date)
+      }
+    }
+    await db.variants.update(variantId, { lastPurchaseAt: latest || undefined })
+  }
+}
+
+/** اصلاح جنس، تعداد و قیمت خرید؛ تأمین‌کننده و پرداخت عمداً ثابت می‌مانند. */
+export async function correctPurchase(purchaseId: number, inputLines: PurchaseEditLine[]): Promise<void> {
+  return db.transaction(
+    'rw',
+    [db.purchases, db.products, db.variants, db.suppliers, db.sales, db.adjustments, db.returns],
+    async () => {
+      const purchase = await db.purchases.get(purchaseId)
+      if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
+      const lines = await canonicalPurchaseLines(inputLines)
+      const total = afn(lines.reduce((sum, line) => sum + line.qty * line.unitCost, 0))
+      const committed = purchase.paid + (purchase.sarrafAmount ?? 0)
+      if (total < committed) {
+        throw new Error(
+          `مجموع درست خرید ${total} افغانی است، اما ${committed} افغانی قبلاً پرداخت/حواله ثبت شده. این خرید را باطل و دوباره درست ثبت کنید.`
+        )
+      }
+
+      const receipts = await assertPurchaseCanChange(purchase, lines.map((line) => line.variantId))
+      const affected = new Set([...purchase.lines.map((line) => line.variantId), ...lines.map((line) => line.variantId)])
+      const revised: Purchase = { ...purchase, lines, total }
+
+      await applyLocalEffects('purchases', purchase, -1)
+      if (purchase.received === true) {
+        for (const receipt of receipts) {
+          await applyLocalEffects('adjustments', receipt, -1)
+          await db.adjustments.update(receipt.id!, { deleted: true })
+        }
+      }
+
+      await db.purchases.update(purchaseId, { lines, total })
+      await applyLocalEffects('purchases', revised, 1)
+
+      if (purchase.received === true) {
+        const receiptDate = purchase.receivedAt ?? purchase.date
+        for (const line of lines) {
+          const receipt: Adjustment = {
+            refId: purchaseId,
+            date: receiptDate,
+            variantId: line.variantId,
+            productName: line.productName,
+            size: line.size,
+            color: line.color,
+            qtyChange: line.qty,
+            reason: 'purchaseReceived',
+            note: `رسید اصلاح‌شدهٔ خرید — ${purchase.supplierName}`
+          }
+          await applyLocalEffects('adjustments', receipt, 1)
+          await db.adjustments.add(receipt)
+        }
+      }
+
+      await rebuildLastPurchaseDates(affected)
+      await applyRebuiltCosts()
+    }
+  )
+}
+
+function purchaseLandingCashPaid(purchase: Purchase): number {
+  return Math.max(0, (purchase.landingCost ?? 0) - landingSarrafOwed(purchase) - landingUnpaidOf(purchase))
+}
+
+/** اثر ابطال پیش از تأیید؛ هیچ داده‌ای تغییر نمی‌کند. */
+export async function cancelPurchaseImpact(purchaseId: number): Promise<PurchaseCancelImpact | null> {
+  const purchase = await db.purchases.get(purchaseId)
+  if (!purchase || purchase.deleted) return null
+  const original = await db.cashMovements.filter((movement) => !movement.deleted && movement.type === 'purchase' && movement.refId === purchaseId).first()
+  let blockedReason: string | undefined
+  try {
+    await assertPurchaseCanChange(purchase, [])
+  } catch (error) {
+    blockedReason = error instanceof Error ? error.message : String(error)
+  }
+  const purchaseCashReturn = purchase.paid
+  const landingCashReturn = purchaseLandingCashPaid(purchase)
+  return {
+    stockChanges:
+      purchase.received === false
+        ? []
+        : purchase.lines.map((line) => ({
+            variantId: line.variantId,
+            productName: line.productName,
+            size: line.size,
+            color: line.color,
+            qtyChange: -line.qty
+          })),
+    cashReturn: purchaseCashReturn + landingCashReturn,
+    purchaseCashReturn,
+    landingCashReturn,
+    cashBox: original ? boxOf(original) : SHOP_BOX,
+    supplierDebtDecrease: Math.max(0, purchase.total - purchase.paid - (purchase.sarrafAmount ?? 0)),
+    sarrafDebtDecrease: (purchase.sarrafAmount ?? 0) + landingSarrafOwed(purchase),
+    blockedReason
+  }
+}
+
+/** ابطال خرید اشتباهی با حفظ سابقه و برگرداندن تمام اثرها. */
+export async function cancelPurchase(purchaseId: number): Promise<void> {
+  return db.transaction(
+    'rw',
+    [db.purchases, db.variants, db.suppliers, db.sales, db.adjustments, db.returns, db.cashMovements],
+    async () => {
+      const purchase = await db.purchases.get(purchaseId)
+      if (!purchase || purchase.deleted) return
+      const receipts = await assertPurchaseCanChange(purchase, [])
+      const affected = new Set(purchase.lines.map((line) => line.variantId))
+
+      await applyLocalEffects('purchases', purchase, -1)
+      for (const receipt of receipts) {
+        await applyLocalEffects('adjustments', receipt, -1)
+        await db.adjustments.update(receipt.id!, { deleted: true })
+      }
+      await db.purchases.update(purchaseId, { deleted: true })
+
+      if (purchase.paid > 0) {
+        const original = await db.cashMovements
+          .filter((cash) => !cash.deleted && cash.type === 'purchase' && cash.refId === purchaseId)
+          .first()
+        await movement({
+          date: Date.now(),
+          type: 'purchase',
+          refId: purchaseId,
+          amount: purchase.paid,
+          box: original ? boxOf(original) : SHOP_BOX,
+          note: `ابطال خرید — ${purchase.supplierName}`
+        })
+      }
+
+      const landingCash = purchaseLandingCashPaid(purchase)
+      if (landingCash > 0) {
+        const originalLanding = await db.cashMovements
+          .filter((cash) => !cash.deleted && cash.type === 'landing' && cash.refId === purchaseId)
+          .first()
+        await movement({
+          date: Date.now(),
+          type: 'landing',
+          refId: purchaseId,
+          amount: landingCash,
+          box: originalLanding ? boxOf(originalLanding) : SHOP_BOX,
+          note: `ابطال مصارف رسیدن — ${purchase.supplierName}`
+        })
+      }
+
+      await rebuildLastPurchaseDates(affected)
+      await applyRebuiltCosts()
+    }
+  )
+}
+
 /**
  * اصلاح قیمت‌های یک فاکتور خرید.
  *
@@ -341,61 +616,12 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
  * قیمت خریدِ ثبت‌شده در فاکتور فروش باید جداگانه قابل توضیح بماند.
  */
 export async function correctPurchasePrices(purchaseId: number, unitCosts: number[]): Promise<void> {
-  return db.transaction(
-    'rw',
-    [db.purchases, db.variants, db.suppliers, db.sales, db.adjustments, db.returns],
-    async () => {
-      const purchase = await db.purchases.get(purchaseId)
-      if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
-      if (unitCosts.length !== purchase.lines.length) throw new Error('قیمت تمام اجناس این خرید را بنویسید')
-
-      const lines = purchase.lines.map((line, index) => {
-        const unitCost = afn(unitCosts[index])
-        if (unitCost <= 0) throw new Error('قیمت خرید باید بیشتر از صفر باشد')
-        return { ...line, unitCost }
-      })
-      const total = afn(lines.reduce((sum, line) => sum + line.qty * line.unitCost, 0))
-      const hawala = purchase.sarrafAmount ?? 0
-      const committed = purchase.paid + hawala
-      if (total < committed) {
-        throw new Error(
-          `مجموع درست خرید ${total} افغانی است، اما ${committed} افغانی قبلاً پرداخت/حواله ثبت شده. اول اضافه‌پرداخت را با تأمین‌کننده تصفیه کنید.`
-        )
-      }
-
-      if (purchase.received !== false) {
-        const arrivedAt = purchase.received === true ? (purchase.receivedAt ?? purchase.date) : purchase.date
-        const variantIds = new Set(lines.map((line) => line.variantId))
-        const laterSale = await db.sales
-          .where('date')
-          .aboveOrEqual(arrivedAt)
-          .filter((sale) => !sale.deleted && sale.lines.some((line) => variantIds.has(line.variantId)))
-          .first()
-        if (laterSale) {
-          throw new Error('بعد از این خرید از همین جنس فروش ثبت شده است؛ برای حفظ مفاد فاکتورهای گذشته، قیمت این خرید خودکار تغییر نمی‌کند.')
-        }
-        const laterReturn = await db.returns
-          .where('date')
-          .aboveOrEqual(arrivedAt)
-          .filter((ret) => !ret.deleted && ret.lines.some((line) => variantIds.has(line.variantId)))
-          .first()
-        if (laterReturn) {
-          throw new Error('بعد از این خرید برای همین جنس مرجوعی ثبت شده است؛ اول سند مرجوعی را بررسی کنید.')
-        }
-      }
-
-      const oldDebt = Math.max(0, purchase.total - purchase.paid - hawala)
-      const newDebt = Math.max(0, total - purchase.paid - hawala)
-      const debtDelta = newDebt - oldDebt
-      if (debtDelta !== 0) {
-        const supplier = await db.suppliers.get(purchase.supplierId)
-        if (!supplier || supplier.deleted) throw new Error('تأمین‌کنندهٔ این خرید یافت نشد')
-        await db.suppliers.update(purchase.supplierId, { balance: supplier.balance + debtDelta })
-      }
-
-      await db.purchases.update(purchaseId, { lines, total })
-      await applyRebuiltCosts()
-    }
+  const purchase = await db.purchases.get(purchaseId)
+  if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
+  if (unitCosts.length !== purchase.lines.length) throw new Error('قیمت تمام اجناس این خرید را بنویسید')
+  return correctPurchase(
+    purchaseId,
+    purchase.lines.map((line, index) => ({ variantId: line.variantId, qty: line.qty, unitCost: unitCosts[index] }))
   )
 }
 

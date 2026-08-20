@@ -14,6 +14,8 @@ import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
 import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
 import CategoryManager from '../src/pages/expenses/CategoryManager'
+import PurchasePriceCorrectionModal from '../src/pages/purchases/PurchasePriceCorrectionModal'
+import PurchaseCancelModal from '../src/pages/purchases/PurchaseCancelModal'
 import {
   addSale,
   addPurchase,
@@ -22,6 +24,9 @@ import {
   landingUnpaidOf,
   receivePurchase,
   correctPurchasePrices,
+  correctPurchase,
+  cancelPurchase,
+  cancelPurchaseImpact,
   addCustomerReturn,
   addSupplierReturn,
   addExchange,
@@ -61,7 +66,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
-import { applyDocEffects, applyRemoteRow, shouldResetForGeneration } from '../src/lib/sync'
+import { applyDocEffects, applyRemoteRow, encodeRefs, decodeRefs, shouldResetForGeneration } from '../src/lib/sync'
 import { dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
@@ -754,6 +759,183 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('قرض تأمین‌کننده به اندازهٔ تفاوت اصلاح شد', (await db.suppliers.get(supId))!.balance, 12000)
       eq('صندوق تغییر نکرد', await cashBalance(), 0)
       eq('کنترل حساب‌ها اختلافی پیدا نکرد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'اصلاح کامل خرید — جنس، تعداد و قیمت با پرداخت ثابت عوض شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '43' })
+      const pid = await addPurchase(buy(supId, v1, 10, 500, { paid: 0 }))
+
+      await correctPurchase(pid, [{ variantId: v2, qty: 8, unitCost: 600 }])
+
+      const purchase = (await db.purchases.get(pid))!
+      eq('جنس اشتباه از گدام برگشت', await stockOf(v1), 0)
+      eq('جنس درست وارد گدام شد', await stockOf(v2), 8)
+      eq('قیمت جنس درست شد', await costOf(v2), 600)
+      eq('مجموع فاکتور درست شد', purchase.total, 4800)
+      eq('قرض تأمین‌کننده درست شد', (await db.suppliers.get(supId))!.balance, 4800)
+      eq('پرداخت ثابت ماند', purchase.paid, 0)
+      is('تأمین‌کننده ثابت ماند', purchase.supplierId, supId)
+      eq('کنترل حساب‌ها اختلافی ندارد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'اصلاح کامل خرید در راه — فقط سند عوض شود و هنگام رسید درست وارد شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '44' })
+      const pid = await addPurchase(buy(supId, v1, 10, 500, { received: false, paid: 0 }))
+
+      await correctPurchase(pid, [{ variantId: v2, qty: 6, unitCost: 700 }])
+      eq('جنس قبلی وارد گدام نشد', await stockOf(v1), 0)
+      eq('جنس درست هنوز در راه است', await stockOf(v2), 0)
+      eq('قرض خرید در راه اصلاح شد', (await db.suppliers.get(supId))!.balance, 4200)
+
+      await receivePurchase(pid)
+      eq('هنگام رسید فقط جنس درست وارد شد', await stockOf(v2), 6)
+      eq('قیمت درست هنگام رسید ثبت شد', await costOf(v2), 700)
+    }
+  },
+  {
+    name: 'اصلاح کامل خرید رسیده از راه — سند رسید نیز اصلاح شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const v2 = await makeVariant({ size: '45' })
+      const pid = await addPurchase(buy(supId, v1, 10, 500, { received: false, paid: 0 }))
+      await receivePurchase(pid)
+
+      await correctPurchase(pid, [{ variantId: v2, qty: 7, unitCost: 650 }])
+
+      eq('رسید قبلی از گدام برگشت', await stockOf(v1), 0)
+      eq('رسید درست وارد گدام شد', await stockOf(v2), 7)
+      eq('قرض درست شد', (await db.suppliers.get(supId))!.balance, 4550)
+      const receipts = await db.adjustments.filter((a) => !a.deleted && a.reason === 'purchaseReceived' && a.refId === pid).toArray()
+      eq('یک سند رسید زنده ماند', receipts.length, 1)
+      eq('سند رسید به جنس درست وصل است', receipts[0].variantId, v2)
+      const encoded = await encodeRefs('adjustments', receipts[0] as unknown as Record<string, unknown>)
+      is('رسید برای همگام‌سازی به uuid خرید وصل شد', encoded.purchaseUuid, (await db.purchases.get(pid))!.uuid)
+      const decoded = await decodeRefs('adjustments', encoded)
+      eq('uuid خرید در موبایل به id محلی برمی‌گردد', decoded.refId as number, pid)
+      eq('کنترل حساب‌ها اختلافی ندارد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'باطل‌کردن خرید اشتباهی — گدام، قرض و صندوق کامل برگردد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(10000)
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 2000 }))
+
+      const impact = (await cancelPurchaseImpact(pid))!
+      eq('پیش‌نمایش تعداد خروج از گدام', impact.stockChanges[0].qtyChange, -10)
+      eq('پیش‌نمایش پول برگشتی', impact.cashReturn, 2000)
+      eq('پیش‌نمایش کاهش قرض', impact.supplierDebtDecrease, 3000)
+
+      await cancelPurchase(pid)
+      eq('جنس خرید اشتباهی از گدام خارج شد', await stockOf(vId), 0)
+      eq('قرض خرید اشتباهی حذف شد', (await db.suppliers.get(supId))!.balance, 0)
+      eq('پول نقد به صندوق برگشت', await cashBalance(), 10000)
+      is('سند برای سابقه باطل ماند', (await db.purchases.get(pid))!.deleted, true)
+      eq('کنترل حساب‌ها اختلافی ندارد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'باطل‌کردن خرید در راه و رسیده — هر دو بدون موجودی یا قرض بمانند',
+    run: async () => {
+      const supId = await newSupplier()
+      const v1 = await makeVariant()
+      const pending = await addPurchase(buy(supId, v1, 10, 500, { received: false, paid: 0 }))
+      await cancelPurchase(pending)
+      eq('خرید در راه موجودی نساخت', await stockOf(v1), 0)
+      eq('قرض خرید در راه برگشت', (await db.suppliers.get(supId))!.balance, 0)
+
+      const v2 = await makeVariant({ size: '46' })
+      const received = await addPurchase(buy(supId, v2, 9, 600, { received: false, paid: 0 }))
+      await receivePurchase(received)
+      await cancelPurchase(received)
+      eq('خرید رسیده از گدام برگشت', await stockOf(v2), 0)
+      eq('قرض خرید رسیده برگشت', (await db.suppliers.get(supId))!.balance, 0)
+      eq('سند رسید نیز باطل شد', await db.adjustments.filter((a) => !a.deleted && a.refId === received).count(), 0)
+      eq('کنترل حساب‌ها اختلافی ندارد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'باطل‌کردن خرید — مصارف رسیدن نقد، قرضی و صراف نیز برگردد',
+    run: async () => {
+      const supId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
+      const vId = await makeVariant()
+      await seedCash(1000)
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      await addLandingCost([pid], 300, 'cash')
+      await addLandingCost([pid], 200, 'later')
+      await addLandingCost([pid], 100, 'sarraf', { id: sarrafId, name: 'صراف' })
+      eq('پیش از ابطال فقط مصرف نقدی از صندوق رفت', await cashBalance(), 700)
+      eq('قرض صراف ثبت شد', (await db.suppliers.get(sarrafId))!.balance, 100)
+
+      await cancelPurchase(pid)
+
+      eq('مصرف نقدی رسیدن به صندوق برگشت', await cashBalance(), 1000)
+      eq('قرض تأمین‌کننده برگشت', (await db.suppliers.get(supId))!.balance, 0)
+      eq('قرض صراف برگشت', (await db.suppliers.get(sarrafId))!.balance, 0)
+      eq('گدام برگشت', await stockOf(vId), 0)
+      eq('کنترل حساب‌ها اختلافی ندارد', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'رابط اصلاح و ابطال خرید — محدوده و اثرها را واضح نشان دهد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      const purchase = (await db.purchases.get(pid))!
+
+      const editHost = document.createElement('div')
+      document.body.append(editHost)
+      const editRoot = createRoot(editHost)
+      try {
+        editRoot.render(createElement(PurchasePriceCorrectionModal, { purchase, onClose: () => undefined }))
+        await waitUntil(() => editHost.textContent?.includes('تأمین‌کننده، پرداخت نقدی و حواله ثابت می‌مانند') === true)
+        is('دکمه حذف جنس از خرید دارد', editHost.textContent?.includes('حذف از خرید'), true)
+        is('بدون تغییر دوباره ثبت نمی‌کند', editHost.textContent?.includes('معلومات تغییر نکرده است'), true)
+      } finally {
+        editRoot.unmount()
+        editHost.remove()
+      }
+
+      const cancelHost = document.createElement('div')
+      document.body.append(cancelHost)
+      const cancelRoot = createRoot(cancelHost)
+      try {
+        cancelRoot.render(createElement(PurchaseCancelModal, { purchase, onClose: () => undefined }))
+        await waitUntil(() => cancelHost.textContent?.includes('کاهش قرض تأمین‌کننده') === true)
+        is('ابطال اثر گدام را نشان می‌دهد', cancelHost.textContent?.includes('اثر بر گدام'), true)
+        is('دکمه تأیید صریح دارد', cancelHost.textContent?.includes('این خرید اشتباهی است — باطل شود'), true)
+      } finally {
+        cancelRoot.unmount()
+        cancelHost.remove()
+      }
+    }
+  },
+  {
+    name: 'اصلاح و ابطال خرید — بعد از فروش حساب گذشته را خراب نکند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const pid = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      await addSale(sell(vId, 1, 900))
+
+      await throws('اصلاح کامل بعد از فروش رد شود', () => correctPurchase(pid, [{ variantId: vId, qty: 8, unitCost: 600 }]))
+      await throws('ابطال بعد از فروش رد شود', () => cancelPurchase(pid))
+      eq('فاکتور زنده ماند', (await db.purchases.get(pid))!.total, 5000)
+      eq('گدام دست‌نخورده ماند', await stockOf(vId), 9)
+      eq('قرض دست‌نخورده ماند', (await db.suppliers.get(supId))!.balance, 5000)
     }
   },
   {

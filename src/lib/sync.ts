@@ -78,7 +78,7 @@ async function idMap(table: SyncTable): Promise<Map<number, string>> {
 }
 
 /** تبدیل ارجاع‌های عددی محلی به uuid قبل از ارسال */
-async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out = { ...rec }
   delete out.id
   delete out.localUpdatedAt
@@ -101,7 +101,10 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     await enc('categoryId', 'expenseCategories', 'categoryUuid')
     await enc('creditorId', 'suppliers', 'creditorUuid')
   }
-  if (table === 'adjustments') await enc('variantId', 'variants', 'variantUuid')
+  if (table === 'adjustments') {
+    await enc('variantId', 'variants', 'variantUuid')
+    await enc('refId', 'purchases', 'purchaseUuid')
+  }
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string
     await enc('partyId', kind === 'customer' ? 'customers' : 'suppliers', 'partyUuid')
@@ -121,7 +124,7 @@ async function encodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
 }
 
 /** تبدیل uuid ها به id محلی هنگام دریافت */
-async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promise<Record<string, unknown>> {
   const out = { ...rec }
   const dec = async (target: string, refTable: SyncTable, field: string) => {
     const u = out[target]
@@ -145,7 +148,10 @@ async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promi
     await dec('categoryUuid', 'expenseCategories', 'categoryId')
     await dec('creditorUuid', 'suppliers', 'creditorId')
   }
-  if (table === 'adjustments') await dec('variantUuid', 'variants', 'variantId')
+  if (table === 'adjustments') {
+    await dec('variantUuid', 'variants', 'variantId')
+    await dec('purchaseUuid', 'purchases', 'refId')
+  }
   if (table === 'payments' || table === 'returns') {
     const kind = (out.partyType ?? out.kind) as string
     await dec('partyUuid', kind === 'customer' ? 'customers' : 'suppliers', 'partyId')
