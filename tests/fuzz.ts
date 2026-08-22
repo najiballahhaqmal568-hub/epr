@@ -26,6 +26,7 @@ import {
   addSupplierReturn,
   addExpense,
   addPayment,
+  correctSupplierPayment,
   addOpeningDebt,
   addPartnerWithdrawal,
   reconcile,
@@ -287,6 +288,32 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
           partyName: s.name,
           amount,
           ...(viaSarraf ? { via: 'sarraf' as const, sarrafId: sarrafs[0], sarrafAmount } : {})
+        })
+      }
+    },
+    {
+      name: 'اصلاح پرداخت تأمین‌کننده',
+      run: async () => {
+        const payments = await db.payments
+          .filter((p) => !p.deleted && p.partyType === 'supplier' && p.amount > 0 && !p.lenderAction && !p.groupUuid)
+          .toArray()
+        if (!payments.length) return
+        const payment = pick(payments)
+        const amount = payment.amount
+        const viaSarraf = rand() < 0.5
+        const sarrafAmount = viaSarraf ? (rand() < 0.5 ? amount : int(1, amount)) : 0
+        const newCashOut = amount - sarrafAmount
+        const oldCashOut = Math.max(0, -(payment.cashDelta ?? 0))
+        const box = boxOf(payment)
+        const currentCash = (await boxBalances()).boxes.find((row) => row.name === box)?.balance ?? 0
+        if (currentCash + oldCashOut < newCashOut) return
+        await correctSupplierPayment(payment.id!, {
+          date: Date.now(),
+          amount,
+          via: viaSarraf ? 'sarraf' : 'cash',
+          ...(viaSarraf ? { sarrafId: sarrafs[0], sarrafAmount } : {}),
+          box,
+          reason: 'اصلاح تصادفی'
         })
       }
     },

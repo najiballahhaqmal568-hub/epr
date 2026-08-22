@@ -297,6 +297,17 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
           await db.table(table).update(existing.id, merged)
           if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
           await applyRebuiltCosts()
+        } else if (table === 'payments') {
+          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
+          // دو دستگاه ممکن است همان پرداخت را همزمان اصلاح کنند. سند جایگزین
+          // uuid ثابت دارد؛ نسخهٔ برنده باید اثر نسخهٔ محلی را برگرداند و اثر
+          // تازه را اعمال کند، نه اینکه هر دو پرداخت در حساب بمانند.
+          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
+          await db.table(table).update(existing.id, merged)
+          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+        } else if (table === 'cashMovements') {
+          // حرکت‌های صندوقِ اصلاح نیز uuid ثابت دارند؛ آخرین نسخه جای قبلی می‌نشیند.
+          await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid })
         } else if (row.deleted && !existing.deleted) {
           await db.table(table).update(existing.id, { deleted: true })
           await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)

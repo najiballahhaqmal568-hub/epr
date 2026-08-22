@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Supplier } from '../../db'
+import { db, type Payment, type Supplier } from '../../db'
 import { addOpeningDebt } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
+import { CorrectSupplierPaymentModal } from './SupplierModals'
 
 /** تاریخچهٔ کامل حساب یک تأمین‌کننده یا صراف */
 export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
   const [showDebt, setShowDebt] = useState(false)
   const [debtStr, setDebtStr] = useState('')
   const [debtNote, setDebtNote] = useState('')
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
   const live = useLiveQuery(() => db.suppliers.get(supplier.id!), [supplier.id])
   const purchases = useLiveQuery(
     () => db.purchases.where('supplierId').equals(supplier.id!).filter((p) => !p.deleted).toArray(),
@@ -29,7 +31,11 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     [supplier.id]
   )
 
-  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean }
+  if (editingPayment) {
+    return <CorrectSupplierPaymentModal payment={editingPayment} onClose={() => setEditingPayment(null)} />
+  }
+
+  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment }
   const events: Ev[] = []
   purchases?.forEach((p) => {
     const hawala = p.sarrafAmount ?? 0
@@ -57,6 +63,9 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     } else {
       const sarrafAmount = p.via === 'sarraf' ? (p.sarrafAmount ?? p.amount) : 0
       const cashAmount = p.amount - sarrafAmount
+      const details = cashAmount > 0 && sarrafAmount > 0
+        ? `صندوق ${fmtMoney(cashAmount)} · صراف ${fmtMoney(sarrafAmount)}${p.note ? ` · ${p.note}` : ''}`
+        : p.note
       events.push({
         date: p.date,
         label: p.via === 'sarraf'
@@ -64,11 +73,10 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
             ? `پرداخت ترکیبی با ${p.sarrafName ?? 'صراف'}`
             : `پرداخت از طریق صراف ${p.sarrafName ?? ''}`
           : 'پرداخت نقدی',
-        sub: cashAmount > 0 && sarrafAmount > 0
-          ? `صندوق ${fmtMoney(cashAmount)} · صراف ${fmtMoney(sarrafAmount)}${p.note ? ` · ${p.note}` : ''}`
-          : p.note,
+        sub: [details, p.correctionReason ? `اصلاح‌شده — ${p.correctionReason}` : ''].filter(Boolean).join(' · ') || undefined,
         amount: p.amount,
-        plus: false
+        plus: false,
+        payment: p.lenderAction || p.groupUuid ? undefined : p
       })
     }
   })
@@ -119,16 +127,26 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
       {events.length === 0 && <Empty text="هنوز سندی ثبت نشده." />}
       <div className="max-h-96 overflow-y-auto">
         {events.map((e, i) => (
-          <div key={i} className="flex items-center justify-between border-b border-slate-100 py-2 text-sm last:border-0">
-            <div>
-              <p className="font-bold text-slate-700">{e.label}</p>
-              {e.sub && <p className="text-xs text-slate-400">{e.sub}</p>}
-              <p className="text-xs text-slate-400">{fmtDate(e.date)}</p>
+          <div key={e.payment?.uuid ?? i} className="border-b border-slate-100 py-2 text-sm last:border-0">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="font-bold text-slate-700">{e.label}</p>
+                {e.sub && <p className="text-xs text-slate-400">{e.sub}</p>}
+                <p className="text-xs text-slate-400">{fmtDate(e.date)}</p>
+              </div>
+              <span className={`shrink-0 font-bold ${e.plus ? 'text-red-600' : 'text-teal-700'}`}>
+                {e.plus ? '+' : '−'}
+                {fmtMoney(Math.abs(e.amount))}
+              </span>
             </div>
-            <span className={`font-bold ${e.plus ? 'text-red-600' : 'text-teal-700'}`}>
-              {e.plus ? '+' : '−'}
-              {fmtMoney(Math.abs(e.amount))}
-            </span>
+            {e.payment?.id && (
+              <button
+                className="mt-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
+                onClick={() => setEditingPayment(e.payment!)}
+              >
+                اصلاح سند
+              </button>
+            )}
           </div>
         ))}
       </div>

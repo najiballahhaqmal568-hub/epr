@@ -247,6 +247,25 @@ export interface Payment extends Synced {
   box?: string
   /** صفحهٔ دفترِ فزیکی که این سند در آن نوشته شد — مثل Sale.bookPage */
   bookPage?: string
+  /** سند تازه‌ای که این پرداخت اشتباه را جایگزین کرده؛ خود سند برای رد حساب نگه داشته می‌شود. */
+  correctedByUuid?: string
+  /** شناسهٔ سند اشتباه قبلی که این پرداخت جای آن را گرفته است. */
+  correctionOfUuid?: string
+  /** دلیل قابل‌فهم اصلاح برای دفتر حساب و دستگاه دوم. */
+  correctionReason?: string
+  correctedAt?: number
+  /** خلاصهٔ سند قبلی؛ بدون شناسه‌های محلی تا در همهٔ دستگاه‌ها قابل‌خواندن بماند. */
+  correctionPrevious?: {
+    date: number
+    amount: number
+    via?: Payment['via']
+    cashDelta: number
+    sarrafName?: string
+    sarrafAmount?: number
+    lenderName?: string
+    note?: string
+    box?: string
+  }
 }
 
 export interface ExpenseCategory extends Synced {

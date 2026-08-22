@@ -16,7 +16,7 @@ import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
 import CategoryManager from '../src/pages/expenses/CategoryManager'
 import PurchasePriceCorrectionModal from '../src/pages/purchases/PurchasePriceCorrectionModal'
 import PurchaseCancelModal from '../src/pages/purchases/PurchaseCancelModal'
-import { PaySupplierModal } from '../src/pages/purchases/SupplierModals'
+import { CorrectSupplierPaymentModal, PaySupplierModal } from '../src/pages/purchases/SupplierModals'
 import {
   addSale,
   addPurchase,
@@ -59,6 +59,8 @@ import {
   deleteSaleImpact,
   deletePayment,
   deletePaymentImpact,
+  correctSupplierPayment,
+  previewSupplierPaymentCorrection,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -1284,6 +1286,96 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'اصلاح امن پرداخت فروشنده — سند قبلی را با رد حساب جایگزین کند',
+    run: async () => {
+      const supplierId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف احمد', balance: 0, kind: 'sarraf' })) as number
+      await seedCash(10000)
+      await addOpeningDebt('supplier', supplierId, 'تأمین‌کننده', 5000)
+      await addPayment({
+        date: Date.now(),
+        partyType: 'supplier',
+        partyId: sarrafId,
+        partyName: 'صراف احمد',
+        amount: 2000,
+        via: 'cash'
+      })
+      const oldId = await addPayment({
+        date: Date.now(),
+        partyType: 'supplier',
+        partyId: supplierId,
+        partyName: 'تأمین‌کننده',
+        amount: 5000,
+        via: 'sarraf',
+        sarrafId,
+        sarrafName: 'صراف احمد',
+        sarrafAmount: 3000
+      })
+
+      const input = {
+        date: Date.now(),
+        amount: 4000,
+        via: 'cash' as const,
+        reason: 'سهم صراف اشتباه بود',
+        note: 'پرداخت درست'
+      }
+      const preview = await previewSupplierPaymentCorrection(oldId, input)
+      const supplierPreview = preview.accounts.find((row) => row.partyId === supplierId)!
+      const sarrafPreview = preview.accounts.find((row) => row.partyId === sarrafId)!
+      eq('پیش‌نمایش قرض فروشنده را نشان داد', supplierPreview.after, 1000)
+      eq('پیش‌نمایش حساب صراف را به طلب قبلی برگرداند', sarrafPreview.after, -2000)
+      eq('پیش‌نمایش صندوق را درست حساب کرد', preview.cash[0].after, 4000)
+
+      const replacementId = await correctSupplierPayment(oldId, input)
+      const old = (await db.payments.get(oldId))!
+      const replacement = (await db.payments.get(replacementId))!
+      is('سند قبلی به‌صورت نرم باطل شد', old.deleted, true)
+      is('سند قبلی به سند درست پیوند خورد', old.correctedByUuid, replacement.uuid)
+      is('سند درست به سند قبلی پیوند خورد', replacement.correctionOfUuid, old.uuid)
+      is('دلیل اصلاح ذخیره شد', replacement.correctionReason, 'سهم صراف اشتباه بود')
+      eq('خلاصهٔ مبلغ قبلی ذخیره شد', replacement.correctionPrevious?.amount ?? 0, 5000)
+      eq('قرض فروشنده بعد از اصلاح', (await db.suppliers.get(supplierId))!.balance, 1000)
+      eq('طلب نزد صراف بعد از اصلاح', (await db.suppliers.get(sarrafId))!.balance, -2000)
+      eq('صندوق بعد از برگشت سهم قبلی و ثبت مبلغ درست', await cashBalance(), 4000)
+      is('کنترول حساب‌ها بعد از اصلاح سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      await throws('اصلاحی که صندوق را منفی می‌کند کامل برگردد', () =>
+        correctSupplierPayment(replacementId, { ...input, amount: 9000, reason: 'آزمایش کمبود صندوق' })
+      )
+      is('بعد از شکست، سند درست هنوز فعال است', (await db.payments.get(replacementId))!.deleted, undefined)
+      eq('بعد از شکست، قرض فروشنده تغییر نکرد', (await db.suppliers.get(supplierId))!.balance, 1000)
+      eq('بعد از شکست، حساب صراف تغییر نکرد', (await db.suppliers.get(sarrafId))!.balance, -2000)
+      eq('بعد از شکست، صندوق تغییر نکرد', await cashBalance(), 4000)
+      is('کنترول حساب‌ها بعد از شکست هم سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      const replacementMovement = await db.cashMovements
+        .filter((movement) => !movement.deleted && movement.refId === replacementId && movement.note?.startsWith('اصلاح پرداخت') === true)
+        .first()
+      is('حرکت صندوق سند اصلاح uuid ثابت دارد', Boolean(replacementMovement?.uuid), true)
+      await applyRemoteRow('payments', {
+        uuid: replacement.uuid!,
+        deleted: false,
+        data: {
+          ...replacement,
+          via: 'sarraf',
+          sarrafId,
+          sarrafName: 'صراف احمد',
+          sarrafAmount: 4000,
+          cashDelta: 0
+        } as unknown as Record<string, unknown>
+      })
+      await applyRemoteRow('cashMovements', {
+        uuid: replacementMovement!.uuid!,
+        deleted: false,
+        data: { ...replacementMovement, amount: 0 } as unknown as Record<string, unknown>
+      })
+      eq('نسخهٔ برندهٔ دستگاه دوم پرداخت تکراری نساخت', await db.payments.filter((p) => !p.deleted && p.uuid === replacement.uuid).count(), 1)
+      eq('نسخهٔ برنده حساب صراف را جایگزین کرد', (await db.suppliers.get(sarrafId))!.balance, 2000)
+      eq('نسخهٔ برنده حرکت صندوق قبلی را جایگزین کرد', await cashBalance(), 8000)
+      is('کنترول حساب‌ها بعد از بردن نسخهٔ دستگاه دوم سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
     name: 'فورم پرداخت فروشنده — گزینهٔ ترکیبی سهم صندوق و صراف را ثبت کند',
     run: async () => {
       const supplierId = (await db.suppliers.add({ name: 'شیخ', balance: 5000, kind: 'supplier' })) as number
@@ -1323,6 +1415,70 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
         eq('فورم سهم صندوق را ذخیره کرد', -(saved.cashDelta ?? 0), 2000)
         eq('فورم فقط هزار قرض جدید صراف ساخت', (await db.suppliers.get(sarrafId))!.balance, 1000)
         eq('فورم دو هزار از صندوق کم کرد', await cashBalance(), 8000)
+      } finally {
+        root.unmount()
+        host.remove()
+      }
+    }
+  },
+  {
+    name: 'فورم اصلاح پرداخت — اثر قبل و بعد را نشان دهد و سند درست بسازد',
+    run: async () => {
+      const supplierId = await newSupplier()
+      const sarrafId = (await db.suppliers.add({ name: 'صراف احمد', balance: 0, kind: 'sarraf' })) as number
+      await seedCash(8000)
+      await addOpeningDebt('supplier', supplierId, 'تأمین‌کننده', 5000)
+      const oldId = await addPayment({
+        date: Date.now(),
+        partyType: 'supplier',
+        partyId: supplierId,
+        partyName: 'تأمین‌کننده',
+        amount: 5000,
+        via: 'cash'
+      })
+      const payment = (await db.payments.get(oldId))!
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      let closed = false
+      try {
+        root.render(createElement(CorrectSupplierPaymentModal, { payment, onClose: () => { closed = true } }))
+        await waitUntil(() => host.textContent?.includes('اصلاح پرداخت') === true)
+        const amountInput = Array.from(host.querySelectorAll('label')).find((label) => label.textContent?.includes('مبلغ درست'))?.querySelector('input') as HTMLInputElement
+        fillInput(amountInput, '4000')
+        await waitUntil(() => Array.from(host.querySelectorAll('select')).some((select) =>
+          Array.from(select.options).some((option) => option.value === 'mixed')
+        ))
+        const method = Array.from(host.querySelectorAll('select')).find((select) =>
+          Array.from(select.options).some((option) => option.value === 'mixed')
+        )!
+        method.value = 'mixed'
+        method.dispatchEvent(new Event('change', { bubbles: true }))
+        await waitUntil(() => host.textContent?.includes('سهم درست صندوق') === true)
+        await waitUntil(() => Array.from(host.querySelectorAll('select')).some((select) =>
+          Array.from(select.options).some((option) => option.value === String(sarrafId))
+        ))
+        const sarrafSelect = Array.from(host.querySelectorAll('select')).find((select) =>
+          Array.from(select.options).some((option) => option.value === String(sarrafId))
+        )!
+        sarrafSelect.value = String(sarrafId)
+        sarrafSelect.dispatchEvent(new Event('change', { bubbles: true }))
+        const cashInput = Array.from(host.querySelectorAll('label')).find((label) => label.textContent?.includes('سهم درست صندوق'))?.querySelector('input') as HTMLInputElement
+        fillInput(cashInput, '1000')
+        const reasonInput = Array.from(host.querySelectorAll('label')).find((label) => label.textContent?.includes('دلیل اصلاح'))?.querySelector('input') as HTMLInputElement
+        fillInput(reasonInput, 'روش پرداخت اشتباه بود')
+        await waitUntil(() => host.textContent?.includes('اثر قبل و بعد') === true)
+
+        const submit = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('ثبت اصلاح سند'))!
+        is('دکمه پس از محاسبهٔ اثر فعال شد', submit.disabled, false)
+        submit.click()
+        await waitUntilAsync(async () => (await db.payments.get(oldId))?.deleted === true)
+        const replacement = await db.payments.filter((p) => !p.deleted && p.correctionOfUuid === payment.uuid).first()
+        is('فورم سند جایگزین ساخت', Boolean(replacement), true)
+        eq('فورم مبلغ درست را ثبت کرد', replacement?.amount ?? 0, 4000)
+        eq('فورم سهم صراف را ثبت کرد', replacement?.sarrafAmount ?? 0, 3000)
+        eq('فورم سهم صندوق را ثبت کرد', -(replacement?.cashDelta ?? 0), 1000)
+        is('فورم بعد از موفقیت بسته شد', closed, true)
       } finally {
         root.unmount()
         host.remove()

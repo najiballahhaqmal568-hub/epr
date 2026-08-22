@@ -1,8 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../../db'
-import { addPayment, addOpeningDebt } from '../../lib/ops'
-import { fmtMoney, parseNum } from '../../lib/format'
+import { db, type Payment } from '../../db'
+import {
+  addPayment,
+  addOpeningDebt,
+  correctSupplierPayment,
+  previewSupplierPaymentCorrection,
+  type SupplierPaymentCorrectionInput,
+  type SupplierPaymentCorrectionPreview
+} from '../../lib/ops'
+import { fmtMoney, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
 export function NewSupplierModal({ kind, onClose }: { kind: 'supplier' | 'sarraf'; onClose: () => void }) {
@@ -162,6 +169,195 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
       >
         ثبت پرداخت
       </PrimaryBtn>
+    </Modal>
+  )
+}
+
+export function CorrectSupplierPaymentModal({ payment, onClose }: { payment: Payment; onClose: () => void }) {
+  const supplier = useLiveQuery(() => db.suppliers.get(payment.partyId), [payment.partyId])
+  const sarrafs = useLiveQuery(
+    () => db.suppliers.filter((s) => !s.deleted && s.kind === 'sarraf' && s.id !== payment.partyId).toArray(),
+    [payment.partyId]
+  )
+  const lenders = useLiveQuery(
+    () => db.suppliers.filter((s) => !s.deleted && s.kind === 'lender' && s.id !== payment.partyId).toArray(),
+    [payment.partyId]
+  )
+  const oldSarrafAmount = payment.via === 'sarraf' ? (payment.sarrafAmount ?? payment.amount) : 0
+  const oldCashAmount = Math.max(0, payment.amount - oldSarrafAmount)
+  const initialVia: 'cash' | 'sarraf' | 'mixed' | 'lender' =
+    payment.via === 'sarraf' ? (oldCashAmount > 0 ? 'mixed' : 'sarraf') : payment.via === 'lender' ? 'lender' : 'cash'
+  const [amount, setAmount] = useState(String(payment.amount))
+  const [dateStr, setDateStr] = useState(toDateInput(payment.date))
+  const [via, setVia] = useState<'cash' | 'sarraf' | 'mixed' | 'lender'>(initialVia)
+  const [sarrafId, setSarrafId] = useState<number | ''>(payment.sarrafId ?? '')
+  const [cashPart, setCashPart] = useState(String(oldCashAmount || ''))
+  const [lenderId, setLenderId] = useState<number | ''>(payment.lenderId ?? '')
+  const [note, setNote] = useState(payment.note ?? '')
+  const [reason, setReason] = useState('')
+  const [preview, setPreview] = useState<SupplierPaymentCorrectionPreview | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const total = parseNum(amount)
+  const cash = parseNum(cashPart)
+  const formValid =
+    total > 0 &&
+    Boolean(dateStr) &&
+    Boolean(reason.trim()) &&
+    ((via !== 'sarraf' && via !== 'mixed') || Boolean(sarrafId)) &&
+    (via !== 'mixed' || (cash > 0 && cash < total)) &&
+    (via !== 'lender' || Boolean(lenderId))
+
+  const input = (): SupplierPaymentCorrectionInput => ({
+    date: fromDateInput(dateStr),
+    amount: total,
+    via: via === 'mixed' ? 'sarraf' : via,
+    ...(via === 'sarraf' || via === 'mixed'
+      ? { sarrafId: Number(sarrafId), sarrafAmount: via === 'mixed' ? total - cash : total }
+      : {}),
+    ...(via === 'lender' ? { lenderId: Number(lenderId) } : {}),
+    note,
+    box: payment.box,
+    reason
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    if (!formValid || !payment.id) {
+      setPreview(null)
+      setLoading(false)
+      return () => {
+        cancelled = true
+      }
+    }
+    setLoading(true)
+    setError('')
+    void previewSupplierPaymentCorrection(payment.id, input())
+      .then((next) => {
+        if (!cancelled) setPreview(next)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setPreview(null)
+          setError(e instanceof Error ? e.message : String(e))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [amount, cashPart, dateStr, lenderId, note, payment.box, payment.id, reason, sarrafId, via, formValid])
+
+  if (!supplier) return null
+  const hasNegativeCash = preview?.cash.some((row) => row.after < 0) ?? false
+  return (
+    <Modal title={`اصلاح پرداخت — ${supplier.name}`} onClose={onClose}>
+      <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
+        <p className="font-bold text-amber-900">سند فعلی</p>
+        <p className="mt-1 text-slate-700">مجموع: {fmtMoney(payment.amount)}</p>
+        {payment.via === 'sarraf' ? (
+          <p className="text-xs text-slate-500">
+            صندوق {fmtMoney(oldCashAmount)} · صراف {fmtMoney(oldSarrafAmount)} ({payment.sarrafName})
+          </p>
+        ) : payment.via === 'lender' ? (
+          <p className="text-xs text-slate-500">پرداخت مستقیم توسط {payment.lenderName}</p>
+        ) : (
+          <p className="text-xs text-slate-500">تمام مبلغ از صندوق</p>
+        )}
+      </div>
+
+      <Field label="مبلغ درست *">
+        <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      </Field>
+      <Field label="تاریخ درست *">
+        <input className={inputCls} type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
+      </Field>
+      <Field label="طریق درست پرداخت *">
+        <select className={inputCls} value={via} onChange={(e) => setVia(e.target.value as typeof via)}>
+          <option value="cash">نقد از صندوق</option>
+          {(sarrafs?.length ?? 0) > 0 && <option value="sarraf">همه از طریق صراف</option>}
+          {(sarrafs?.length ?? 0) > 0 && <option value="mixed">ترکیبی — صندوق و صراف</option>}
+          {(lenders?.length ?? 0) > 0 && <option value="lender">قرض‌دهنده مستقیم فروشنده را پرداخت کرد</option>}
+        </select>
+      </Field>
+
+      {(via === 'sarraf' || via === 'mixed') && (
+        <>
+          <Field label="صراف درست *">
+            <select className={inputCls} value={sarrafId} onChange={(e) => setSarrafId(e.target.value ? Number(e.target.value) : '')}>
+              <option value="">انتخاب کنید...</option>
+              {sarrafs?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          {via === 'mixed' && (
+            <Field label="سهم درست صندوق *">
+              <input className={inputCls} inputMode="numeric" value={cashPart} onChange={(e) => setCashPart(e.target.value)} />
+            </Field>
+          )}
+        </>
+      )}
+      {via === 'lender' && (
+        <Field label="قرض‌دهندهٔ درست *">
+          <select className={inputCls} value={lenderId} onChange={(e) => setLenderId(e.target.value ? Number(e.target.value) : '')}>
+            <option value="">انتخاب کنید...</option>
+            {lenders?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </Field>
+      )}
+      <Field label="یادداشت سند">
+        <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
+      </Field>
+      <Field label="دلیل اصلاح *">
+        <input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثلاً مبلغ یا سهم صندوق اشتباه بود" />
+      </Field>
+
+      {loading && <p className="mb-3 text-center text-sm text-slate-400">در حال محاسبهٔ اثر اصلاح…</p>}
+      {preview && (
+        <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+          <p className="mb-2 font-bold text-slate-700">اثر قبل و بعد</p>
+          {preview.accounts.map((row) => (
+            <div key={`party-${row.partyId}`} className="mb-1 flex items-center justify-between gap-2">
+              <span>{row.partyName}</span>
+              <span className="font-bold">فعلی {fmtMoney(row.before)} · بعد {fmtMoney(row.after)}</span>
+            </div>
+          ))}
+          {preview.cash.map((row) => (
+            <div key={`cash-${row.box}`} className={`mb-1 flex items-center justify-between gap-2 ${row.after < 0 ? 'text-red-600' : ''}`}>
+              <span>صندوق «{row.box}»</span>
+              <span className="font-bold">فعلی {fmtMoney(row.before)} · بعد {fmtMoney(row.after)}</span>
+            </div>
+          ))}
+          {hasNegativeCash && <p className="mt-2 font-bold text-red-600">پول صندوق برای این اصلاح کافی نیست.</p>}
+        </div>
+      )}
+      <p className="mb-3 text-xs text-slate-500">
+        سند قبلی پاک نمی‌شود؛ با علامت «اصلاح‌شده» نگه داشته می‌شود و سند درست جای آن ثبت می‌گردد.
+      </p>
+      {error && <p className="mb-2 text-sm font-bold text-red-600">{error}</p>}
+      <div className="sticky -bottom-8 -mx-4 -mb-8 border-t border-slate-100 bg-white px-4 pb-8 pt-3">
+        <PrimaryBtn
+          disabled={!formValid || !preview || loading || saving || hasNegativeCash}
+          onClick={async () => {
+            if (!payment.id) return
+            try {
+              setSaving(true)
+              setError('')
+              await correctSupplierPayment(payment.id, input())
+              onClose()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e))
+            } finally {
+              setSaving(false)
+            }
+          }}
+        >
+          {saving ? 'در حال ثبت…' : 'ثبت اصلاح سند'}
+        </PrimaryBtn>
+      </div>
     </Modal>
   )
 }
