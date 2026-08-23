@@ -71,6 +71,7 @@ import {
   correctLandingTotal,
   cancelCustomerReturn,
   cancelReturnImpact,
+  correctLenderPayment,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -908,6 +909,49 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('مفاد نهایی', await profitAndLoss(), 400)
       eq('هیچ برگشت زنده نماند', (await db.returns.filter((r) => !r.deleted).toArray()).length, 0)
       eq('حساب مشتری سالم', await customerLedgerEnd(custId), 0)
+    }
+  },
+  {
+    name: 'اصلاح امن سند پول قرض‌دار — حساب او و صندوق هر دو درست',
+    run: async () => {
+      const lenderId = (await db.suppliers.add({ name: 'حاجی صاحب', balance: 0, kind: 'lender' } as never)) as number
+      await seedCash(5000)
+      await addLoan(lenderId, 'حاجی صاحب', 5000)
+      eq('قرض ثبت شد', (await db.suppliers.get(lenderId))!.balance, 5000)
+      const loanDoc = (await db.payments.filter((p) => !p.deleted && p.partyType === 'supplier' && p.amount < 0 && p.via === 'cash').first())!
+
+      const c1id = await correctLenderPayment(loanDoc.id!, { amount: 4000, date: Date.now(), reason: 'قرض کمتر بود' })
+      eq('حساب او بعد از اصلاح قرض', (await db.suppliers.get(lenderId))!.balance, 4000)
+      eq('صندوق: فقط ۴٬۰۰۰ آمد', await cashBalance(), 9000)
+      const c1 = (await db.payments.get(c1id))!
+      eq('سند نو منفی است', c1.amount, -4000)
+      is('دلیل ذخیره شد', c1.correctionReason, 'قرض کمتر بود')
+      is('زنجیره درست', c1.correctionOfUuid, loanDoc.uuid)
+      eq('سند قبلی زنده نیست', Boolean((await db.payments.get(loanDoc.id!))!.deleted), true)
+
+      await giveCashToLender(lenderId, 'حاجی صاحب', 1500)
+      eq('پرداخت ثبت شد', (await db.suppliers.get(lenderId))!.balance, 2500)
+      eq('صندوق پس از پرداخت', await cashBalance(), 7500)
+      const repayDoc = (await db.payments.filter((p) => !p.deleted && p.lenderAction === 'cashRepayment').first())!
+      const c2id = await correctLenderPayment(repayDoc.id!, { amount: 2000, date: Date.now(), reason: 'پرداخت بیشتر شد' })
+      eq('حساب او با پرداخت اصلاح‌شده', (await db.suppliers.get(lenderId))!.balance, 2000)
+      eq('صندوق با پرداخت اصلاح‌شده', await cashBalance(), 7000)
+
+      await throws(
+        'کمبود صندوق رد شود',
+        () => correctLenderPayment(c2id, { amount: 12000, date: Date.now(), reason: 'x' })
+      )
+      eq('شکست: حساب او تغییری نکرد', (await db.suppliers.get(lenderId))!.balance, 2000)
+      eq('شکست: صندوق تغییری نکرد', await cashBalance(), 7000)
+      eq('شکست: سند زنده ماند', Boolean((await db.payments.get(c2id))!.deleted), false)
+
+      await addOpeningLenderCash(lenderId, 'حاجی صاحب', 800)
+      eq('قرض قبلی پولی ثبت شد', (await db.suppliers.get(lenderId))!.balance, 1200)
+      const openDoc = (await db.payments.filter((p) => !p.deleted && p.via === 'opening' && p.lenderOpening === true).first())!
+      await correctLenderPayment(openDoc.id!, { amount: 300, date: Date.now(), reason: 'رقم غلط بود' })
+      eq('قرض قبلی اصلاح شد — مجموع داده‌شده ۳۰۰', (await db.suppliers.get(lenderId))!.balance, 1700)
+      eq('صندوق دست نخورد', await cashBalance(), 7000)
+      eq('دفتر صندوق برابر است', await cashLedgerEnd(), 7000)
     }
   },
   {

@@ -1774,6 +1774,170 @@ export async function addPartnerWithdrawal(partnerName: string, amount: number, 
   await movement({ date: Date.now(), type: 'withdrawal', amount: -amount, partnerName, note: note?.trim() || `برداشت ${partnerName}` })
 }
 
+export interface LenderPaymentCorrectionInput {
+  /** مقدار نو — علامت از سند قبلی می‌ماند (قرض گرفته یا پرداخت به او) */
+  amount: number
+  date: number
+  note?: string
+  reason: string
+}
+
+export interface LenderPaymentCorrectionPreview {
+  lenderName: string
+  before: number
+  after: number
+  cash: Array<{ box: string; before: number; after: number }>
+}
+
+async function lenderPaymentParty(current: Payment): Promise<Supplier> {
+  if (current.partyType !== 'supplier' || current.groupUuid || current.goodsLines?.length || current.via === 'goods') {
+    throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
+  }
+  const row = await db.suppliers.get(current.partyId)
+  if (!row || row.deleted || row.kind !== 'lender') throw new Error('قرض‌دهنده یافت نشد')
+  return row
+}
+
+function lenderMoveType(p: Payment): 'loanIn' | 'loanRepay' | 'lenderCashLoan' {
+  return p.amount < 0 ? 'loanIn' : p.lenderAction === 'cashLoan' ? 'lenderCashLoan' : 'loanRepay'
+}
+
+/** پیش‌نمایش اثر اصلاح سند پولِ قرض‌دار، بدون نوشتن هیچ عددی */
+export async function previewLenderPaymentCorrection(
+  paymentId: number,
+  input: LenderPaymentCorrectionInput
+): Promise<LenderPaymentCorrectionPreview | null> {
+  const current = await db.payments.get(paymentId)
+  if (!current || current.deleted) return null
+  const lender = await lenderPaymentParty(current)
+  const mag = afn(Math.abs(input.amount))
+  if (mag <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
+  const newAmount = current.amount < 0 ? -mag : mag
+  const newCashDelta =
+    current.via === 'opening' ? 0 : current.amount < 0 ? mag : -mag
+
+  const accountDeltas = new Map<number, number>()
+  for (const effect of effectsOf('payments', current)) {
+    accountDeltas.set(effect.id!, (accountDeltas.get(effect.id!) ?? 0) - effect.delta)
+  }
+  const replacement: Payment = { ...current, amount: newAmount, cashDelta: newCashDelta }
+  for (const effect of effectsOf('payments', replacement)) {
+    accountDeltas.set(effect.id!, (accountDeltas.get(effect.id!) ?? 0) + effect.delta)
+  }
+
+  const oldCashDelta = paymentCashDelta(current, lender.kind)
+  const cashDeltas = new Map<string, number>()
+  if (oldCashDelta) cashDeltas.set(boxOf(current), (cashDeltas.get(boxOf(current)) ?? 0) - oldCashDelta)
+  if (newCashDelta) cashDeltas.set(boxOf(current), (cashDeltas.get(boxOf(current)) ?? 0) + newCashDelta)
+  const cash: LenderPaymentCorrectionPreview['cash'] = []
+  for (const [box, delta] of cashDeltas) {
+    const before = await cashBalance(box)
+    cash.push({ box, before, after: before + delta })
+  }
+  return {
+    lenderName: lender.name,
+    before: lender.balance,
+    after: lender.balance + (accountDeltas.get(current.partyId) ?? 0),
+    cash
+  }
+}
+
+/**
+ * اصلاح امن سند پولِ قرض‌دار (قرض گرفته‌شده، پرداخت به او، قرض قبلی پولی):
+ * سند قبلی رد حساب می‌ماند، اثرش بر حساب او و صندوق برمی‌گردد و سند درست
+ * در همان تراکنش ثبت می‌شود. اسناد کفش از اینجا اصلاح نمی‌شوند.
+ */
+export async function correctLenderPayment(paymentId: number, input: LenderPaymentCorrectionInput): Promise<number> {
+  return db.transaction('rw', [db.payments, db.suppliers, db.cashMovements], async () => {
+    const current = await db.payments.get(paymentId)
+    if (!current || current.deleted) throw new Error('سند یافت نشد')
+    const lender = await lenderPaymentParty(current)
+    const mag = afn(Math.abs(input.amount))
+    if (mag <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
+    if (!Number.isFinite(input.date) || input.date <= 0) throw new Error('تاریخ درست را وارد کنید')
+    if (!input.reason.trim()) throw new Error('دلیل اصلاح را بنویسید')
+
+    const newAmount = current.amount < 0 ? -mag : mag
+    const newCashDelta = current.via === 'opening' ? 0 : current.amount < 0 ? mag : -mag
+
+    for (const effect of effectsOf('payments', current)) {
+      const row = await db.table(effect.table).get(effect.id!)
+      if (!row) throw new Error('حساب مربوط به سند قبلی یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
+    }
+
+    const correctedAt = Date.now()
+    const previousUuid = current.uuid ?? newUuid()
+    const replacementUuid = correctionUuid(`lender-payment:${previousUuid}`)
+    const oldCashDelta = paymentCashDelta(current, lender.kind)
+    await db.payments.update(paymentId, {
+      uuid: previousUuid,
+      deleted: true,
+      correctedByUuid: replacementUuid,
+      correctedAt
+    })
+
+    if (oldCashDelta) {
+      await db.cashMovements.add({
+        uuid: correctionUuid(`lender-payment-reverse-cash:${previousUuid}`),
+        date: correctedAt,
+        type: lenderMoveType(current),
+        refId: paymentId,
+        amount: -oldCashDelta,
+        box: boxOf(current),
+        note: `اصلاح — برگشت سند قبلی ${current.partyName}`
+      })
+    }
+
+    // شناسهٔ محلیِ سند قبلی نباید در سند نو کپی شود — کلید تکراری می‌شود
+    const { id: _oldId, ...base } = current
+    const replacement: Payment = {
+      ...base,
+      date: input.date,
+      amount: newAmount,
+      cashDelta: newCashDelta,
+      note: input.note?.trim() || undefined,
+      uuid: replacementUuid,
+      correctionOfUuid: previousUuid,
+      correctionReason: input.reason.trim(),
+      correctedAt,
+      correctionPrevious: {
+        date: current.date,
+        amount: current.amount,
+        via: current.via,
+        cashDelta: oldCashDelta,
+        lenderName: current.lenderName ?? current.partyName,
+        note: current.note
+      }
+    }
+    const replacementId = (await db.payments.add(replacement)) as number
+
+    for (const effect of effectsOf('payments', replacement)) {
+      const row = await db.table(effect.table).get(effect.id!)
+      if (!row) throw new Error('حساب مربوط به سند اصلاح‌شده یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
+    }
+
+    const replacementBox = boxOf(replacement)
+    const balanceNow = await cashBalance(replacementBox)
+    if (balanceNow + newCashDelta < 0) {
+      throw new Error(`پیسه در «${replacementBox}» کافی نیست! موجودی: ${new Intl.NumberFormat('fa-AF').format(balanceNow)} ؋`)
+    }
+    if (newCashDelta) {
+      await db.cashMovements.add({
+        uuid: correctionUuid(`lender-payment-new-cash:${previousUuid}`),
+        date: replacement.date,
+        type: lenderMoveType(replacement),
+        refId: replacementId,
+        amount: newCashDelta,
+        box: replacementBox,
+        note: `اصلاح سند — ${replacement.partyName}`
+      })
+    }
+    return replacementId
+  })
+}
+
 const EXPENSE_MOVE: Record<Expense['type'], 'expense' | 'homeExpense' | 'personalExpense' | 'withdrawal'> = {
   business: 'expense',
   home: 'homeExpense',

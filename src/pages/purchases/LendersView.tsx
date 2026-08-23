@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../../lib/networth'
-import { accessFlags, db, type Supplier, type LenderAction } from '../../db'
+import { accessFlags, db, type Payment, type Supplier, type LenderAction } from '../../db'
 import {
   addLender,
   addLoan,
@@ -24,6 +24,7 @@ import {
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../../components/ui'
 import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
+import CorrectLenderPaymentModal from './CorrectLenderPaymentModal'
 
 type StockOption = LenderGoodsLine & { variantId: number; stockQty: number; retailPrice: number; wholesalePrice: number }
 
@@ -134,6 +135,14 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
   const [editPhone, setEditPhone] = useState(lender.phone ?? '')
   const [editNote, setEditNote] = useState(lender.note ?? '')
   const [error, setError] = useState('')
+  // سند پولی که مالک می‌خواهد اصلاح کند — بدون پاک کردن
+  const [editingLenderDoc, setEditingLenderDoc] = useState<Payment | null>(null)
+  // تأیید دومرحله‌ای شراکت: نام دقیق باید تایپ شود
+  const [partnerConfirmName, setPartnerConfirmName] = useState('')
+
+  if (editingLenderDoc) {
+    return <CorrectLenderPaymentModal payment={editingLenderDoc} onClose={() => setEditingLenderDoc(null)} />
+  }
 
   const live = useLiveQuery(() => db.suppliers.get(lender.id!), [lender.id])
   const payments = useLiveQuery(
@@ -919,10 +928,19 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             ⚠️ زحمت روزانهٔ خودتان را هم در نظر بگیرید — یا فیصدی‌تان بیشتر باشد، یا برای خود معاش ماهانه تعیین کنید.
             شراکت از امروز شروع می‌شود و مفاد پیش از امروز مالِ شماست.
           </p>
+          <Field label="تأیید دومرحله‌ای — نام دقیق او را بنویسید *">
+            <input className={inputCls} value={partnerConfirmName} onChange={(e) => setPartnerConfirmName(e.target.value)} placeholder={l.name} />
+          </Field>
+          <p className="mb-2 text-xs font-bold text-red-600">
+            این کار برگشت‌ناپذیر است: قرض {fmtMoney(owed)} صفر و سرمایهٔ او می‌شود و حسابش به لیست شرکا می‌رود.
+          </p>
           <PrimaryBtn
-            disabled={parseNum(shareStr) <= 0 || parseNum(shareStr) >= 100}
+            disabled={
+              parseNum(shareStr) <= 0 ||
+              parseNum(shareStr) >= 100 ||
+              partnerConfirmName.trim() !== l.name.trim()
+            }
             onClick={async () => {
-              if (!confirm(`قرض ${fmtMoney(owed)} به سرمایهٔ شریک تبدیل شود و شراکت از امروز شروع شود؟`)) return
               try {
                 await convertLoanToCapital(l.id!, parseNum(shareStr))
                 onClose()
@@ -931,7 +949,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
               }
             }}
           >
-            تأیید — از امروز شریک است
+            تأیید نهایی — از امروز شریک است
           </PrimaryBtn>
         </div>
       )}
@@ -958,8 +976,23 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             </div>
           </div>
           {r.source?.table === 'payments' && !accessFlags.readOnly && (
-            <button
-              className="mt-2 w-full border-t border-red-100 pt-2 text-xs font-bold text-red-600"
+            <div className="mt-2 flex gap-2 border-t border-slate-100 pt-2">
+              <button
+                className="flex-1 rounded-lg bg-teal-50 py-1.5 text-xs font-bold text-teal-700"
+                onClick={async () => {
+                  const p = await db.payments.get(r.source!.id)
+                  if (!p || p.deleted) return
+                  if (p.via === 'goods' || p.goodsLines?.length || p.groupUuid) {
+                    setError('اسناد کفش از همین‌جا اصلاح نمی‌شوند — با «اشتباه بود — پاک کن» هر دو نیمه جمع می‌شود.')
+                    return
+                  }
+                  setEditingLenderDoc(p)
+                }}
+              >
+                اصلاح سند
+              </button>
+              <button
+                className="flex-1 rounded-lg bg-red-50 py-1.5 text-xs font-bold text-red-600"
               onClick={async () => {
                 try {
                   const impact = await deletePaymentImpact(r.source!.id)
@@ -983,6 +1016,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
             >
               اشتباه بود — حذف سند
             </button>
+            </div>
           )}
         </div>
       ))}

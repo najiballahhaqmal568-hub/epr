@@ -24,6 +24,7 @@ import {
   receivePurchase,
   addCustomerReturn,
   cancelCustomerReturn,
+  correctLenderPayment,
   addSupplierReturn,
   addExpense,
   deleteExpense,
@@ -399,6 +400,34 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         }
         if (!ok.length) return
         await cancelCustomerReturn(pick(ok).id!, 'اصلاح تصادفی')
+      }
+    },
+    {
+      name: 'اصلاح سند پول قرض‌دار',
+      run: async () => {
+        const lenderIds = new Set(
+          (await db.suppliers.filter((s) => !s.deleted && s.kind === 'lender').toArray()).map((s) => s.id)
+        )
+        const cands = await db.payments
+          .filter(
+            (p) =>
+              !p.deleted &&
+              p.partyType === 'supplier' &&
+              p.via !== 'goods' &&
+              !p.goodsLines?.length &&
+              !p.groupUuid &&
+              lenderIds.has(p.partyId)
+          )
+          .toArray()
+        if (!cands.length) return
+        const p = pick(cands)
+        const mag = Math.abs(p.amount)
+        // ورودیِ پول آزاد است؛ خروجی فقط کم می‌شود تا صندوق منفی نشود
+        const next =
+          p.amount < 0 || (p.cashDelta ?? 0) >= 0
+            ? int(1, Math.max(1, Math.floor(mag * 2)))
+            : int(1, Math.max(1, Math.floor(mag)))
+        await correctLenderPayment(p.id!, { amount: next, date: Date.now(), reason: 'اصلاح تصادفی' })
       }
     },
     {
