@@ -39,6 +39,9 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
     let msg = isUndo
       ? 'آخرین فروش برگردانده شود؟ اجناس دوباره به گدام می‌رود و اثر پول و قرض آن هم برعکس می‌شود.'
       : 'این فروش حذف شود؟ اجناس به گدام برمی‌گردد.'
+    if (im && im.linkedReturns > 0) {
+      msg += `\n\n⚠️ ${im.linkedReturns} برگشت متصل به این فروش هم همراه آن حذف می‌شود و اثرش بر گدام، صندوق و قرض برعکس می‌گردد.`
+    }
     if (im && im.paid > 0) {
       msg += `\n\nپول ${fmtMoney(im.paid)} از «${im.box}» پس می‌رود: ${fmtMoney(im.before)} ← ${fmtMoney(im.after)}`
       if (im.after < 0) {

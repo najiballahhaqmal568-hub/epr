@@ -170,6 +170,25 @@ export async function deleteSale(saleId: number): Promise<void> {
       }
       await db.payments.update(linkedPayment.id!, { deleted: true })
     }
+    // برگشت‌های متصل به همین فروش (مرجوعی/تبادله) هم باید همراه آن بروند
+    // تا سند یتیم نماند و مفاد منفی بی‌صاحب در گزارش‌ها نمانَد.
+    const linkedReturns = await db.returns
+      .filter((r) => !r.deleted && r.kind === 'customer' && r.refId === saleId)
+      .toArray()
+    for (const r of linkedReturns) {
+      for (const line of r.lines) {
+        if (!line.restock) continue
+        const v = await db.variants.get(line.variantId)
+        if (v) await db.variants.update(line.variantId, { stockQty: v.stockQty - line.qty })
+      }
+      if (r.settlement === 'cashRefund' && r.amount > 0) {
+        await movement({ date: Date.now(), type: 'refund', refId: r.id, amount: r.amount, note: `حذف فروش — برگشت مرجوعی ${r.partyName}` })
+      } else if (r.settlement === 'reduceDebt' && r.amount > 0 && r.partyId) {
+        const c = await db.customers.get(r.partyId)
+        if (c) await db.customers.update(r.partyId, { balance: c.balance + r.amount })
+      }
+      await db.returns.update(r.id!, { deleted: true })
+    }
     // پول در همان جایی برمی‌گردد که آمده بود
     const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
     const cash = saleCashPaid(sale)
@@ -195,14 +214,15 @@ export async function deleteSale(saleId: number): Promise<void> {
  */
 export async function deleteSaleImpact(
   saleId: number
-): Promise<{ paid: number; box: string; before: number; after: number } | null> {
+): Promise<{ paid: number; box: string; before: number; after: number; linkedReturns: number } | null> {
   const sale = await db.sales.get(saleId)
   if (!sale || sale.deleted) return null
   const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
   const box = orig ? boxOf(orig) : SHOP_BOX
   const before = await cashBalance(box)
   const paid = saleCashPaid(sale)
-  return { paid, box, before, after: before - paid }
+  const linkedReturns = await db.returns.filter((r) => !r.deleted && r.kind === 'customer' && r.refId === saleId).count()
+  return { paid, box, before, after: before - paid, linkedReturns }
 }
 
 // قاعده‌های قیمت تمام‌شده در lib/costing.ts زندگی می‌کنند تا sync و integrity هم همان را ببینند

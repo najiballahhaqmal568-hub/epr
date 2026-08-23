@@ -537,6 +537,69 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'حذف فروش، برگشتِ متصل را هم با اثرش برمی‌گرداند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const custId = await newCustomer('کریم')
+      await seedCash(5000)
+      await addPurchase(buy(supId, vId, 10, 500))
+      const saleId = await addSale(sell(vId, 4, 900, { customerId: custId, customerName: 'کریم', paid: 1800 }))
+      await addCustomerReturn({
+        date: Date.now(),
+        kind: 'customer',
+        partyId: custId,
+        partyName: 'کریم',
+        refId: saleId,
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+        amount: 900,
+        settlement: 'reduceDebt',
+        reason: 'اشتباه'
+      })
+      eq('مفاد پیش از حذف', await profitAndLoss(), 1200)
+      eq('پیش‌نمایش: یک برگشت متصل', (await deleteSaleImpact(saleId))!.linkedReturns, 1)
+      await deleteSale(saleId)
+      eq('گدام به اندازهٔ خرید برگشت', await stockOf(vId), 10)
+      eq('قرض مشتری صفر شد', (await db.customers.get(custId))!.balance, 0)
+      eq('دفتر مشتری با عدد ذخیره‌شده یکی است', await customerLedgerEnd(custId), 0)
+      eq('صندوق صفر شد', await cashBalance(), 0)
+      eq('مفاد صفر شد', await profitAndLoss(), 0)
+      eq('سند مرجوعی زنده نماند', (await db.returns.filter((r) => !r.deleted).toArray()).length, 0)
+    }
+  },
+  {
+    name: 'حذف نیمهٔ فروش تبادله، نیمهٔ مرجوعی را هم جمع می‌کند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const custId = await newCustomer('نیاز')
+      await seedCash(6000)
+      await addPurchase(buy(supId, vId, 10, 500))
+      const oldSaleId = await addSale(sell(vId, 2, 900, { customerId: custId, customerName: 'نیاز' }))
+      await addExchange(
+        {
+          date: Date.now(),
+          kind: 'customer',
+          partyId: custId,
+          partyName: 'نیاز',
+          refId: oldSaleId,
+          lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+          amount: 900,
+          settlement: 'cashRefund',
+          reason: 'تبادله'
+        },
+        sell(vId, 1, 900, { customerId: custId, customerName: 'نیاز' })
+      )
+      eq('صندوق پس از تبادله فقط صفر شد', await cashBalance(), 2800)
+      await deleteSale(oldSaleId)
+      eq('گدام: خرید منهای فروش جدیدِ تبادله', await stockOf(vId), 9)
+      eq('صندوق: سرمایه − خرید + فروش جدید', await cashBalance(), 1900)
+      eq('مفاد: فقط فروش جدید', await profitAndLoss(), 400)
+      eq('سند مرجوعی زنده نماند', (await db.returns.filter((r) => !r.deleted).toArray()).length, 0)
+      eq('حساب مشتری سالم ماند', await customerLedgerEnd(custId), 0)
+    }
+  },
+  {
     name: 'فروش زیر قیمت زیان نشان می‌دهد',
     run: async () => {
       const supId = await newSupplier()

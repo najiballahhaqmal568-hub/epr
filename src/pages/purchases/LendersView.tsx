@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../../lib/networth'
-import { db, type Supplier, type LenderAction } from '../../db'
+import { accessFlags, db, type Supplier, type LenderAction } from '../../db'
 import {
   addLender,
   addLoan,
@@ -345,20 +345,22 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
           >
             ذخیرهٔ تغییرات
           </PrimaryBtn>
-          <button
-            className="mt-3 w-full rounded-xl border border-red-300 py-2 text-sm font-bold text-red-700"
-            onClick={async () => {
-              if (!confirm('این قرض‌دهنده حذف شود؟ فقط وقتی حساب و سند زنده ندارد حذف می‌شود.')) return
-              try {
-                await deleteLender(l.id!)
-                onClose()
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e))
-              }
-            }}
-          >
-            حذف قرض‌دهنده
-          </button>
+          {!accessFlags.readOnly && (
+            <button
+              className="mt-3 w-full rounded-xl border border-red-300 py-2 text-sm font-bold text-red-700"
+              onClick={async () => {
+                if (!confirm('این قرض‌دهنده حذف شود؟ فقط وقتی حساب و سند زنده ندارد حذف می‌شود.')) return
+                try {
+                  await deleteLender(l.id!)
+                  onClose()
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e))
+                }
+              }}
+            >
+              حذف قرض‌دهنده
+            </button>
+          )}
         </div>
       )}
 
@@ -955,7 +957,7 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
               </p>
             </div>
           </div>
-          {r.source?.table === 'payments' && (
+          {r.source?.table === 'payments' && !accessFlags.readOnly && (
             <button
               className="mt-2 w-full border-t border-red-100 pt-2 text-xs font-bold text-red-600"
               onClick={async () => {

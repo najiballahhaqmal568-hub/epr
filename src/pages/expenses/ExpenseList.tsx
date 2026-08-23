@@ -154,7 +154,7 @@ export function ExpenseList({
             </div>
             <div className="text-left">
               <p className={`font-bold ${TYPE_COLORS[e.type]}`}>{fmtMoney(e.amount)}</p>
-              {!e.partner && (
+              {!e.partner && !accessFlags.readOnly && (
                 <button
                   className="text-xs text-red-400"
                   onClick={async () => {

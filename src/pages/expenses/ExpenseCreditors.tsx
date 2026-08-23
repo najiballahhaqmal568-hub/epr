@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Supplier } from '../../db'
+import { accessFlags, db, type Supplier } from '../../db'
 import {
   deletePayment,
   payExpenseCreditorCash,
@@ -249,7 +249,7 @@ function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onClose: ()
                 {row.amount > 0 ? '+' : '−'}{fmtMoney(Math.abs(row.amount))}
               </p>
             </div>
-            {row.kind === 'payment' && (
+            {row.kind === 'payment' && !accessFlags.readOnly && (
               <button
                 className="mt-1 w-full border-t border-red-100 pt-1 text-xs font-bold text-red-600"
                 onClick={async () => {
