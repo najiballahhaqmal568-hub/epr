@@ -1806,6 +1806,170 @@ export async function deleteExpense(expenseId: number): Promise<void> {
   })
 }
 
+export interface ExpenseCorrectionInput {
+  date: number
+  amount: number
+  /** بخش نقدی؛ باقی مبلغ قرض به طلبکار می‌افتد. */
+  cashPaid: number
+  /** طلبکارِ بخش قرضی — وقتی مصرف قبلاً طلبکار داشته و تغییر نکرده، اختیاری است. */
+  creditorId?: number
+  note?: string
+  reason: string
+}
+
+export interface ExpenseCorrectionPreview {
+  accounts: Array<{ partyId: number; partyName: string; before: number; after: number }>
+  cash: Array<{ box: string; before: number; after: number }>
+  replacement: Expense
+}
+
+async function expenseReplacement(current: Expense, input: ExpenseCorrectionInput): Promise<Expense> {
+  if (current.type !== 'business' || current.shopClosed || current.amount <= 0) {
+    throw new Error('این نوع مصرف از اینجا قابل اصلاح نیست')
+  }
+  const amount = afn(input.amount)
+  const cashPaid = afn(input.cashPaid)
+  if (amount <= 0) throw new Error('مبلغ مصرف باید بیشتر از صفر باشد')
+  if (cashPaid < 0 || cashPaid > amount) throw new Error('بخش نقدی نمی‌تواند منفی یا بیشتر از کل مبلغ باشد')
+  if (!Number.isFinite(input.date) || input.date <= 0) throw new Error('تاریخ درست را وارد کنید')
+  if (!input.reason.trim()) throw new Error('دلیل اصلاح را بنویسید')
+  const creditAmount = amount - cashPaid
+
+  const replacement: Expense = {
+    date: input.date,
+    categoryId: current.categoryId,
+    categoryName: current.categoryName,
+    amount,
+    cashPaid,
+    creditAmount,
+    box: current.box,
+    note: input.note?.trim() || undefined,
+    type: 'business'
+  }
+
+  if (creditAmount > 0) {
+    const creditorId = input.creditorId ?? current.creditorId
+    if (!creditorId) throw new Error('طلبکار مصرف را انتخاب کنید')
+    const creditor = await db.suppliers.get(creditorId)
+    if (!creditor || creditor.deleted || creditor.kind === 'partner') throw new Error('طلبکار مصرف یافت نشد')
+    replacement.creditorId = creditor.id!
+    replacement.creditorName = creditor.name
+  }
+  return replacement
+}
+
+/** پیش‌نمایش اثر اصلاح مصرف، بدون نوشتن هیچ عددی. */
+export async function previewExpenseCorrection(
+  expenseId: number,
+  input: ExpenseCorrectionInput
+): Promise<ExpenseCorrectionPreview> {
+  const current = await db.expenses.get(expenseId)
+  if (!current || current.deleted) throw new Error('سند مصرف یافت نشد')
+  const replacement = await expenseReplacement(current, input)
+
+  const accountDeltas = new Map<number, number>()
+  for (const effect of effectsOf('expenses', current)) {
+    accountDeltas.set(effect.id!, (accountDeltas.get(effect.id!) ?? 0) - effect.delta)
+  }
+  for (const effect of effectsOf('expenses', replacement)) {
+    accountDeltas.set(effect.id!, (accountDeltas.get(effect.id!) ?? 0) + effect.delta)
+  }
+  const accounts: ExpenseCorrectionPreview['accounts'] = []
+  for (const [id, delta] of accountDeltas) {
+    const party = await db.suppliers.get(id)
+    if (!party) throw new Error('طلبکار مربوط به سند یافت نشد')
+    accounts.push({ partyId: id, partyName: party.name, before: party.balance, after: party.balance + delta })
+  }
+
+  const oldCashPaid = expenseCashPaid(current)
+  const newCashPaid = expenseCashPaid(replacement)
+  const box = boxOf(current)
+  const before = await cashBalance(box)
+  return { accounts, cash: [{ box, before, after: before + oldCashPaid - newCashPaid }], replacement }
+}
+
+/**
+ * اصلاح امن مصرف (مقدار/تقسیم نقد-قرض/طلبکار/تاریخ): سند قبلی رد حساب می‌ماند، اثرش برمی‌گردد
+ * و سند درست در همان تراکنش ساخته می‌شود. کمبود صندوق همهٔ تغییرات را برمی‌گرداند.
+ * تسویه‌های قبلیِ طلبکار سالم می‌مانند — اگر قرض کمتر از تسویه شود، باقی به طلب ما تبدیل می‌شود.
+ */
+export async function correctExpense(expenseId: number, input: ExpenseCorrectionInput): Promise<number> {
+  return db.transaction('rw', [db.expenses, db.suppliers, db.cashMovements], async () => {
+    const current = await db.expenses.get(expenseId)
+    if (!current || current.deleted) throw new Error('سند مصرف یافت نشد')
+    const replacement = await expenseReplacement(current, input)
+
+    for (const effect of effectsOf('expenses', current)) {
+      const row = await db.table(effect.table).get(effect.id!)
+      if (!row) throw new Error('طلبکار مربوط به سند قبلی یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
+    }
+
+    const correctedAt = Date.now()
+    const previousUuid = current.uuid ?? newUuid()
+    const replacementUuid = correctionUuid(`expense:${previousUuid}`)
+    const oldCashPaid = expenseCashPaid(current)
+    await db.expenses.update(expenseId, {
+      uuid: previousUuid,
+      deleted: true,
+      correctedByUuid: replacementUuid,
+      correctedAt
+    })
+
+    const box = boxOf(current)
+    if (oldCashPaid > 0) {
+      await db.cashMovements.add({
+        uuid: correctionUuid(`expense-reverse-cash:${previousUuid}`),
+        date: correctedAt,
+        type: EXPENSE_MOVE[current.type],
+        refId: expenseId,
+        amount: oldCashPaid,
+        box,
+        note: `اصلاح — برگشت سند قبلی ${current.categoryName}`
+      })
+    }
+
+    replacement.uuid = replacementUuid
+    replacement.correctionOfUuid = previousUuid
+    replacement.correctionReason = input.reason.trim()
+    replacement.correctedAt = correctedAt
+    replacement.correctionPrevious = {
+      date: current.date,
+      amount: current.amount,
+      cashPaid: oldCashPaid,
+      creditAmount: expenseCreditAmount(current),
+      creditorName: current.creditorName,
+      note: current.note,
+      box: current.box
+    }
+    const replacementId = (await db.expenses.add(replacement)) as number
+
+    for (const effect of effectsOf('expenses', replacement)) {
+      const row = await db.table(effect.table).get(effect.id!)
+      if (!row) throw new Error('طلبکار مربوط به سند اصلاح‌شده یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
+    }
+
+    const newCashPaid = expenseCashPaid(replacement)
+    if (newCashPaid > 0) {
+      const balanceNow = await cashBalance(box)
+      if (balanceNow - newCashPaid < 0) {
+        throw new Error(`پیسه در «${box}» کافی نیست! موجودی: ${new Intl.NumberFormat('fa-AF').format(balanceNow)} ؋`)
+      }
+      await db.cashMovements.add({
+        uuid: correctionUuid(`expense-new-cash:${previousUuid}`),
+        date: replacement.date,
+        type: EXPENSE_MOVE[replacement.type],
+        refId: replacementId,
+        amount: -newCashPaid,
+        box,
+        note: `اصلاح مصرف — ${replacement.categoryName}`
+      })
+    }
+    return replacementId
+  })
+}
+
 /** تغییر نام کتگوری در لیست و در سوابق مصارف */
 export async function renameCategory(categoryId: number, newName: string): Promise<void> {
   return db.transaction('rw', db.expenseCategories, db.expenses, async () => {

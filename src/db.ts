@@ -301,6 +301,23 @@ export interface Expense extends Synced {
   type: ExpenseType
   /** سند وضعیت روز بسته؛ مصرف و حرکت صندوق نیست. */
   shopClosed?: boolean
+  /** سند تازه‌ای که این مصرف اشتباه را جایگزین کرده؛ خود سند برای رد حساب نگه داشته می‌شود. */
+  correctedByUuid?: string
+  /** شناسهٔ سند اشتباه قبلی که این مصرف جای آن را گرفته است. */
+  correctionOfUuid?: string
+  /** دلیل قابل‌فهم اصلاح برای دفتر و دستگاه دوم. */
+  correctionReason?: string
+  correctedAt?: number
+  /** خلاصهٔ سند قبلی؛ بدون شناسه‌های محلی تا در همهٔ دستگاه‌ها قابل‌خواندن بماند. */
+  correctionPrevious?: {
+    date: number
+    amount: number
+    cashPaid?: number
+    creditAmount?: number
+    creditorName?: string
+    note?: string
+    box?: string
+  }
 }
 
 export type CashMovementType =

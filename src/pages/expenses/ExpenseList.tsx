@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { accessFlags, db, type ExpenseType } from '../../db'
+import { accessFlags, db, type Expense, type ExpenseType } from '../../db'
 import { deleteExpense } from '../../lib/ops'
 import { fmtMoney, fmtDate, startOfDay, startOfMonth } from '../../lib/format'
 import { Empty } from '../../components/ui'
@@ -9,6 +9,7 @@ import NewExpenseModal from './NewExpenseModal'
 import CategoryManager from './CategoryManager'
 import ExpenseCreditors from './ExpenseCreditors'
 import DailyExpenseChecklist from './DailyExpenseChecklist'
+import CorrectExpenseModal from './CorrectExpenseModal'
 
 export function ExpenseList({
   openNew = false,
@@ -24,6 +25,8 @@ export function ExpenseList({
   const [showTools, setShowTools] = useState(false)
   const [showAll, setShowAll] = useState(false)
   const [filter, setFilter] = useState<number | 'all' | ExpenseType>('all')
+  // مصرفی که مالک می‌خواهد اصلاح کند (مبلغ/نقد-قرض/طلبکار/تاریخ) — بدون پاک کردن
+  const [toCorrect, setToCorrect] = useState<Expense | null>(null)
   const monthStart = startOfMonth()
   const dayStart = startOfDay()
 
@@ -155,14 +158,21 @@ export function ExpenseList({
             <div className="text-left">
               <p className={`font-bold ${TYPE_COLORS[e.type]}`}>{fmtMoney(e.amount)}</p>
               {!e.partner && !accessFlags.readOnly && (
-                <button
-                  className="text-xs text-red-400"
-                  onClick={async () => {
-                    if (confirm('این مصرف حذف شود؟')) await deleteExpense(e.id!)
-                  }}
-                >
-                  حذف
-                </button>
+                <div className="flex flex-col items-end gap-1">
+                  {e.type === 'business' && !('shopClosed' in e && e.shopClosed) && e.amount > 0 && (
+                    <button className="text-xs font-bold text-teal-700" onClick={() => setToCorrect(e as Expense)}>
+                      اصلاح سند
+                    </button>
+                  )}
+                  <button
+                    className="text-xs text-red-400"
+                    onClick={async () => {
+                      if (confirm('این مصرف حذف شود؟')) await deleteExpense(e.id!)
+                    }}
+                  >
+                    حذف
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -170,6 +180,7 @@ export function ExpenseList({
       ))}
       {showNew && <NewExpenseModal onClose={() => setShowNew(false)} />}
       {showCats && <CategoryManager onClose={() => setShowCats(false)} />}
+      {toCorrect && <CorrectExpenseModal expense={toCorrect} onClose={() => setToCorrect(null)} />}
     </>
   )
 }

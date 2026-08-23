@@ -63,6 +63,9 @@ import {
   previewSupplierPaymentCorrection,
   correctCustomerPayment,
   previewCustomerPaymentCorrection,
+  correctExpense,
+  previewExpenseCorrection,
+  deleteExpense,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -669,6 +672,70 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), 0)
       is('زنجیرهٔ اصلاح ادامه یافت', (await db.payments.get(c2id))!.correctionOfUuid, c1.uuid)
       eq('مفاد با مصرف منفی شد', await profitAndLoss(), -350)
+    }
+  },
+  {
+    name: 'حذف امن مصرف مخلوط — صندوق و طلبکار برمی‌گردد',
+    run: async () => {
+      const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
+      const creditorId = (await db.suppliers.add({ name: 'احمد کرایه‌دار', balance: 0, kind: 'expenseCreditor' } as never)) as number
+      await seedCash(5000)
+      const expId = await addExpense({
+        date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه',
+        amount: 1200, cashPaid: 200, creditAmount: 1000, creditorId, creditorName: 'احمد کرایه‌دار'
+      } as Expense)
+      eq('صندوق پس از مصرف مخلوط', await cashBalance(), 4800)
+      eq('قرض طلبکار', (await db.suppliers.get(creditorId))!.balance, 1000)
+      eq('مفاد منفی شد', await profitAndLoss(), -1200)
+      await deleteExpense(expId)
+      eq('صندوق برگشت', await cashBalance(), 5000)
+      eq('طلبکار صفر شد', (await db.suppliers.get(creditorId))!.balance, 0)
+      eq('مفاد صفر شد', await profitAndLoss(), 0)
+      eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), 5000)
+    }
+  },
+  {
+    name: 'اصلاح امن مصرف — تقسیم و طلبکار عوض شود، تسویهٔ قبلی سالم بماند',
+    run: async () => {
+      const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
+      const aId = (await db.suppliers.add({ name: 'احمد کرایه‌دار', balance: 0, kind: 'expenseCreditor' } as never)) as number
+      const bId = (await db.suppliers.add({ name: 'کریم کرایه‌دار', balance: 0, kind: 'expenseCreditor' } as never)) as number
+      await seedCash(5000)
+      const expId = await addExpense({
+        date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه',
+        amount: 1200, cashPaid: 200, creditAmount: 1000, creditorId: aId, creditorName: 'احمد کرایه‌دار'
+      } as Expense)
+      await payExpenseCreditorCash(aId, 400) // تسویهٔ جزئی: احمد ۶۰۰ می‌ماند، صندوق ۴٬۴۰۰
+      eq('تسویهٔ جزئی احمد', (await db.suppliers.get(aId))!.balance, 600)
+
+      const pv = await previewExpenseCorrection(expId, { date: Date.now(), amount: 1500, cashPaid: 300, creditorId: bId, reason: 'اشتباه بود' })
+      const ahmad = pv.accounts.find((x) => x.partyId === aId)!
+      const karim = pv.accounts.find((x) => x.partyId === bId)!
+      eq('پیش‌نمایش: احمد به طلب ما می‌رود', ahmad.after, -400)
+      eq('پیش‌نمایش: قرض جدید کریم', karim.after, 1200)
+      eq('پیش‌نمایش صندوق', pv.cash[0].after, 4300)
+
+      const c1id = await correctExpense(expId, { date: Date.now(), amount: 1500, cashPaid: 300, creditorId: bId, note: 'درست شد', reason: 'مبلغ و طلبکار اشتباه بود' })
+      eq('احمد: تسویه‌اش ماند، قرضش رفت', (await db.suppliers.get(aId))!.balance, -400)
+      eq('قرض کریم ثبت شد', (await db.suppliers.get(bId))!.balance, 1200)
+      eq('صندوق پس از اصلاح', await cashBalance(), 4300)
+      eq('مفاد با مصرف درست', await profitAndLoss(), -1500)
+      const c1 = (await db.expenses.get(c1id))!
+      is('دلیل اصلاح ذخیره شد', c1.correctionReason, 'مبلغ و طلبکار اشتباه بود')
+      eq('خلاصهٔ سند قبلی', c1.correctionPrevious?.amount, 1200)
+      eq('سند قبلی زنده نیست', (await db.expenses.get(expId))!.deleted, true)
+
+      await throws(
+        'کمبود صندوق رد شود',
+        () => correctExpense(c1id, { date: Date.now(), amount: 6000, cashPaid: 5800, creditorId: bId, reason: 'غلط دوم' })
+      )
+      eq('شکست: قرض کریم تغییری نکرد', (await db.suppliers.get(bId))!.balance, 1200)
+      eq('شکست: صندوق تغییری نکرد', await cashBalance(), 4300)
+      eq('شکست: سند زنده ماند', Boolean((await db.expenses.get(c1id))!.deleted), false)
+
+      await payExpenseCreditorCash(bId, 500)
+      eq('تسویه از قرض نو کریم', (await db.suppliers.get(bId))!.balance, 700)
+      eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), 3800)
     }
   },
   {

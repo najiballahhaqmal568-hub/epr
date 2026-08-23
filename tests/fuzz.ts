@@ -25,6 +25,9 @@ import {
   addCustomerReturn,
   addSupplierReturn,
   addExpense,
+  deleteExpense,
+  correctExpense,
+  expenseCashPaid,
   addPayment,
   correctSupplierPayment,
   addOpeningDebt,
@@ -334,6 +337,31 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
           { date: Date.now(), amount: int(1, Math.floor(bal)), type, note: 'آزمایش', box },
           type === 'business' ? undefined : partner || undefined
         )
+      }
+    },
+    {
+      name: 'اصلاح یا حذف مصرف',
+      run: async () => {
+        const live = await db.expenses
+          .filter((e) => !e.deleted && !e.shopClosed && e.type === 'business' && e.amount > 0)
+          .toArray()
+        if (!live.length) return
+        const e = pick(live)
+        if (Math.random() < 0.5) {
+          await deleteExpense(e.id!)
+          return
+        }
+        const box = e.box ?? SHOP_BOX
+        const bal = (await boxBalances()).boxes.find((b) => b.name === box)?.balance ?? 0
+        const oldCash = expenseCashPaid(e)
+        // کاهش بخش نقدی نباید از موجودی صندوق بیشتر شود؛ بدون طلبکار، قرض صفر می‌ماند
+        const cap = e.creditorId ? e.amount : Math.min(e.amount, oldCash + bal)
+        await correctExpense(e.id!, {
+          date: Date.now(),
+          amount: e.amount,
+          cashPaid: int(0, Math.max(0, Math.floor(cap))),
+          reason: 'اصلاح تصادفی'
+        })
       }
     },
     {
