@@ -193,6 +193,8 @@ export interface Purchase extends Synced {
    * فهمید چقدرش قرضِ صراف است. این عدد همان را جدا نگه می‌دارد.
    */
   landingSarrafAmount?: number
+  /** تاریخچهٔ اصلاح‌های مصارف رسیدن — برای رد حساب؛ اثر مالی در landingCost و حرکت صندوق/صراف است. */
+  landingCorrections?: Array<{ date: number; delta: number; bucket: 'cash' | 'sarraf' | 'later'; reason: string }>
 }
 
 /**

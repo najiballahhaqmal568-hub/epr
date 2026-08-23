@@ -1,6 +1,6 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
+import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -338,6 +338,72 @@ export async function payLanding(purchaseId: number): Promise<void> {
     if (due <= 0) return
     await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -due, note: `مصارف رسیدن — ${p.supplierName}` })
     await db.purchases.update(purchaseId, { landingUnpaid: 0, landingPaid: true })
+  })
+}
+
+export interface LandingCorrectionInput {
+  /** مجموع درست مصارف رسیدن این خرید — نه تفاوت */
+  newTotal: number
+  bucket: 'cash' | 'sarraf' | 'later'
+  sarraf?: { id: number; name: string }
+  reason: string
+}
+
+/**
+ * اصلاح امن مصارف رسیدن یک خرید: «مجموع درست» نوشته می‌شود و فقط تفاوتش
+ * به صندوق/صراف/باقی‌مانده می‌رود. سندهای قبلی دست نمی‌خورند؛ تاریخچهٔ
+ * اصلاح‌ها روی خود خرید می‌ماند و قیمت تمام‌شده از نو از اسناد ساخته می‌شود.
+ */
+export async function correctLandingTotal(purchaseId: number, input: LandingCorrectionInput): Promise<void> {
+  const newTotal = afn(input.newTotal)
+  if (newTotal < 0) throw new Error('مجموع مصارف رسیدن منفی نمی‌شود')
+  if (!input.reason.trim()) throw new Error('دلیل اصلاح را بنویسید')
+  if (input.bucket === 'sarraf' && !input.sarraf) throw new Error('صراف را انتخاب کنید')
+  return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
+    const p = await db.purchases.get(purchaseId)
+    if (!p || p.deleted) throw new Error('خرید یافت نشد')
+    const delta = newTotal - afn(p.landingCost ?? 0)
+    if (delta === 0) throw new Error('مجموع نو با مجموع فعلی برابر است — تغییری نیست')
+
+    const update: Partial<Purchase> = { landingCost: newTotal }
+    let sarrafRow: Supplier | undefined
+
+    if (input.bucket === 'sarraf') {
+      const sf = await db.suppliers.get(input.sarraf!.id)
+      if (!sf || sf.deleted || sf.kind !== 'sarraf') throw new Error('صراف یافت نشد')
+      // بخش صرافِ قبلی صریح نوشته می‌شود تا قاعدهٔ کهنهٔ خواندن سر کار نیفتد
+      const oldSarrafPart = p.landingSarrafAmount ?? 0
+      const newSarrafPart = oldSarrafPart + delta
+      if (newSarrafPart < 0) throw new Error('بخش صراف مصارف رسیدن منفی نمی‌شود؛ مجموع را بیشتر کنید یا راه دیگر را انتخاب کنید')
+      update.landingSarrafAmount = newSarrafPart
+      update.landingSarrafId = sf.id!
+      update.landingSarrafName = sf.name
+      sarrafRow = sf
+    } else if (input.bucket === 'later') {
+      const unpaidBefore = landingUnpaidOf(p)
+      const unpaidAfter = unpaidBefore + delta
+      if (unpaidAfter < 0) {
+        // بیش از باقی‌مانده کم شده — مازاد به صندوق برمی‌گردد (پولی که پیش‌تر نقد رفته بود)
+        await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -unpaidAfter, box: SHOP_BOX, note: `اصلاح مصارف رسیدن — ${p.supplierName}` })
+      }
+      update.landingUnpaid = Math.max(0, unpaidAfter)
+    } else {
+      await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -delta, box: SHOP_BOX, note: `اصلاح مصارف رسیدن — ${p.supplierName}` })
+    }
+
+    const unpaidFinal = update.landingUnpaid ?? landingUnpaidOf(p)
+    update.landingVia = input.bucket
+    update.landingPaid = unpaidFinal <= 0
+    const history = p.landingCorrections ?? []
+    update.landingCorrections = [...history, { date: Date.now(), delta, bucket: input.bucket, reason: input.reason.trim() }]
+    await db.purchases.update(purchaseId, update)
+
+    if (input.bucket === 'sarraf' && sarrafRow && delta !== 0) {
+      await db.suppliers.update(sarrafRow.id!, { balance: sarrafRow.balance + delta })
+    }
+
+    // قیمت تمام‌شده همیشه از روی اسناد ساخته می‌شود — اینجا هم دوباره ساخته شود
+    await applyRebuiltCosts()
   })
 }
 
@@ -1069,6 +1135,97 @@ export async function correctCustomerPayment(
       box: replacementBox,
       note: `اصلاح دریافت — ${replacement.partyName}`
     })
+    return replacementId
+  })
+}
+
+export interface OpeningDebtCorrectionInput {
+  amount: number
+  note?: string
+  reason: string
+}
+
+/** پیش‌نمایش اثر اصلاح «قرض قبلی»، بدون نوشتن هیچ عددی. */
+export async function previewOpeningDebtCorrection(
+  paymentId: number,
+  input: OpeningDebtCorrectionInput
+): Promise<{ partyName: string; before: number; after: number }> {
+  const current = await db.payments.get(paymentId)
+  if (!current || current.deleted) throw new Error('سند یافت نشد')
+  const row = await openingDebtParty(current)
+  const amount = afn(input.amount)
+  return { partyName: row.name, before: row.balance, after: row.balance + current.amount + amount }
+}
+
+async function openingDebtParty(current: Payment): Promise<Customer | Supplier> {
+  if (current.via !== 'opening' || current.amount >= 0 || current.groupUuid || current.lenderAction) {
+    throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
+  }
+  const partyTable = current.partyType === 'customer' ? db.customers : db.suppliers
+  const row = await partyTable.get(current.partyId)
+  if (!row || row.deleted) throw new Error('طرف حساب یافت نشد')
+  return row
+}
+
+/**
+ * اصلاح امن «قرض قبلی» (پیش از اپ): رقم اشتباه با یک سند نو درست می‌شود؛
+ * سند قبلی رد حساب می‌ماند و هیچ پولی بین صندوق‌ها حرکت نمی‌کند.
+ * برای مشتری و تأمین‌کننده هر دو کار می‌کند.
+ */
+export async function correctOpeningDebt(paymentId: number, input: OpeningDebtCorrectionInput): Promise<number> {
+  return db.transaction('rw', [db.payments, db.customers, db.suppliers], async () => {
+    const current = await db.payments.get(paymentId)
+    if (!current || current.deleted) throw new Error('سند یافت نشد')
+    await openingDebtParty(current)
+    const amount = afn(input.amount)
+    if (amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
+    if (!input.reason.trim()) throw new Error('دلیل اصلاح را بنویسید')
+
+    for (const effect of effectsOf('payments', current)) {
+      const r = (await db.table(effect.table).get(effect.id!)) as Record<string, number> | undefined
+      if (!r) throw new Error('طرف حساب سند قبلی یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (r[effect.field] ?? 0) - effect.delta })
+    }
+
+    const correctedAt = Date.now()
+    const previousUuid = current.uuid ?? newUuid()
+    const replacementUuid = correctionUuid(`opening-debt:${previousUuid}`)
+    await db.payments.update(paymentId, {
+      uuid: previousUuid,
+      deleted: true,
+      correctedByUuid: replacementUuid,
+      correctedAt
+    })
+
+    const replacement: Payment = {
+      date: current.date,
+      partyType: current.partyType,
+      partyId: current.partyId,
+      partyName: current.partyName,
+      amount: -amount,
+      note: input.note?.trim() ? `قرض قبلی — ${input.note.trim()}` : current.note,
+      via: 'opening',
+      cashDelta: 0,
+      bookPage: current.bookPage,
+      uuid: replacementUuid,
+      correctionOfUuid: previousUuid,
+      correctionReason: input.reason.trim(),
+      correctedAt,
+      correctionPrevious: {
+        date: current.date,
+        amount: current.amount,
+        via: current.via,
+        cashDelta: 0,
+        note: current.note
+      }
+    }
+    const replacementId = (await db.payments.add(replacement)) as number
+
+    for (const effect of effectsOf('payments', replacement)) {
+      const r = (await db.table(effect.table).get(effect.id!)) as Record<string, number> | undefined
+      if (!r) throw new Error('طرف حساب سند جدید یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (r[effect.field] ?? 0) + effect.delta })
+    }
     return replacementId
   })
 }

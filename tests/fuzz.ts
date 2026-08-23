@@ -39,6 +39,7 @@ import {
   addExchange,
   addLandingCost,
   payLanding,
+  correctLandingTotal,
   landingUnpaidOf,
   addLoan,
   repayLoan,
@@ -360,6 +361,20 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
           date: Date.now(),
           amount: e.amount,
           cashPaid: int(0, Math.max(0, Math.floor(cap))),
+          reason: 'اصلاح تصادفی'
+        })
+      }
+    },
+    {
+      name: 'اصلاح مصارف رسیدن',
+      run: async () => {
+        const cands = await db.purchases.filter((p) => !p.deleted && (p.landingCost ?? 0) > 0).toArray()
+        if (!cands.length) return
+        const p = pick(cands)
+        // راه «بعداً» — هیچ حرکت نقدی ندارد و همیشه مجاز است
+        await correctLandingTotal(p.id!, {
+          newTotal: int(0, Math.max(1, Math.floor((p.landingCost ?? 0) * 2))),
+          bucket: 'later',
           reason: 'اصلاح تصادفی'
         })
       }

@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../../db'
-import { addLandingCost } from '../../lib/ops'
+import { db, landingUnpaidOf } from '../../db'
+import { addLandingCost, correctLandingTotal } from '../../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
 /**
  * ثبت مصارف رسیدن بعد از تحویل جنس — یک یا چند خرید (یک حمل) انتخاب می‌شود
  * و مبلغ کل مساوی فی جوړه بین همه پخش می‌گردد.
+ * وقتی فقط یک خرید انتخاب شده باشد، «اصلاح مجموع» هم همان‌جا ممکن است.
  */
 export function LandingCostModal({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<number[]>([])
@@ -16,6 +17,13 @@ export function LandingCostModal({ onClose }: { onClose: () => void }) {
   const [sarrafId, setSarrafId] = useState<number | ''>('')
   const [error, setError] = useState('')
   const [done, setDone] = useState('')
+
+  // اصلاح مجموع مصارفِ یک خرید
+  const [newTotalStr, setNewTotalStr] = useState('')
+  const [fixBucket, setFixBucket] = useState<'cash' | 'sarraf' | 'later'>('cash')
+  const [fixSarrafId, setFixSarrafId] = useState<number | ''>('')
+  const [fixReason, setFixReason] = useState('')
+  const [fixError, setFixError] = useState('')
 
   const purchases = useLiveQuery(
     () => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted && p.received !== false).limit(30).toArray(),
@@ -27,6 +35,8 @@ export function LandingCostModal({ onClose }: { onClose: () => void }) {
   const totalPairs = chosen.reduce((s, p) => s + p.lines.reduce((a, l) => a + l.qty, 0), 0)
   const amount = Math.max(0, parseNum(amountStr))
   const perPair = amount > 0 && totalPairs > 0 ? amount / totalPairs : 0
+  // اصلاح فقط برای یک خریدِ با مصارف قبلی معنا دارد
+  const fixTarget = chosen.length === 1 ? chosen[0] : undefined
 
   async function save() {
     if (!picked.length) return setError('حداقل یک خرید را انتخاب کنید')
@@ -40,6 +50,26 @@ export function LandingCostModal({ onClose }: { onClose: () => void }) {
       setAmountStr('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function saveFix() {
+    if (!fixTarget?.id) return
+    const newTotal = parseNum(newTotalStr)
+    try {
+      await correctLandingTotal(fixTarget.id, {
+        newTotal,
+        bucket: fixBucket,
+        sarraf: fixBucket === 'sarraf' && fixSarrafId !== '' ? { id: fixSarrafId, name: sarrafs?.find((s) => s.id === fixSarrafId)?.name ?? '' } : undefined,
+        reason: fixReason
+      })
+      setDone(`✅ مجموع مصارف رسیدن به ${fmtMoney(newTotal)} اصلاح شد`)
+      setPicked([])
+      setNewTotalStr('')
+      setFixReason('')
+      setFixError('')
+    } catch (e) {
+      setFixError(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -106,6 +136,49 @@ export function LandingCostModal({ onClose }: { onClose: () => void }) {
       <PrimaryBtn onClick={save} disabled={!picked.length || amount <= 0}>
         ثبت مصارف رسیدن
       </PrimaryBtn>
+
+      {fixTarget && (fixTarget.landingCost ?? 0) > 0 && (
+        <div className="mt-4 border-t border-slate-200 pt-3">
+          <p className="mb-1 text-sm font-bold text-slate-700">🔧 اصلاح مجموع مصارف همین خرید</p>
+          <p className="mb-2 text-xs text-slate-500">
+            فعلی: {fmtMoney(fixTarget.landingCost ?? 0)}
+            {landingUnpaidOf(fixTarget) > 0 ? ` · باقی‌مانده: ${fmtMoney(landingUnpaidOf(fixTarget))}` : ''}
+            {(fixTarget.landingSarrafAmount ?? 0) > 0 ? ` · قرض صراف: ${fmtMoney(fixTarget.landingSarrafAmount ?? 0)}` : ''}
+          </p>
+          <Field label="مجموع درست مصارف رسیدن *">
+            <input className={inputCls} inputMode="numeric" value={newTotalStr} onChange={(e) => setNewTotalStr(e.target.value)} />
+          </Field>
+          <Field label="تفاوتش کجا برود/بیاید؟ *">
+            <select className={inputCls} value={fixBucket} onChange={(e) => setFixBucket(e.target.value as 'cash' | 'sarraf' | 'later')}>
+              <option value="cash">نقد از صندوق — تفاوت پرداخت یا پس گرفته می‌شود</option>
+              <option value="sarraf">قرض صراف کم یا زیاد شود</option>
+              <option value="later">باقی‌ماندهٔ «بعداً» کم یا زیاد شود</option>
+            </select>
+          </Field>
+          {fixBucket === 'sarraf' && (
+            <Field label="کدام صراف؟ *">
+              <select className={inputCls} value={fixSarrafId} onChange={(e) => setFixSarrafId(e.target.value ? Number(e.target.value) : '')}>
+                <option value="">انتخاب کنید...</option>
+                {sarrafs?.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="دلیل اصلاح *">
+            <input className={inputCls} value={fixReason} onChange={(e) => setFixReason(e.target.value)} placeholder="مثلاً کرایه اشتباه نوشته شده بود" />
+          </Field>
+          {fixError && <p className="mb-2 text-sm font-bold text-red-600">{fixError}</p>}
+          <PrimaryBtn
+            onClick={saveFix}
+            disabled={parseNum(newTotalStr) <= 0 || !fixReason.trim() || (fixBucket === 'sarraf' && fixSarrafId === '')}
+          >
+            ثبت اصلاح مصارف
+          </PrimaryBtn>
+        </div>
+      )}
     </Modal>
   )
 }

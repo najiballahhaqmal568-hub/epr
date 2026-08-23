@@ -66,6 +66,9 @@ import {
   correctExpense,
   previewExpenseCorrection,
   deleteExpense,
+  correctOpeningDebt,
+  previewOpeningDebtCorrection,
+  correctLandingTotal,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -736,6 +739,82 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await payExpenseCreditorCash(bId, 500)
       eq('تسویه از قرض نو کریم', (await db.suppliers.get(bId))!.balance, 700)
       eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), 3800)
+    }
+  },
+  {
+    name: 'قرض قبلی تأمین‌کننده — اصلاح و پاک کردن امن',
+    run: async () => {
+      const supId = await newSupplier()
+      await addOpeningDebt('supplier', supId, 'تأمین‌کننده', 5000)
+      eq('قرض قبلی ثبت شد', (await db.suppliers.get(supId))!.balance, 5000)
+      const doc = (await db.payments.filter((p) => !p.deleted && p.partyType === 'supplier' && p.via === 'opening').first())!
+      const pv = await previewOpeningDebtCorrection(doc.id!, { amount: 7000, reason: 'رقم غلط بود' })
+      eq('پیش‌نمایش قرض بعدی', pv.after, 7000)
+
+      const c1id = await correctOpeningDebt(doc.id!, { amount: 7000, reason: 'رقم غلط بود' })
+      eq('قرض پس از اصلاح', (await db.suppliers.get(supId))!.balance, 7000)
+      const c1 = (await db.payments.get(c1id))!
+      eq('سند نو منفی است', c1.amount, -7000)
+      is('دلیل اصلاح ذخیره شد', c1.correctionReason, 'رقم غلط بود')
+      is('زنجیره به سند قبلی پیوست', c1.correctionOfUuid, doc.uuid)
+      eq('سند قبلی زنده نیست', (await db.payments.get(doc.id!))!.deleted, true)
+
+      const c2id = await correctOpeningDebt(c1id, { amount: 4500, reason: 'باز هم غلط' })
+      eq('اصلاح دوم روی سندِ اصلاح‌شده', (await db.suppliers.get(supId))!.balance, 4500)
+      is('زنجیرهٔ دوم درست', (await db.payments.get(c2id))!.correctionOfUuid, c1.uuid)
+      await throws('مبلغ صفر رد شود', () => correctOpeningDebt(c2id, { amount: 0, reason: 'x' }))
+
+      await deletePayment(c2id)
+      eq('پاک کردن: حساب صفر شد', (await db.suppliers.get(supId))!.balance, 0)
+      eq('به صندوق هیچ اثری نیست', await cashBalance(), 0)
+      eq('دفتر صندوق هم خالی است', await cashLedgerEnd(), 0)
+    }
+  },
+  {
+    name: 'اصلاح مصارف رسیدن — مجموع درست، صندوق و صراف و باقی‌مانده',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const p1 = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 })) // خرید قرضی
+      await seedCash(3000)
+      await receivePurchase(p1)
+      await addLandingCost([p1], 1000, 'cash')
+      eq('صندوق پس از مصارف نقدی', await cashBalance(), 2000)
+      eq('قیمت تمام‌شده با مصارف', await costOf(vId), 600)
+      await addSale(sell(vId, 2, 900)) // صندوق ۲٬۰۰۰+۱٬۸۰۰ · مفاد ۲×(۹۰۰−۶۰۰)
+      eq('مفاد فروش', await profitAndLoss(), 600)
+
+      // مجموع از ۱٬۰۰۰ به ۴۰۰ — مازادِ نقدی به صندوق برمی‌گردد
+      await correctLandingTotal(p1, { newTotal: 400, bucket: 'cash', reason: 'کرایه اشتباه نوشته شده بود' })
+      eq('صندوق: مازاد برگشت', await cashBalance(), 4400)
+      eq('قیمت تمام‌شدهٔ نو', await costOf(vId), 540)
+      eq('گدام دست‌نخورده', await stockOf(vId), 8)
+      eq('قرض تأمین‌کننده جدا است', (await db.suppliers.get(supId))!.balance, 5000)
+      eq('مفادِ ثبت‌شده ثابت می‌ماند', await profitAndLoss(), 600)
+      eq('ردّ اصلاح ماند', ((await db.purchases.get(p1))!.landingCorrections ?? []).length, 1)
+
+      // تفاوت به «بعداً» رود و بعد پرداختش کنیم
+      await correctLandingTotal(p1, { newTotal: 900, bucket: 'later', reason: 'باقی بعداً داده شد' })
+      eq('باقی‌مانده ثبت شد', landingUnpaidOf((await db.purchases.get(p1))!), 500)
+      await payLanding(p1)
+      eq('پرداخت باقی‌مانده', await cashBalance(), 3900)
+
+      // تفاوت به قرض صراف رود و کمش هم بشود؛ منفی شدنش رد گردد
+      const sId = (await db.suppliers.add({ name: 'حاجی صراف', balance: 0, kind: 'sarraf' } as never)) as number
+      const sarraf = { id: sId, name: 'حاجی صراف' }
+      await correctLandingTotal(p1, { newTotal: 1200, bucket: 'sarraf', sarraf, reason: 'کمیشن صراف اضافه شد' })
+      eq('قرض صراف ثبت شد', (await db.suppliers.get(sId))!.balance, 300)
+      eq('بخش صراف مصارف', (await db.purchases.get(p1))!.landingSarrafAmount, 300)
+      await correctLandingTotal(p1, { newTotal: 1100, bucket: 'sarraf', sarraf, reason: 'کمی کمتر شد' })
+      eq('کاهش قرض صراف', (await db.suppliers.get(sId))!.balance, 200)
+      await throws(
+        'منفی شدن بخش صراف رد شود',
+        () => correctLandingTotal(p1, { newTotal: 800, bucket: 'sarraf', sarraf, reason: 'x' })
+      )
+      eq('شکست: قرض صراف تغییری نکرد', (await db.suppliers.get(sId))!.balance, 200)
+      eq('شکست: مجموع تغییری نکرد', (await db.purchases.get(p1))!.landingCost, 1100)
+
+      eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), await cashBalance())
     }
   },
   {

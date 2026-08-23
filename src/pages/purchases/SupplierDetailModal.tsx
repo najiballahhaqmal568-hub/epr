@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Payment, type Supplier } from '../../db'
-import { addOpeningDebt } from '../../lib/ops'
+import { accessFlags, db, type Payment, type Supplier } from '../../db'
+import { addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { CorrectSupplierPaymentModal } from './SupplierModals'
+import CorrectOpeningDebtModal from './CorrectOpeningDebtModal'
 
 /** تاریخچهٔ کامل حساب یک تأمین‌کننده یا صراف */
 export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
@@ -12,6 +13,11 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   const [debtStr, setDebtStr] = useState('')
   const [debtNote, setDebtNote] = useState('')
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
+  const [editingOpening, setEditingOpening] = useState<Payment | null>(null)
+  // سند اشتباهی (قرض قبلی) که مالک می‌خواهد کلاً پاک کند — اول اثرش نشان داده می‌شود
+  const [toDelete, setToDelete] = useState<
+    { id: number; label: string; before: number; after: number } | null
+  >(null)
   const live = useLiveQuery(() => db.suppliers.get(supplier.id!), [supplier.id])
   const purchases = useLiveQuery(
     () => db.purchases.where('supplierId').equals(supplier.id!).filter((p) => !p.deleted).toArray(),
@@ -33,6 +39,9 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
 
   if (editingPayment) {
     return <CorrectSupplierPaymentModal payment={editingPayment} onClose={() => setEditingPayment(null)} />
+  }
+  if (editingOpening) {
+    return <CorrectOpeningDebtModal payment={editingOpening} onClose={() => setEditingOpening(null)} />
   }
 
   type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment }
@@ -58,8 +67,15 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   })
   payments?.forEach((p) => {
     if (p.amount < 0) {
-      // بیلانس اولیه / قرض قبلی: قرض ما را بالا برده است
-      events.push({ date: p.date, label: p.note ?? 'قرض قبلی', amount: -p.amount, plus: true })
+      // بیلانس اولیه / قرض قبلی: قرض ما را بالا برده است — از اینجا قابل اصلاح و پاک‌کردن است
+      events.push({
+        date: p.date,
+        label: p.note ?? 'قرض قبلی',
+        sub: p.correctionReason ? `اصلاح‌شده — ${p.correctionReason}` : undefined,
+        amount: -p.amount,
+        plus: true,
+        payment: p.via === 'opening' && !p.lenderAction && !p.groupUuid ? p : undefined
+      })
     } else {
       const sarrafAmount = p.via === 'sarraf' ? (p.sarrafAmount ?? p.amount) : 0
       const cashAmount = p.amount - sarrafAmount
@@ -139,17 +155,60 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
                 {fmtMoney(Math.abs(e.amount))}
               </span>
             </div>
-            {e.payment?.id && (
-              <button
-                className="mt-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
-                onClick={() => setEditingPayment(e.payment!)}
-              >
-                اصلاح سند
-              </button>
+            {!accessFlags.readOnly && e.payment?.id && (
+              <div className="mt-2 flex gap-2">
+                <button
+                  className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700"
+                  onClick={() => (e.payment!.amount < 0 ? setEditingOpening(e.payment!) : setEditingPayment(e.payment!))}
+                >
+                  اصلاح سند
+                </button>
+                {e.payment.amount < 0 && (
+                  <button
+                    className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
+                    onClick={async () => {
+                      const pid = e.payment!.id!
+                      const im = await deletePaymentImpact(pid)
+                      if (!im) return
+                      setToDelete({ id: pid, label: e.label, before: im.before, after: im.after })
+                    }}
+                  >
+                    اشتباه بود — پاک کن
+                  </button>
+                )}
+              </div>
             )}
           </div>
         ))}
       </div>
+      {toDelete && (
+        <Modal title="پاک کردن سند اشتباهی" onClose={() => setToDelete(null)}>
+          <p className="mb-3 text-sm text-slate-700">
+            «{toDelete.label}» از حساب {supplier.name} پاک می‌شود. اثرش این است:
+          </p>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+            <p className="flex justify-between">
+              <span className="text-slate-500">قرض حالا</span>
+              <span className="font-bold">{fmtMoney(toDelete.before)}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-slate-500">قرض بعد از پاک کردن</span>
+              <span className="font-bold text-teal-700">{fmtMoney(toDelete.after)}</span>
+            </p>
+          </div>
+          <p className="mb-3 text-xs text-slate-500">
+            سند پاک می‌شود ولی نشانش در پشتیبان می‌ماند — هیچ عددی بی‌سند تغییر نمی‌کند.
+          </p>
+          <PrimaryBtn
+            onClick={async () => {
+              await deletePayment(toDelete.id)
+              setToDelete(null)
+            }}
+          >
+            بلی، پاک کن
+          </PrimaryBtn>
+        </Modal>
+      )}
       <p className="mt-2 text-center text-xs text-slate-400">قرمز = قرض ما زیاد شد · سبز = پرداخت/کم شد</p>
     </Modal>
   )
