@@ -36,6 +36,10 @@ export function NewSaleModal({
   // در عمده اول می‌پرسد: کارتن کامل یا نیم کارتن (خانه‌پری سایزها تا نصف کارتن)
   const [pickerMode, setPickerMode] = useState<'choice' | 'single' | 'half'>('single')
   const [halfQtys, setHalfQtys] = useState<Record<number, number>>({})
+  // چند کارتن یک‌جا — مثل فاکتور عمدهٔ کاغذی (۳ کارتن ECCO…)
+  const [cartonCounts, setCartonCounts] = useState<Record<number, number>>({})
+  const cartonCountOf = (id: number) => Math.max(1, Math.floor(cartonCounts[id] ?? 1))
+  const setCartonCount = (id: number, n: number) => setCartonCounts((c) => ({ ...c, [id]: Math.max(1, n) }))
 
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
@@ -103,17 +107,18 @@ export function NewSaleModal({
     )
   }
 
-  function addCartonSale(p: Product) {
+  function addCartonSale(p: Product, count = 1) {
     const vs = variants?.filter((v) => v.productId === p.id) ?? []
     setLines((ls) => {
       let out = [...ls]
       for (const it of p.carton!.items) {
         const v = vs.find((x) => x.size === it.size && x.color === it.color)
         if (!v) continue
+        const q = it.qty * count
         const price = saleType === 'retail' ? v.retailPrice : v.wholesalePrice
         const i = out.findIndex((l) => l.variantId === v.id)
-        if (i >= 0) out = out.map((l, j) => (j === i ? { ...l, qty: l.qty + it.qty } : l))
-        else out.push({ variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: it.qty, unitPrice: price })
+        if (i >= 0) out = out.map((l, j) => (j === i ? { ...l, qty: l.qty + q } : l))
+        else out.push({ variantId: v.id!, productName: p.name, size: v.size, color: v.color, qty: q, unitPrice: price })
       }
       return out
     })
@@ -124,7 +129,7 @@ export function NewSaleModal({
         const v = vs2.find((x) => x.size === it.size && x.color === it.color)
         return s + it.qty * (v?.wholesalePrice ?? 0)
       }, 0)
-      const diff = pairSum - p.carton.price
+      const diff = (pairSum - p.carton.price) * count
       if (diff > 0) setDiscountStr((prev) => String(parseNum(prev) + diff))
     }
   }
@@ -350,24 +355,51 @@ export function NewSaleModal({
           placeholder="نام، سایز، رنگ یا کود..."
         />
       </Field>
-      {cartonProducts.map((p) => {
-        const pairs = p.carton!.items.reduce((s, it) => s + it.qty, 0)
-        const avail = cartonsInStock(p)
-        return (
-          <button
-            key={`c${p.id}`}
-            onClick={() => addCartonSale(p)}
-            disabled={avail <= 0}
-            className="mb-2 flex w-full items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800 active:bg-amber-100 disabled:opacity-40"
-          >
-            <span>
-              📦 {p.name} — ＋ یک کارتن ({fmtNum(pairs)} جوړه)
-              {saleType === 'wholesale' && p.carton!.price ? <span className="block text-xs font-normal">قیمت کارتنی: {fmtMoney(p.carton!.price)}</span> : null}
-            </span>
-            <span className="text-sm font-normal">{avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل نیست'}</span>
-          </button>
-        )
-      })}
+      {saleType === 'wholesale' &&
+        cartonProducts.map((p) => {
+          const pairs = p.carton!.items.reduce((s, it) => s + it.qty, 0)
+          const avail = cartonsInStock(p)
+          const n = cartonCountOf(p.id!)
+          return (
+            <div
+              key={`c${p.id}`}
+              className="mb-2 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate">📦 {p.name}</p>
+                <p className="block text-xs font-normal">
+                  هر کارتن {fmtNum(pairs)} جوړه
+                  {p.carton!.price ? ` · کارتنی: ${fmtMoney(p.carton!.price)}` : ''} ·{' '}
+                  {avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل نیست'}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  className="h-8 w-8 rounded-full bg-white font-bold"
+                  onClick={() => setCartonCount(p.id!, n - 1)}
+                  disabled={n <= 1}
+                >
+                  −
+                </button>
+                <span className="w-8 text-center">{fmtNum(n)}</span>
+                <button
+                  className="h-8 w-8 rounded-full bg-white font-bold"
+                  onClick={() => setCartonCount(p.id!, Math.min(n + 1, avail))}
+                  disabled={avail <= 0 || n >= avail}
+                >
+                  ＋
+                </button>
+                <button
+                  onClick={() => addCartonSale(p, n)}
+                  disabled={avail <= 0}
+                  className="rounded-xl bg-amber-700 px-4 py-2 text-white active:bg-amber-800 disabled:opacity-40"
+                >
+                  ＋ افزودن
+                </button>
+              </div>
+            </div>
+          )
+        })}
       {matches.length > 0 && (
         <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
           {matches.map((v) => {
@@ -535,20 +567,40 @@ export function NewSaleModal({
           if (pickerMode === 'choice' && p.carton?.items.length) {
             const pairs = p.carton.items.reduce((s, it) => s + it.qty, 0)
             const avail = cartonsInStock(p)
+            const n = cartonCountOf(p.id!)
             return (
               <Modal title={`📦 ${p.name}`} onClose={() => setPickerFor(null)}>
+                <div className="mb-2 flex items-center justify-center gap-3 rounded-xl bg-slate-50 p-2">
+                  <button
+                    className="h-9 w-9 rounded-full bg-white font-bold"
+                    onClick={() => setCartonCount(p.id!, n - 1)}
+                    disabled={n <= 1}
+                  >
+                    −
+                  </button>
+                  <span className="text-lg font-bold">{fmtNum(n)} کارتن</span>
+                  <button
+                    className="h-9 w-9 rounded-full bg-white font-bold"
+                    onClick={() => setCartonCount(p.id!, Math.min(n + 1, avail))}
+                    disabled={avail <= 0 || n >= avail}
+                  >
+                    ＋
+                  </button>
+                </div>
                 <button
                   disabled={avail <= 0}
                   onClick={() => {
-                    addCartonSale(p)
+                    addCartonSale(p, n)
                     setPickerFor(null)
                   }}
                   className="mb-2 w-full rounded-xl bg-teal-700 p-4 text-right font-bold text-white active:bg-teal-800 disabled:opacity-40"
                 >
-                  <span className="block text-lg">📦 کارتن کامل ({fmtNum(pairs)} جوړه)</span>
+                  <span className="block text-lg">
+                    📦 {fmtNum(n)} کارتن ({fmtNum(pairs * n)} جوړه)
+                  </span>
                   <span className="text-sm font-normal opacity-90">
                     {avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل موجود نیست'}
-                    {p.carton.price ? ` · قیمت کارتنی: ${fmtMoney(p.carton.price)}` : ''}
+                    {p.carton.price ? ` · قیمت کارتنی هر کارتن: ${fmtMoney(p.carton.price)}` : ''}
                   </span>
                 </button>
                 <button

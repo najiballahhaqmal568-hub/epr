@@ -1064,6 +1064,37 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'فروش عمدهٔ کارتنی — چند کارتن بین سایزها پخش شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const productId = (await db.products.add({ name: 'کارتنی' })) as number
+      const v41 = (await db.variants.add({ productId, size: '41', color: 'سیاه', stockQty: 0, purchasePrice: 0, retailPrice: 1000, wholesalePrice: 800, lowStock: 2 })) as number
+      const v42 = (await db.variants.add({ productId, size: '42', color: 'سیاه', stockQty: 0, purchasePrice: 0, retailPrice: 1000, wholesalePrice: 800, lowStock: 2 })) as number
+      await addPurchase(buy(supId, v41, 24, 500, { paid: 0 }))
+      await addPurchase(buy(supId, v42, 24, 500, { paid: 0 }))
+      const custId = await newCustomer('عمده‌دار')
+      // ۳ کارتنِ ۱۲ جوړه‌ای: هر کارتن ۶+۶ میان دو سایز — همان کاری که دکمهٔ کارتنی می‌کند
+      await addSale({
+        date: Date.now(),
+        customerId: custId,
+        customerName: 'عمده‌دار',
+        saleType: 'wholesale',
+        lines: [
+          { variantId: v41, productName: 'کارتنی', size: '41', color: 'سیاه', qty: 18, unitPrice: 800 },
+          { variantId: v42, productName: 'کارتنی', size: '42', color: 'سیاه', qty: 18, unitPrice: 800 }
+        ],
+        total: 28800,
+        paid: 8800
+      })
+      eq('سایز ۴۱: ۲۴ خرید − ۱۸ فروش', await stockOf(v41), 6)
+      eq('سایز ۴۲ همینطور', await stockOf(v42), 6)
+      eq('قرض مشتری عمده', (await db.customers.get(custId))!.balance, 20000)
+      eq('نقد وارد صندوق شد', await cashBalance(), 8800)
+      eq('مفاد فی جوړه ۳۰۰ × ۳۶', await profitAndLoss(), 10800)
+      eq('دفتر مشتری برابر عدد ذخیره', await customerLedgerEnd(custId), 20000)
+    }
+  },
+  {
     name: 'فروش زیر قیمت زیان نشان می‌دهد',
     run: async () => {
       const supId = await newSupplier()
