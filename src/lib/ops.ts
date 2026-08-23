@@ -915,6 +915,164 @@ export async function correctSupplierPayment(
   })
 }
 
+export interface CustomerPaymentCorrectionInput {
+  date: number
+  amount: number
+  note?: string
+  bookPage?: string
+  reason: string
+}
+
+export interface CustomerPaymentCorrectionPreview {
+  accounts: Array<{ partyId: number; partyName: string; before: number; after: number }>
+  cash: Array<{ box: string; before: number; after: number }>
+  replacement: Payment
+}
+
+async function customerPaymentReplacement(
+  current: Payment,
+  input: CustomerPaymentCorrectionInput
+): Promise<Payment> {
+  if (current.partyType !== 'customer' || current.amount <= 0 || current.groupUuid || current.lenderAction) {
+    throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
+  }
+  const customer = await db.customers.get(current.partyId)
+  if (!customer || customer.deleted) throw new Error('مشتری یافت نشد')
+  const amount = afn(input.amount)
+  if (amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
+  if (!Number.isFinite(input.date) || input.date <= 0) throw new Error('تاریخ درست را وارد کنید')
+  if (!input.reason.trim()) throw new Error('دلیل اصلاح را بنویسید')
+
+  // دریافت پول مشتری همیشه نقدی است؛ صندوق همان صندوقِ سند قبلی می‌ماند.
+  return {
+    date: input.date,
+    partyType: 'customer',
+    partyId: customer.id!,
+    partyName: customer.name,
+    amount,
+    note: input.note?.trim() || undefined,
+    bookPage: input.bookPage?.trim() || current.bookPage,
+    box: current.box,
+    via: 'cash',
+    cashDelta: amount
+  }
+}
+
+/** پیش‌نمایش اثر اصلاح رسید مشتری، بدون نوشتن هیچ عددی. */
+export async function previewCustomerPaymentCorrection(
+  paymentId: number,
+  input: CustomerPaymentCorrectionInput
+): Promise<CustomerPaymentCorrectionPreview> {
+  const current = await db.payments.get(paymentId)
+  if (!current || current.deleted) throw new Error('سند پرداخت یافت نشد')
+  const replacement = await customerPaymentReplacement(current, input)
+  const customer = await db.customers.get(current.partyId)
+  if (!customer) throw new Error('مشتری یافت نشد')
+
+  const accounts: CustomerPaymentCorrectionPreview['accounts'] = [
+    {
+      partyId: customer.id!,
+      partyName: customer.name,
+      before: customer.balance,
+      // اثر سند قبلی اول برمی‌گردد (+amount)، بعد سند نو می‌نشیند (−amount)
+      after: customer.balance + current.amount - replacement.amount
+    }
+  ]
+
+  const oldCashDelta = paymentCashDelta(current)
+  const newCashDelta = paymentCashDelta(replacement)
+  const cashDeltas = new Map<string, number>()
+  if (oldCashDelta) cashDeltas.set(boxOf(current), (cashDeltas.get(boxOf(current)) ?? 0) - oldCashDelta)
+  if (newCashDelta) cashDeltas.set(boxOf(replacement), (cashDeltas.get(boxOf(replacement)) ?? 0) + newCashDelta)
+  const cash: CustomerPaymentCorrectionPreview['cash'] = []
+  for (const [box, delta] of cashDeltas) {
+    const before = await cashBalance(box)
+    cash.push({ box, before, after: before + delta })
+  }
+  return { accounts, cash, replacement }
+}
+
+/**
+ * اصلاح امن رسید مشتری (دریافت پول): سند قبلی به‌صورت رد حساب می‌ماند، اثرش برمی‌گردد
+ * و سند درست در همان تراکنش ساخته می‌شود. کاهش مبلغ یعنی پول از صندوق بیرون می‌رود —
+ * پس کافی‌بودن پول روی اثر خالص کنترل می‌شود و نبودِ آن همهٔ تغییرات را برمی‌گرداند.
+ */
+export async function correctCustomerPayment(
+  paymentId: number,
+  input: CustomerPaymentCorrectionInput
+): Promise<number> {
+  return db.transaction('rw', [db.payments, db.customers, db.cashMovements], async () => {
+    const current = await db.payments.get(paymentId)
+    if (!current || current.deleted) throw new Error('سند پرداخت یافت نشد')
+    const replacement = await customerPaymentReplacement(current, input)
+
+    for (const effect of effectsOf('payments', current)) {
+      const row = await db.table(effect.table).get(effect.id!)
+      if (!row) throw new Error('حساب مربوط به سند قبلی یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
+    }
+
+    const correctedAt = Date.now()
+    const previousUuid = current.uuid ?? newUuid()
+    const replacementUuid = correctionUuid(`customer-payment:${previousUuid}`)
+    const oldCashDelta = paymentCashDelta(current)
+    await db.payments.update(paymentId, {
+      uuid: previousUuid,
+      deleted: true,
+      correctedByUuid: replacementUuid,
+      correctedAt
+    })
+
+    await db.cashMovements.add({
+      uuid: correctionUuid(`customer-payment-reverse-cash:${previousUuid}`),
+      date: correctedAt,
+      type: 'customerPayment',
+      refId: paymentId,
+      amount: -oldCashDelta,
+      box: boxOf(current),
+      note: `اصلاح — برگشت سند قبلی ${current.partyName}`
+    })
+
+    replacement.uuid = replacementUuid
+    replacement.correctionOfUuid = previousUuid
+    replacement.correctionReason = input.reason.trim()
+    replacement.correctedAt = correctedAt
+    replacement.correctionPrevious = {
+      date: current.date,
+      amount: current.amount,
+      via: current.via,
+      cashDelta: oldCashDelta,
+      note: current.note,
+      box: current.box
+    }
+    const replacementId = (await db.payments.add(replacement)) as number
+
+    for (const effect of effectsOf('payments', replacement)) {
+      const row = await db.table(effect.table).get(effect.id!)
+      if (!row) throw new Error('حساب مربوط به سند اصلاح‌شده یافت نشد')
+      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
+    }
+
+    const newCashDelta = paymentCashDelta(replacement)
+    const replacementBox = boxOf(replacement)
+    // بعد از برگشت سند قبلی، موجودی زندهٔ صندوق را می‌خوانیم تا اثر خالص منفی مسدود شود.
+    const balanceNow = await cashBalance(replacementBox)
+    if (balanceNow + newCashDelta < 0) {
+      throw new Error(`پیسه در «${replacementBox}» کافی نیست! موجودی: ${new Intl.NumberFormat('fa-AF').format(balanceNow)} ؋`)
+    }
+    await db.cashMovements.add({
+      uuid: correctionUuid(`customer-payment-new-cash:${previousUuid}`),
+      date: replacement.date,
+      type: 'customerPayment',
+      refId: replacementId,
+      amount: newCashDelta,
+      box: replacementBox,
+      note: `اصلاح دریافت — ${replacement.partyName}`
+    })
+    return replacementId
+  })
+}
+
 /** ثبت پرداخت/دریافت: کاهش قرض طرف حساب + حرکت صندوق */
 export async function addPayment(payment: Payment): Promise<number> {
   payment.amount = afn(payment.amount)

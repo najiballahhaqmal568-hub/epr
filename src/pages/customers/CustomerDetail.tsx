@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Customer } from '../../db'
+import { db, accessFlags, type Customer, type Payment } from '../../db'
 import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
+import CorrectCustomerPaymentModal from './CorrectCustomerPaymentModal'
 
 export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [showPay, setShowPay] = useState(false)
@@ -20,6 +21,8 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   const [toDelete, setToDelete] = useState<
     { id: number; label: string; partyName: string; before: number; after: number; cash: number } | null
   >(null)
+  // رسید اشتباهی که مالک می‌خواهد اصلاح کند (مبلغ/تاریخ/صفحه) — بدون پاک کردن
+  const [toCorrect, setToCorrect] = useState<Payment | null>(null)
 
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
   const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
@@ -189,15 +192,31 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
               <p className="text-xs text-slate-500">مانده: {fmtMoney(r.balance)}</p>
               {/* فقط سندهای دستی (دریافت پول و قرض قبلی) — فروش و مرجوعی از راه خودشان پاک می‌شوند */}
               {r.source?.table === 'payments' && (
-                <button
-                  className="mt-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700"
-                  onClick={async () => {
-                    const im = await deletePaymentImpact(r.source!.id)
-                    if (im) setToDelete({ id: r.source!.id, ...im })
-                  }}
-                >
-                  اشتباه بود — پاک کن
-                </button>
+                (() => {
+                  const p = (payments ?? []).find((x) => x.id === r.source!.id)
+                  const correctable = !!p && p.amount > 0 && !p.groupUuid && !p.lenderAction && !accessFlags.readOnly
+                  return (
+                    <>
+                      {correctable && (
+                        <button
+                          className="mr-1 mt-1 rounded-lg bg-teal-50 px-2 py-1 text-xs font-bold text-teal-700"
+                          onClick={() => setToCorrect(p!)}
+                        >
+                          اصلاح سند
+                        </button>
+                      )}
+                      <button
+                        className="mt-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700"
+                        onClick={async () => {
+                          const im = await deletePaymentImpact(r.source!.id)
+                          if (im) setToDelete({ id: r.source!.id, ...im })
+                        }}
+                      >
+                        اشتباه بود — پاک کن
+                      </button>
+                    </>
+                  )
+                })()
               )}
             </div>
           </div>
@@ -242,6 +261,8 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
           </PrimaryBtn>
         </Modal>
       )}
+
+      {toCorrect && <CorrectCustomerPaymentModal payment={toCorrect} onClose={() => setToCorrect(null)} />}
 
       {showEdit && <CustomerModal customer={c} onClose={() => setShowEdit(false)} />}
     </Modal>

@@ -79,11 +79,12 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
 
   for (const p of payments) {
     // مبلغ منفی = قرض قبلی یا کسر صندوق که به حساب شخص رفته: قرض را بالا می‌برد
+    const correctionNote = p.correctionReason ? `اصلاح: ${p.correctionReason}` : undefined
     events.push({
       key: `p${p.id}`,
       date: p.date,
       label: p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
-      note: p.amount < 0 ? undefined : p.note,
+      note: p.amount < 0 ? undefined : [p.note, correctionNote].filter(Boolean).join(' · ') || undefined,
       page: p.bookPage?.trim() || undefined,
       source: { table: 'payments', id: p.id! },
       // دریافت پول قرض را کم می‌کند، قرض قبلی (مبلغ منفی) آن را زیاد

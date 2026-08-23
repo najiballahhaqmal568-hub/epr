@@ -61,6 +61,8 @@ import {
   deletePaymentImpact,
   correctSupplierPayment,
   previewSupplierPaymentCorrection,
+  correctCustomerPayment,
+  previewCustomerPaymentCorrection,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -597,6 +599,76 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('مفاد: فقط فروش جدید', await profitAndLoss(), 400)
       eq('سند مرجوعی زنده نماند', (await db.returns.filter((r) => !r.deleted).toArray()).length, 0)
       eq('حساب مشتری سالم ماند', await customerLedgerEnd(custId), 0)
+    }
+  },
+  {
+    name: 'اصلاح امن رسید مشتری — مبلغ و تاریخ و صفحه درست شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const custId = await newCustomer('کریم')
+      await seedCash(100)
+      await addPurchase(buy(supId, vId, 5, 400, { paid: 0 })) // خرید قرضی
+      await addSale(sell(vId, 1, 1000, { customerId: custId, customerName: 'کریم', paid: 0 })) // قرض ۱٬۰۰۰
+      const r1 = await addPayment({
+        date: Date.now(),
+        partyType: 'customer',
+        partyId: custId,
+        partyName: 'کریم',
+        amount: 300
+      })
+      eq('قرض بعد از رسید اول', (await db.customers.get(custId))!.balance, 700)
+      eq('صندوق بعد از رسید اول', await cashBalance(), 400)
+
+      const oldDate = Date.now() - 24 * 60 * 60 * 1000 // دیروز
+      const pv = await previewCustomerPaymentCorrection(r1, {
+        date: oldDate,
+        amount: 900,
+        bookPage: '۱۲',
+        reason: 'مبلغ کم نوشته شده بود'
+      })
+      eq('پیش‌نمایش قرض بعدی', pv.accounts[0].after, 100)
+
+      const c1id = await correctCustomerPayment(r1, { date: oldDate, amount: 900, bookPage: '۱۲', reason: 'مبلغ کم نوشته شده بود' })
+      const c1 = (await db.payments.get(c1id))!
+      eq('قرض بعد از اصلاح به ۹۰۰', (await db.customers.get(custId))!.balance, 100)
+      eq('صندوق بعد از اصلاح به ۹۰۰', await cashBalance(), 1000)
+      eq('دفتر مشتری برابر عدد ذخیره', await customerLedgerEnd(custId), 100)
+      eq('تاریخ سند جایگزین', c1.date, oldDate)
+      is('صفحهٔ دفتر ثبت شد', c1.bookPage, '۱۲')
+      is('دلیل اصلاح ذخیره شد', c1.correctionReason, 'مبلغ کم نوشته شده بود')
+      eq('خلاصهٔ سند قبلی', c1.correctionPrevious?.amount, 300)
+      const r1doc = (await db.payments.get(r1))!
+      eq('سند قبلی زنده نیست', r1doc.deleted, true)
+      is('سند قبلی به جایگزین پیوست', r1doc.correctedByUuid, c1.uuid)
+      eq('مفاد دست‌نخورده', await profitAndLoss(), 600)
+
+      // مصرف بزرگ تا صندوق تقریباً خالی شود؛ کاهشِ بزرگِ رسید باید رد شود و همه‌چیز برگردد
+      const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
+      await addExpense({ date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه', amount: 950 } as Expense)
+      eq('صندوق پس از مصرف', await cashBalance(), 50)
+      const beforeFailBal = (await db.customers.get(custId))!.balance
+      await throws(
+        'کاهشِ بیشتر از پول صندوق رد شود',
+        () => correctCustomerPayment(c1id, { date: Date.now(), amount: 500, reason: 'اشتباه دوم' })
+      )
+      eq('شکست: قرض تغییری نکرد', (await db.customers.get(custId))!.balance, beforeFailBal)
+      eq('شکست: صندوق تغییری نکرد', await cashBalance(), 50)
+      eq('شکست: سند قبلی زنده ماند', Boolean((await db.payments.get(c1id))!.deleted), false)
+      eq(
+        'شکست: سند جایگزین ساخته نشد',
+        (await db.payments.filter((p) => p.correctionOfUuid === c1.uuid).toArray()).length,
+        0
+      )
+
+      // کاهش کوچک‌تر که صندوق می‌کشد — باید کار کند و دفتر برابر بماند
+      const c2id = await correctCustomerPayment(c1id, { date: oldDate, amount: 850, reason: 'درست شد' })
+      eq('قرض پس از اصلاح دوم', (await db.customers.get(custId))!.balance, 150)
+      eq('صندوق پس از اصلاح دوم', await cashBalance(), 0)
+      eq('دفتر مشتری باز هم برابر عدد ذخیره', await customerLedgerEnd(custId), 150)
+      eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), 0)
+      is('زنجیرهٔ اصلاح ادامه یافت', (await db.payments.get(c2id))!.correctionOfUuid, c1.uuid)
+      eq('مفاد با مصرف منفی شد', await profitAndLoss(), -350)
     }
   },
   {
