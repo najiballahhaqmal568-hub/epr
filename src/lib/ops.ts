@@ -2466,8 +2466,63 @@ export async function cancelCustomerReturn(retId: number, reason: string): Promi
         const c = await db.customers.get(ret.partyId)
         if (c) await db.customers.update(ret.partyId, { balance: c.balance + ret.amount })
       }
+    await db.returns.update(retId, { deleted: true, cancelledReason: reason.trim(), cancelledAt: Date.now() })
+    // حذف سند، ترتیب میانگین قیمت را عوض می‌کند — دوباره از روی اسناد ساخته شود
+    await applyRebuiltCosts()
+  })
+}
+
+export interface CancelSupplierReturnImpact {
+  partyName: string
+  /** جنس‌هایی که دوباره به گدام برمی‌گردد */
+  stockIn: Array<{ label: string; variantId: number; qty: number }>
+  /** قرض ما به تأمین‌کننده دوباره زیاد می‌شود */
+  debtDelta: number
+  /** پولی که صندوق باید پس بدهد */
+  cashDelta: number
+}
+
+/** اثر ابطال یک برگشت به تأمین‌کننده، بدون نوشتن هیچ عددی */
+export async function cancelSupplierReturnImpact(retId: number): Promise<CancelSupplierReturnImpact | null> {
+  const ret = await db.returns.get(retId)
+  if (!ret || ret.deleted || ret.kind !== 'supplier') return null
+  const stockIn: CancelSupplierReturnImpact['stockIn'] = ret.lines.map((l) => ({
+    label: `${l.productName} ${l.size}`,
+    variantId: l.variantId,
+    qty: l.qty
+  }))
+  const debtDelta = ret.settlement === 'reduceDebt' && ret.amount > 0 ? ret.amount : 0
+  const cashDelta = ret.settlement === 'cashRefund' && ret.amount > 0 ? ret.amount : 0
+  return { partyName: ret.partyName, stockIn, debtDelta, cashDelta }
+}
+
+/**
+ * ابطال امن برگشت به تأمین‌کننده: جنس دوباره وارد گدام می‌شود، قرض ما به او
+ * برمی‌گردد یا پولِ برگشتی از صندوق بیرون می‌رود. سند با دلیلش برای رد حساب می‌ماند.
+ */
+export async function cancelSupplierReturn(retId: number, reason: string): Promise<void> {
+  if (!reason.trim()) throw new Error('دلیل ابطال را بنویسید')
+  return db.transaction(
+    'rw',
+    [db.returns, db.variants, db.suppliers, db.cashMovements, db.sales, db.purchases, db.adjustments],
+    async () => {
+      const ret = await db.returns.get(retId)
+      if (!ret || ret.deleted) throw new Error('سند مرجوعی یافت نشد')
+      if (ret.kind !== 'supplier') throw new Error('این سند مرجوعیِ تأمین‌کننده نیست')
+
+      for (const line of ret.lines) {
+        const v = await db.variants.get(line.variantId)
+        if (!v) throw new Error('جنس یافت نشد')
+        await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty })
+      }
+      if (ret.settlement === 'reduceDebt' && ret.amount > 0 && ret.partyId) {
+        const s = await db.suppliers.get(ret.partyId)
+        if (s) await db.suppliers.update(ret.partyId, { balance: s.balance + ret.amount })
+      } else if (ret.settlement === 'cashRefund' && ret.amount > 0) {
+        // پولی که تأمین‌کننده برگردانده بود، حالا از صندوق بیرون می‌رود
+        await movement({ date: Date.now(), type: 'refund', refId: retId, amount: -ret.amount, note: `ابطال مرجوعی به ${ret.partyName}` })
+      }
       await db.returns.update(retId, { deleted: true, cancelledReason: reason.trim(), cancelledAt: Date.now() })
-      // حذف سند، ترتیب میانگین قیمت را عوض می‌کند — دوباره از روی اسناد ساخته شود
       await applyRebuiltCosts()
     }
   )

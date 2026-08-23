@@ -5,7 +5,7 @@ import { fmtNum, fmtMoney, fmtDate, fmtDateShort, toDateInput, fromDateInput } f
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
 import { addCapital, addPartnerWithdrawal, afn } from '../../lib/ops'
 import { netWorth } from '../../lib/networth'
-import { addPartner, setPartnerCapital, settleYear, type SettleChoice } from '../../lib/partnership'
+import { addPartner, setPartnerCapital, setPartnerShare, settleYear, type SettleChoice } from '../../lib/partnership'
 import { parseNum } from '../../lib/format'
 import Row from './Row'
 
@@ -17,7 +17,7 @@ import Row from './Row'
  */
 export function PartnersCard({ netProfit }: { netProfit: number }) {
   const [showAdd, setShowAdd] = useState(false)
-  const [action, setAction] = useState<{ kind: 'capital' | 'withdraw'; id: number; name: string } | null>(null)
+  const [action, setAction] = useState<{ kind: 'capital' | 'withdraw' | 'share'; id: number; name: string } | null>(null)
   const [historyFor, setHistoryFor] = useState<string | null>(null)
   const [showSettle, setShowSettle] = useState(false)
   const [name, setName] = useState('')
@@ -27,6 +27,8 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
+  // فیصدی نو برای اصلاح سهم شریک
+  const [shareStr, setShareStr] = useState('')
 
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
@@ -104,6 +106,17 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
             </button>
             <button className="mr-auto text-xs text-slate-500" onClick={() => setHistoryFor(p.name)}>
               جزئیات ←
+            </button>
+          </div>
+          <div className="mt-1">
+            <button
+              className="text-xs font-bold text-slate-600"
+              onClick={() => {
+                setAction({ kind: 'share', id: p.id!, name: p.name })
+                setShareStr(String(p.share ?? 0)); setError('')
+              }}
+            >
+              ✏️ اصلاح فیصدی سهم ({fmtNum(p.share ?? 0)}٪)
             </button>
           </div>
         </div>
@@ -226,7 +239,33 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
         </Modal>
       )}
 
-      {action && (
+      {action && action.kind === 'share' && (
+        <Modal title={`اصلاح فیصدی سهم — ${action.name}`} onClose={() => setAction(null)}>
+          <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+            سهم فیصدی فقط تقسیم مفاد سال را تعیین می‌کند — به سرمایه، صندوق و گدام هیچ اثری ندارد.
+            مجموع فیصدی شرکا باید زیر ۱۰۰٪ بماند تا سهم شما باقی بماند.
+          </p>
+          <Field label="فیصدی نو *">
+            <input className={inputCls} inputMode="numeric" value={shareStr} onChange={(e) => setShareStr(e.target.value)} />
+          </Field>
+          {error && <p className="mb-2 text-sm font-bold text-red-600">{error}</p>}
+          <PrimaryBtn
+            disabled={parseNum(shareStr) <= 0 || parseNum(shareStr) >= 100}
+            onClick={async () => {
+              try {
+                await setPartnerShare(action.id, parseNum(shareStr))
+                setAction(null)
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            }}
+          >
+            ذخیرهٔ فیصدی
+          </PrimaryBtn>
+        </Modal>
+      )}
+
+      {action && action.kind !== 'share' && (
         <Modal title={action.kind === 'capital' ? `سرمایه‌گذاری — ${action.name}` : `برداشت/مصرف — ${action.name}`} onClose={() => setAction(null)}>
           <Field label="مبلغ *">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
@@ -324,6 +363,8 @@ function SettleModal({
   const [payCash, setPayCash] = useState(true)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
+  // تأیید دومرحله‌ای: برای بستن سال باید عبارت دقیق تایپ شود
+  const [confirmStr, setConfirmStr] = useState('')
 
   const shareOf = (p: import('../../db').Supplier) => Math.round((yearProfit * (p.share ?? 0)) / 100)
   const payableOf = (p: import('../../db').Supplier) => shareOf(p) - wSince(p.name)
@@ -394,7 +435,15 @@ function SettleModal({
         پرداخت‌ها از صندوق ثبت شود
       </label>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-      <PrimaryBtn onClick={() => void closeYear()}>✓ بستن سال و شروع سال جدید</PrimaryBtn>
+      <p className="mb-2 rounded-xl bg-red-50 p-2 text-xs font-bold text-red-700">
+        ⚠️ بستن سال برگشت‌ناپذیر است: سرمایه‌ها و خروج شرکا همین امروز ثبت می‌شود و سال جدید شروع می‌گردد.
+      </p>
+      <Field label="برای تأیید، عبارت «بستن سال» را دقیق بنویسید *">
+        <input className={inputCls} value={confirmStr} onChange={(e) => setConfirmStr(e.target.value)} placeholder="بستن سال" />
+      </Field>
+      <PrimaryBtn disabled={confirmStr.trim() !== 'بستن سال'} onClick={() => void closeYear()}>
+        ✓ بستن سال و شروع سال جدید
+      </PrimaryBtn>
     </Modal>
   )
 }

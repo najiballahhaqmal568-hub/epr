@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { accessFlags, db, type Payment, type Supplier } from '../../db'
-import { addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
+import { accessFlags, db, type Payment, type ReturnDoc, type Supplier } from '../../db'
+import { addOpeningDebt, deletePayment, deletePaymentImpact, cancelSupplierReturn } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { CorrectSupplierPaymentModal } from './SupplierModals'
@@ -18,6 +18,9 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   const [toDelete, setToDelete] = useState<
     { id: number; label: string; before: number; after: number } | null
   >(null)
+  // برگشت به تأمین‌کننده که مالک می‌خواهد ابطال کند
+  const [cancellingRet, setCancellingRet] = useState<ReturnDoc | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
   const live = useLiveQuery(() => db.suppliers.get(supplier.id!), [supplier.id])
   const purchases = useLiveQuery(
     () => db.purchases.where('supplierId').equals(supplier.id!).filter((p) => !p.deleted).toArray(),
@@ -44,7 +47,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     return <CorrectOpeningDebtModal payment={editingOpening} onClose={() => setEditingOpening(null)} />
   }
 
-  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment }
+  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment; ret?: ReturnDoc }
   const events: Ev[] = []
   purchases?.forEach((p) => {
     const hawala = p.sarrafAmount ?? 0
@@ -101,7 +104,14 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   })
   returns?.forEach((r) => {
     if (r.settlement === 'reduceDebt') {
-      events.push({ date: r.date, label: `مرجوعی جنس (${r.reason})`, amount: r.amount, plus: false })
+      events.push({
+        date: r.date,
+        label: `مرجوعی جنس (${r.reason})`,
+        sub: r.cancelledReason ? `ابطال‌شده — ${r.cancelledReason}` : undefined,
+        amount: r.amount,
+        plus: false,
+        ret: r
+      })
     }
   })
   events.sort((a, b) => b.date - a.date)
@@ -155,6 +165,17 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
                 {fmtMoney(Math.abs(e.amount))}
               </span>
             </div>
+            {!accessFlags.readOnly && e.ret && !e.ret.deleted && (
+              <button
+                className="mt-2 w-full rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
+                onClick={async () => {
+                  setCancelReason('')
+                  setCancellingRet(e.ret!)
+                }}
+              >
+                ابطال برگشت
+              </button>
+            )}
             {!accessFlags.readOnly && e.payment?.id && (
               <div className="mt-2 flex gap-2">
                 <button
@@ -206,6 +227,46 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
             }}
           >
             بلی، پاک کن
+          </PrimaryBtn>
+        </Modal>
+      )}
+      {cancellingRet && (
+        <Modal title="ابطال برگشت به تأمین‌کننده" onClose={() => setCancellingRet(null)}>
+          <p className="mb-3 text-sm text-slate-700">
+            مرجوعیِ «{fmtMoney(cancellingRet.amount)}» به {cancellingRet.partyName} ابطال می‌شود — انگار چنین برگشتی ثبت نشده بود:
+          </p>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+            <p className="flex justify-between">
+              <span className="text-slate-500">جنس به گدام برمی‌گردد</span>
+              <span className="font-bold">
+                +{fmtMoney(cancellingRet.lines.reduce((s, l) => s + l.qty, 0))} جوړه
+              </span>
+            </p>
+            {cancellingRet.settlement === 'reduceDebt' && (
+              <p className="mt-1 flex justify-between border-t border-slate-200 pt-1">
+                <span className="text-slate-500">قرض ما به او برمی‌گردد</span>
+                <span className="font-bold text-red-600">+{fmtMoney(cancellingRet.amount)}</span>
+              </p>
+            )}
+            {cancellingRet.settlement === 'cashRefund' && (
+              <p className="mt-1 flex justify-between border-t border-slate-200 pt-1">
+                <span className="text-slate-500">پول از صندوق بیرون می‌رود</span>
+                <span className="font-bold text-red-600">−{fmtMoney(cancellingRet.amount)}</span>
+              </p>
+            )}
+          </div>
+          <Field label="دلیل ابطال *">
+            <input className={inputCls} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="مثلاً مقدار یا تسویه اشتباه بود" />
+          </Field>
+          <p className="mb-3 mt-2 text-xs text-slate-500">سند پاک نمی‌شود؛ با دلیلش برای رد حساب می‌ماند.</p>
+          <PrimaryBtn
+            disabled={!cancelReason.trim()}
+            onClick={async () => {
+              await cancelSupplierReturn(cancellingRet.id!, cancelReason)
+              setCancellingRet(null)
+            }}
+          >
+            بلی، ابطال کن
           </PrimaryBtn>
         </Modal>
       )}

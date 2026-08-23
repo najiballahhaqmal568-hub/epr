@@ -74,6 +74,8 @@ import {
   correctLenderPayment,
   cancelTransfer,
   cancelTransferImpact,
+  cancelSupplierReturn,
+  cancelSupplierReturnImpact,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -89,7 +91,7 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { pageOrder, familyPages } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
-import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital } from '../src/lib/partnership'
+import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
 import { dailyExpenseItems, dailyReminderItems, setShopClosed } from '../src/lib/dailyExpenses'
 import { productReorderInfo } from '../src/lib/reorder'
@@ -998,6 +1000,67 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('کهنه: خانه به قبل از انتقال برگشت', await cashBalance('خانه'), 700)
       eq('کهنه: دکان به قبل از انتقال برگشت', await cashBalance(SHOP_BOX), 3800)
       eq('پول کل ثابت ماند', (await boxBalances()).total, 4500)
+    }
+  },
+  {
+    name: 'ابطال امن برگشت به تأمین‌کننده — گدام و حساب برمی‌گردد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(6000)
+      const p1 = await addPurchase(buy(supId, vId, 10, 500, { paid: 0 }))
+      await receivePurchase(p1)
+      eq('شروع: قرض ما', (await db.suppliers.get(supId))!.balance, 5000)
+
+      // برگشت قرضی — قرض ما کم و جنس از گدام بیرون می‌رود
+      const ret1 = await addSupplierReturn({
+        date: Date.now(), kind: 'supplier', partyId: supId, partyName: 'تأمین‌کننده',
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 500, restock: true }],
+        amount: 1000, settlement: 'reduceDebt', reason: 'خراب'
+      })
+      eq('گدام پس از برگشت', await stockOf(vId), 8)
+      eq('قرض پس از برگشت', (await db.suppliers.get(supId))!.balance, 4000)
+
+      const im = (await cancelSupplierReturnImpact(ret1))!
+      eq('پیش‌نمایش: دو جوړه به گدام برمی‌گردد', im.stockIn[0].qty, 2)
+      eq('پیش‌نمایش: قرض برمی‌گردد', im.debtDelta, 1000)
+
+      await cancelSupplierReturn(ret1, 'مقدار اشتباه بود')
+      eq('گدام کامل برگشت', await stockOf(vId), 10)
+      eq('قرض کامل برگشت', (await db.suppliers.get(supId))!.balance, 5000)
+      eq('مفاد صفر ماند', await profitAndLoss(), 0)
+      const doc = (await db.returns.get(ret1))!
+      is('دلیل ابطال ماند', doc.cancelledReason, 'مقدار اشتباه بود')
+
+      // برگشت نقدی — پولی که تأمین‌کننده داده بود، هنگام ابطال از صندوق می‌رود
+      const ret2 = await addSupplierReturn({
+        date: Date.now(), kind: 'supplier', partyId: supId, partyName: 'تأمین‌کننده',
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 500, restock: true }],
+        amount: 600, settlement: 'cashRefund', reason: 'برگشت نقدی'
+      })
+      eq('صندوق پس از مرجوعی نقدی', await cashBalance(), 6600)
+      await cancelSupplierReturn(ret2, 'اشتباه بود')
+      eq('صندوق: پول برگشت', await cashBalance(), 6000)
+      eq('گدام درست', await stockOf(vId), 10)
+      eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), 6000)
+    }
+  },
+  {
+    name: 'فیصدی سهم شریک اصلاح شود — مجموع زیر ۱۰۰٪ بماند',
+    run: async () => {
+      const p1 = (await db.suppliers.add({ name: 'شریک یک', balance: 0, kind: 'partner', capital: 100000, share: 20 } as never)) as number
+      const p2 = (await db.suppliers.add({ name: 'شریک دو', balance: 0, kind: 'partner', capital: 150000, share: 30 } as never)) as number
+      await setPartnerShare(p1, 25)
+      eq('فیصدی نو ثبت شد', (await db.suppliers.get(p1))!.share, 25)
+      await throws(
+        'مجموع بالای ۱۰۰٪ رد شود',
+        () => setPartnerShare(p2, 80)
+      )
+      eq('شکست: فیصدی تغییری نکرد', (await db.suppliers.get(p2))!.share, 30)
+      await throws(
+        'فیصدی صفر رد شود',
+        () => setPartnerShare(p1, 0)
+      )
     }
   },
   {

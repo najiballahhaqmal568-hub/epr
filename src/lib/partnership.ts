@@ -95,6 +95,19 @@ export async function removePartner(id: number): Promise<void> {
 }
 
 /**
+ * اصلاح فیصدی سهم یک شریک در میان سال.
+ * سهم مالک همیشه باقی‌ماندهٔ ۱۰۰٪ است، پس مجموع شرکا باید زیر ۱۰۰٪ بماند.
+ */
+export async function setPartnerShare(id: number, share: number): Promise<void> {
+  if (!Number.isFinite(share) || share <= 0 || share >= 100) throw new Error('فیصدی سهم باید بین ۱ و ۹۹ باشد')
+  const p = await db.suppliers.get(id)
+  if (!p || p.deleted || p.kind !== 'partner') throw new Error('شریک یافت نشد')
+  const others = (await listPartners()).filter((x) => x.id !== id).reduce((s, x) => s + (x.share ?? 0), 0)
+  if (others + share >= 100) throw new Error('مجموع فیصدی شرکا باید کمتر از ۱۰۰٪ بماند تا سهمی برای مالک بماند')
+  await db.suppliers.update(id, { share })
+}
+
+/**
  * شروع سال مالی: سرمایهٔ مالک خودکار حساب می‌شود تا مفاد روز اول صفر شود.
  * فیصدی مالک هم باقی‌ماندهٔ فیصدی شرکاست، پس مجموع همیشه دقیقاً ۱۰۰٪ است.
  */
