@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, accessFlags, type Customer, type Payment } from '../../db'
-import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact } from '../../lib/ops'
+import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact, cancelCustomerReturn, cancelReturnImpact, type CancelReturnImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
@@ -23,6 +23,9 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   >(null)
   // رسید اشتباهی که مالک می‌خواهد اصلاح کند (مبلغ/تاریخ/صفحه) — بدون پاک کردن
   const [toCorrect, setToCorrect] = useState<Payment | null>(null)
+  // برگشتی که مالک می‌خواهد ابطال کند — همهٔ اثرهایش برمی‌گردد
+  const [toCancel, setToCancel] = useState<{ id: number; impact: CancelReturnImpact } | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
 
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
   const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
@@ -214,9 +217,23 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                       >
                         اشتباه بود — پاک کن
                       </button>
-                    </>
-                  )
-                })()
+                     </>
+                   )
+                 })()
+               )}
+              {r.source?.table === 'returns' && !accessFlags.readOnly && (
+                <button
+                  className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700"
+                  onClick={async () => {
+                    const im = await cancelReturnImpact(r.source!.id)
+                    if (im) {
+                      setCancelReason('')
+                      setToCancel({ id: r.source!.id, impact: im })
+                    }
+                  }}
+                >
+                  ابطال برگشت
+                </button>
               )}
             </div>
           </div>
@@ -263,6 +280,50 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
       )}
 
       {toCorrect && <CorrectCustomerPaymentModal payment={toCorrect} onClose={() => setToCorrect(null)} />}
+
+      {toCancel && (
+        <Modal title="ابطال برگشت" onClose={() => setToCancel(null)}>
+          <p className="mb-3 text-sm text-slate-700">
+            برگشتِ «{toCancel.impact.partyName}» به مقدار {fmtMoney(toCancel.impact.amount)} ابطال می‌شود — یعنی انگار چنین برگشتی ثبت نشده بود:
+          </p>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+            {toCancel.impact.stockOut.map((s) => (
+              <p key={s.variantId} className={`flex justify-between ${s.have < s.qty ? 'font-bold text-red-600' : ''}`}>
+                <span>از گدام کم شود: {s.label}</span>
+                <span>−{fmtMoney(s.qty)} جوړه (فعلی {fmtMoney(s.have)})</span>
+              </p>
+            ))}
+            {toCancel.impact.cashDelta > 0 && (
+              <p className="mt-1 flex justify-between border-t border-slate-200 pt-1">
+                <span className="text-slate-500">صندوق (پول مرجوعی برمی‌گردد)</span>
+                <span className="font-bold text-teal-700">+{fmtMoney(toCancel.impact.cashDelta)}</span>
+              </p>
+            )}
+            {toCancel.impact.debtDelta > 0 && (
+              <p className="mt-1 flex justify-between border-t border-slate-200 pt-1">
+                <span className="text-slate-500">قرض مشتری برمی‌گردد</span>
+                <span className="font-bold text-red-600">+{fmtMoney(toCancel.impact.debtDelta)}</span>
+              </p>
+            )}
+            {toCancel.impact.stockOut.some((s) => s.have < s.qty) && (
+              <p className="mt-2 font-bold text-red-600">⚠️ این جنس دوباره فروخته شده و موجودی نمی‌رسد — ابطال ممکن نیست.</p>
+            )}
+          </div>
+          <Field label="دلیل ابطال *">
+            <input className={inputCls} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="مثلاً مقدار یا تسویه اشتباه ثبت شده بود" />
+          </Field>
+          <p className="mb-3 mt-2 text-xs text-slate-500">سند پاک نمی‌شود؛ با دلیلش به‌عنوان رد حساب می‌ماند.</p>
+          <PrimaryBtn
+            disabled={!cancelReason.trim() || toCancel.impact.stockOut.some((s) => s.have < s.qty)}
+            onClick={async () => {
+              await cancelCustomerReturn(toCancel.id, cancelReason)
+              setToCancel(null)
+            }}
+          >
+            بلی، ابطال کن
+          </PrimaryBtn>
+        </Modal>
+      )}
 
       {showEdit && <CustomerModal customer={c} onClose={() => setShowEdit(false)} />}
     </Modal>

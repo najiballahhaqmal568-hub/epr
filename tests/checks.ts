@@ -69,6 +69,8 @@ import {
   correctOpeningDebt,
   previewOpeningDebtCorrection,
   correctLandingTotal,
+  cancelCustomerReturn,
+  cancelReturnImpact,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -815,6 +817,97 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('شکست: مجموع تغییری نکرد', (await db.purchases.get(p1))!.landingCost, 1100)
 
       eq('جریان صندوق با دفتر یکی است', await cashLedgerEnd(), await cashBalance())
+    }
+  },
+  {
+    name: 'ابطال امن برگشت مشتری — گدام، صندوق و قرض برمی‌گردد',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const custId = await newCustomer('کریم')
+      await seedCash(6000)
+      await addPurchase(buy(supId, vId, 10, 500))
+      const saleId = await addSale(sell(vId, 4, 900, { customerId: custId, customerName: 'کریم', paid: 1000 }))
+      const ret1 = await addCustomerReturn({
+        date: Date.now(), kind: 'customer', partyId: custId, partyName: 'کریم', refId: saleId,
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+        amount: 800, settlement: 'reduceDebt', reason: 'کمبود'
+      })
+      eq('گدام پس از برگشت', await stockOf(vId), 7)
+      eq('قرض پس از برگشت', (await db.customers.get(custId))!.balance, 1800)
+
+      const im = (await cancelReturnImpact(ret1))!
+      eq('پیش‌نمایش: قرض برمی‌گردد', im.debtDelta, 800)
+      eq('پیش‌نمایش: یک جوړه از گدام کم می‌شود', im.stockOut[0].qty, 1)
+
+      await cancelCustomerReturn(ret1, 'مقدار اشتباه بود')
+      eq('گدام: انگار چنین برگشتی نبود', await stockOf(vId), 6)
+      eq('قرض کامل برگشت', (await db.customers.get(custId))!.balance, 2600)
+      eq('دفتر مشتری برابر عدد ذخیره', await customerLedgerEnd(custId), 2600)
+      eq('مفاد فقط از فروش', await profitAndLoss(), 1600)
+      const doc = (await db.returns.get(ret1))!
+      eq('سند زنده نیست', Boolean(doc.deleted), true)
+      is('دلیل ابطال ماند', doc.cancelledReason, 'مقدار اشتباه بود')
+
+      // برگشت نقدی — پولش هم به صندوق برمی‌گردد
+      const ret2 = await addCustomerReturn({
+        date: Date.now(), kind: 'customer', partyId: custId, partyName: 'کریم', refId: saleId,
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+        amount: 500, settlement: 'cashRefund', reason: 'آزمون'
+      })
+      eq('صندوق پس از مرجوعی نقدی', await cashBalance(), 1500)
+      await cancelCustomerReturn(ret2, 'اشتباه دوم')
+      eq('صندوق: پول مرجوعی برگشت', await cashBalance(), 2000)
+      eq('گدام: جنس مرجوعی دوباره بیرون رفت', await stockOf(vId), 6)
+
+      // جنسِ برگشتی دوباره فروخته شود؛ ابطال رد گردد و همه‌چیز سالم بماند
+      const ret3 = await addCustomerReturn({
+        date: Date.now(), kind: 'customer', partyId: custId, partyName: 'کریم', refId: saleId,
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 5, unitPrice: 900, restock: true }],
+        amount: 1000, settlement: 'reduceDebt', reason: 'برگشت بزرگ'
+      })
+      eq('گدام با برگشت پنج‌تایی', await stockOf(vId), 11)
+      await addSale(sell(vId, 10, 900))
+      eq('گدام پس از فروش دوباره', await stockOf(vId), 1)
+      await throws(
+        'ابطال وقتی موجودی نمی‌رسد رد شود',
+        () => cancelCustomerReturn(ret3, 'دیر شد')
+      )
+      eq('شکست: گدام تغییری نکرد', await stockOf(vId), 1)
+      eq('شکست: قرض تغییری نکرد', (await db.customers.get(custId))!.balance, 1600)
+      eq('شکست: سند زنده ماند', Boolean((await db.returns.get(ret3))!.deleted), false)
+    }
+  },
+  {
+    name: 'تبادله — ابطال برگشت و حذف فروش قدیمی همه‌چیز را جمع می‌کند',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const custId = await newCustomer('نیاز')
+      await seedCash(7000)
+      await addPurchase(buy(supId, vId, 10, 500))
+      const oldSaleId = await addSale(sell(vId, 2, 900, { customerId: custId, customerName: 'نیاز' }))
+      await addExchange(
+        {
+          date: Date.now(), kind: 'customer', partyId: custId, partyName: 'نیاز', refId: oldSaleId,
+          lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 900, restock: true }],
+          amount: 900, settlement: 'cashRefund', reason: 'تبادله'
+        },
+        sell(vId, 1, 900, { customerId: custId, customerName: 'نیاز' })
+      )
+      eq('صندوق پس از تبادله فقط تفاوت است', await cashBalance(), 3800)
+      // نیمهٔ مرجوعی ابطال شود
+      const exRet = (await db.returns.filter((r) => !r.deleted && r.refId === oldSaleId).first())!
+      await cancelCustomerReturn(exRet.id!, 'تبادله غلط بود')
+      eq('صندوق: پول مرجوعی برگشت', await cashBalance(), 4700)
+      eq('گدام: جنس برگشتی دوباره بیرون رفت', await stockOf(vId), 7)
+      // نیمهٔ فروش قدیمی حذف شود
+      await deleteSale(oldSaleId)
+      eq('گدام نهایی: فقط فروش نو', await stockOf(vId), 9)
+      eq('صندوق نهایی: سرمایه − خرید + فروش نو', await cashBalance(), 2900)
+      eq('مفاد نهایی', await profitAndLoss(), 400)
+      eq('هیچ برگشت زنده نماند', (await db.returns.filter((r) => !r.deleted).toArray()).length, 0)
+      eq('حساب مشتری سالم', await customerLedgerEnd(custId), 0)
     }
   },
   {

@@ -2181,6 +2181,71 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
   })
 }
 
+export interface CancelReturnImpact {
+  partyName: string
+  /** جنس‌هایی که هنگام ابطال از گدام کم می‌شود — اگر موجودی نرسد، ابطال رد می‌شود */
+  stockOut: Array<{ label: string; variantId: number; qty: number; have: number }>
+  cashDelta: number
+  debtDelta: number
+  settlement: ReturnDoc['settlement']
+  amount: number
+}
+
+/** اثر ابطال یک برگشت مشتری، بدون نوشتن هیچ عددی */
+export async function cancelReturnImpact(retId: number): Promise<CancelReturnImpact | null> {
+  const ret = await db.returns.get(retId)
+  if (!ret || ret.deleted || ret.kind !== 'customer') return null
+  const stockOut: CancelReturnImpact['stockOut'] = []
+  for (const line of ret.lines) {
+    if (!line.restock) continue
+    const v = await db.variants.get(line.variantId)
+    if (!v) continue
+    stockOut.push({ label: `${line.productName} ${line.size}`, variantId: line.variantId, qty: line.qty, have: v.stockQty })
+  }
+  const cashDelta = ret.settlement === 'cashRefund' && ret.amount > 0 ? ret.amount : 0
+  const debtDelta = ret.settlement === 'reduceDebt' && ret.amount > 0 ? ret.amount : 0
+  return { partyName: ret.partyName, stockOut, cashDelta, debtDelta, settlement: ret.settlement, amount: ret.amount }
+}
+
+/**
+ * ابطال امن برگشت مشتری: همهٔ اثرهایش برمی‌گردد — جنسِ برگشته دوباره از گدام کم،
+ * پول مرجوعی به صندوق یا قرض به حساب مشتری برمی‌گردد. اگر جنسِ برگشتی دوباره
+ * فروخته شده و موجودی نرسد، ابطال رد می‌شود تا موجودی منفی نشود.
+ * سند پاک نمی‌شود؛ دلیل ابطال روی آن می‌ماند.
+ */
+export async function cancelCustomerReturn(retId: number, reason: string): Promise<void> {
+  if (!reason.trim()) throw new Error('دلیل ابطال را بنویسید')
+  return db.transaction(
+    'rw',
+    [db.returns, db.variants, db.customers, db.cashMovements, db.sales, db.purchases, db.adjustments],
+    async () => {
+      const ret = await db.returns.get(retId)
+      if (!ret || ret.deleted) throw new Error('سند مرجوعی یافت نشد')
+      if (ret.kind !== 'customer') throw new Error('این سند مرجوعیِ مشتری نیست')
+
+      for (const line of ret.lines) {
+        if (!line.restock) continue
+        const v = await db.variants.get(line.variantId)
+        if (!v) throw new Error('جنس یافت نشد')
+        if (v.stockQty < line.qty) {
+          throw new Error(`موجودی «${line.productName} ${line.size}» کافی نیست — این جنس دوباره فروخته شده است`)
+        }
+        await db.variants.update(line.variantId, { stockQty: v.stockQty - line.qty })
+      }
+      if (ret.settlement === 'cashRefund' && ret.amount > 0) {
+        // پول مرجوعی‌شده به صندوق برمی‌گردد
+        await movement({ date: Date.now(), type: 'refund', refId: retId, amount: ret.amount, note: `ابطال مرجوعی — ${ret.partyName}` })
+      } else if (ret.settlement === 'reduceDebt' && ret.amount > 0 && ret.partyId) {
+        const c = await db.customers.get(ret.partyId)
+        if (c) await db.customers.update(ret.partyId, { balance: c.balance + ret.amount })
+      }
+      await db.returns.update(retId, { deleted: true, cancelledReason: reason.trim(), cancelledAt: Date.now() })
+      // حذف سند، ترتیب میانگین قیمت را عوض می‌کند — دوباره از روی اسناد ساخته شود
+      await applyRebuiltCosts()
+    }
+  )
+}
+
 /**
  * تبادلهٔ جنس: مرجوعی + فروش جدید در یک تراکنش.
  * مرجوعی به شکل «بازپرداخت نقدی» و فروش با paid شامل ارزش جنس برگشتی ثبت می‌شود،

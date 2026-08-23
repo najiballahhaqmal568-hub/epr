@@ -23,6 +23,7 @@ import {
   cancelPurchase,
   receivePurchase,
   addCustomerReturn,
+  cancelCustomerReturn,
   addSupplierReturn,
   addExpense,
   deleteExpense,
@@ -377,6 +378,27 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
           bucket: 'later',
           reason: 'اصلاح تصادفی'
         })
+      }
+    },
+    {
+      name: 'ابطال مرجوعی مشتری',
+      run: async () => {
+        const cands = await db.returns.filter((r) => !r.deleted && r.kind === 'customer').toArray()
+        const ok: typeof cands = []
+        for (const r of cands) {
+          let feasible = true
+          for (const l of r.lines) {
+            if (!l.restock) continue
+            const v = await db.variants.get(l.variantId)
+            if (!v || v.stockQty < l.qty) {
+              feasible = false
+              break
+            }
+          }
+          if (feasible) ok.push(r)
+        }
+        if (!ok.length) return
+        await cancelCustomerReturn(pick(ok).id!, 'اصلاح تصادفی')
       }
     },
     {

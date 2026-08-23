@@ -411,6 +411,9 @@ export interface ReturnDoc extends Synced {
   amount: number
   /** نوع فروشِ اصلی — تا مرجوعی از مفاد عمده یا پرچون کم شود */
   saleType?: 'retail' | 'wholesale'
+  /** وقتی برگشت ابطال شده باشد: دلیل و وقتش — سند برای رد حساب می‌ماند */
+  cancelledReason?: string
+  cancelledAt?: number
 }
 
 /** جنس کاندید برای خرید آینده — با منبع (تلگرام/واتساپ) و مشخصات فروشگاه */
