@@ -80,8 +80,71 @@ export async function transferCash(from: string, to: string, amount: number, not
   if (amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
   if (from.trim() === to.trim()) throw new Error('مبدأ و مقصد یکی است')
   return db.transaction('rw', db.cashMovements, async () => {
-    await movement({ date: Date.now(), type: 'transfer', box: from, amount: -amount, note: note?.trim() || `انتقال به ${to}` })
-    await movement({ date: Date.now(), type: 'transfer', box: to, amount, note: note?.trim() || `انتقال از ${from}` })
+    const transferUuid = newUuid()
+    await movement({ date: Date.now(), type: 'transfer', box: from, amount: -amount, note: note?.trim() || `انتقال به ${to}`, transferUuid })
+    await movement({ date: Date.now(), type: 'transfer', box: to, amount, note: note?.trim() || `انتقال از ${from}`, transferUuid })
+  })
+}
+
+export interface CancelTransferImpact {
+  amount: number
+  fromBox: string
+  toBox: string
+  /** موجودی مقصد بعد از برداشتن ورودی — اگر منفی شود ابطال ممکن نیست */
+  toBalanceAfter: number
+}
+
+async function findTransferPair(m: CashMovement): Promise<CashMovement | undefined> {
+  const live = await db.cashMovements.filter((x) => !x.deleted && x.type === 'transfer' && x.id !== m.id).toArray()
+  if (m.transferUuid) return live.find((x) => x.transferUuid === m.transferUuid)
+  // اسناد کهنه بدون پیوند: هم‌مقدارِ مخالف در جای دیگر، نزدیک به همین وقت
+  const cands = live.filter(
+    (x) => boxOf(x) !== boxOf(m) && x.amount === -m.amount && Math.abs(x.date - m.date) < 60_000 && !x.cancelledReason
+  )
+  return cands.length === 1 ? cands[0] : undefined
+}
+
+/** اثر ابطال یک انتقال، بدون نوشتن هیچ عددی */
+export async function cancelTransferImpact(
+  movementId: number
+): Promise<CancelTransferImpact | null> {
+  const m = await db.cashMovements.get(movementId)
+  if (!m || m.deleted || m.type !== 'transfer') return null
+  const pair = await findTransferPair(m)
+  if (!pair) return null
+  const fromM = m.amount < 0 ? m : pair
+  const toM = m.amount < 0 ? pair : m
+  const balTo = await cashBalance(boxOf(toM))
+  return {
+    amount: Math.abs(m.amount),
+    fromBox: boxOf(fromM),
+    toBox: boxOf(toM),
+    toBalanceAfter: balTo - Math.abs(m.amount)
+  }
+}
+
+/**
+ * ابطال امن انتقال بین جاها: هر دو نیمه علامت حذف می‌خورند و پول به مبدأ برمی‌گردد.
+ * اگر پول به مقصد خرج شده و موجودی نمی‌رسد، ابطال رد می‌شود تا صندوق منفی نشود.
+ */
+export async function cancelTransfer(movementId: number, reason: string): Promise<void> {
+  if (!reason.trim()) throw new Error('دلیل ابطال را بنویسید')
+  return db.transaction('rw', db.cashMovements, async () => {
+    const m = await db.cashMovements.get(movementId)
+    if (!m || m.deleted) throw new Error('سند انتقال یافت نشد')
+    if (m.type !== 'transfer') throw new Error('این سند انتقال نیست')
+    const pair = await findTransferPair(m)
+    if (!pair) throw new Error('جفت سند این انتقال پیدا نشد؛ دستی بررسی کنید')
+    const toM = m.amount > 0 ? m : pair
+    const toBal = await cashBalance(boxOf(toM))
+    if (toBal < Math.abs(m.amount)) {
+      throw new Error(
+        `پول به «${boxOf(toM)}» خرج شده است و برنمی‌گردد! موجودی: ${new Intl.NumberFormat('fa-AF').format(toBal)} ؋`
+      )
+    }
+    const now = Date.now()
+    await db.cashMovements.update(m.id!, { deleted: true, cancelledReason: reason.trim(), cancelledAt: now })
+    await db.cashMovements.update(pair.id!, { deleted: true, cancelledReason: reason.trim(), cancelledAt: now })
   })
 }
 

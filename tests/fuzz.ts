@@ -25,6 +25,8 @@ import {
   addCustomerReturn,
   cancelCustomerReturn,
   correctLenderPayment,
+  cancelTransfer,
+  cancelTransferImpact,
   addSupplierReturn,
   addExpense,
   deleteExpense,
@@ -428,6 +430,19 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
             ? int(1, Math.max(1, Math.floor(mag * 2)))
             : int(1, Math.max(1, Math.floor(mag)))
         await correctLenderPayment(p.id!, { amount: next, date: Date.now(), reason: 'اصلاح تصادفی' })
+      }
+    },
+    {
+      name: 'ابطال انتقال صندوق',
+      run: async () => {
+        const halves = await db.cashMovements.filter((m) => !m.deleted && m.type === 'transfer').toArray()
+        const ok: typeof halves = []
+        for (const h of halves) {
+          const im = await cancelTransferImpact(h.id!)
+          if (im && im.toBalanceAfter >= 0) ok.push(h)
+        }
+        if (!ok.length) return
+        await cancelTransfer(pick(ok).id!, 'اصلاح تصادفی')
       }
     },
     {

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, accessFlags } from '../../db'
-import { reconcile, transferCash, boxOf, SHOP_BOX } from '../../lib/ops'
+import { reconcile, transferCash, cancelTransfer, cancelTransferImpact, boxOf, SHOP_BOX, type CancelTransferImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum, startOfDay, startOfMonth } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
 import { buildCashLedger } from '../../lib/ledger'
@@ -13,6 +13,9 @@ function CashLedgerModal({ onClose }: { onClose: () => void }) {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('week')
   const [q, setQ] = useState('')
   const [boxFilter, setBoxFilter] = useState('')
+  // انتقالی که مالک می‌خواهد ابطال کند — هر دو نیمه‌اش جمع می‌شود
+  const [toCancelT, setToCancelT] = useState<{ id: number; impact: CancelTransferImpact } | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
 
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
   const boxNames = [...new Set((movements ?? []).map(boxOf))].sort()
@@ -120,6 +123,19 @@ function CashLedgerModal({ onClose }: { onClose: () => void }) {
                     </p>
                     {r.note && <p className="truncate text-xs text-slate-500">{r.note}</p>}
                     <p className="text-xs text-slate-400">{fmtDate(r.date)}</p>
+                    {r.type === 'transfer' && !accessFlags.readOnly && (
+                      <button
+                        className="mt-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700"
+                        onClick={async () => {
+                          const im = await cancelTransferImpact(Number(r.key.slice(1)))
+                          if (!im) return
+                          setCancelReason('')
+                          setToCancelT({ id: Number(r.key.slice(1)), impact: im })
+                        }}
+                      >
+                        ابطال انتقال
+                      </button>
+                    )}
                   </div>
                   <div className="shrink-0 text-left">
                     <p className={`font-bold ${r.delta >= 0 ? 'text-teal-700' : 'text-red-600'}`}>
@@ -134,6 +150,40 @@ function CashLedgerModal({ onClose }: { onClose: () => void }) {
           )
         })}
       </div>
+
+      {toCancelT && (
+        <Modal title="ابطال انتقال" onClose={() => setToCancelT(null)}>
+          <p className="mb-3 text-sm text-slate-700">
+            انتقال {fmtMoney(toCancelT.impact.amount)} از «{toCancelT.impact.fromBox}» به «{toCancelT.impact.toBox}» ابطال می‌شود — پول به مبدأ برمی‌گردد:
+          </p>
+          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+            <p className="flex justify-between">
+              <span className="text-slate-500">«{toCancelT.impact.fromBox}» برمی‌گردد</span>
+              <span className="font-bold text-teal-700">+{fmtMoney(toCancelT.impact.amount)}</span>
+            </p>
+            <p className={`mt-1 flex justify-between border-t border-slate-200 pt-1 ${toCancelT.impact.toBalanceAfter < 0 ? 'font-bold text-red-600' : ''}`}>
+              <span className="text-slate-500">از «{toCancelT.impact.toBox}» کم می‌شود</span>
+              <span>−{fmtMoney(toCancelT.impact.amount)} (بعد: {fmtMoney(toCancelT.impact.toBalanceAfter)})</span>
+            </p>
+            {toCancelT.impact.toBalanceAfter < 0 && (
+              <p className="mt-2 font-bold text-red-600">⚠️ این پول به مقصد خرج شده و موجودی نمی‌رسد — ابطال ممکن نیست.</p>
+            )}
+          </div>
+          <Field label="دلیل ابطال *">
+            <input className={inputCls} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="مثلاً اشتباهی ثبت شده بود" />
+          </Field>
+          <p className="mb-3 mt-2 text-xs text-slate-500">هر دو نیمه علامت حذف می‌خورند ولی برای ردّ حساب می‌مانند.</p>
+          <PrimaryBtn
+            disabled={!cancelReason.trim() || toCancelT.impact.toBalanceAfter < 0}
+            onClick={async () => {
+              await cancelTransfer(toCancelT.id, cancelReason)
+              setToCancelT(null)
+            }}
+          >
+            بلی، ابطال کن
+          </PrimaryBtn>
+        </Modal>
+      )}
     </Modal>
   )
 }

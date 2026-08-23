@@ -353,6 +353,11 @@ export interface CashMovement extends Synced {
   note?: string
   /** برای سرمایه‌گذاری و برداشت شریک */
   partnerName?: string
+  /** پیوند دو نیمهٔ یک انتقال بین جاها */
+  transferUuid?: string
+  /** وقتی سند ابطال شده باشد: دلیل و وقتش — سند برای رد حساب می‌ماند */
+  cancelledReason?: string
+  cancelledAt?: number
 }
 
 export interface Reconciliation extends Synced {

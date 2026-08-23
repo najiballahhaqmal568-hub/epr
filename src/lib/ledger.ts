@@ -24,6 +24,8 @@ export interface LedgerRow {
   balance: number
   /** جای پول (فقط برای دفتر پول) */
   box?: string
+  /** نوع حرکت (فقط برای دفتر پول) */
+  type?: CashMovement['type']
 }
 
 /** دفتر صندوق: هر حرکت با موجودی بعد از آن */
@@ -38,6 +40,7 @@ export function buildCashLedger(movements: CashMovement[], labelOf: (t: CashMove
       label: labelOf(m.type),
       note: m.note,
       box: m.box?.trim() || 'دکان',
+      type: m.type,
       delta: m.amount,
       balance: bal
     }

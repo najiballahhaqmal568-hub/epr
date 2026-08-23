@@ -72,6 +72,8 @@ import {
   cancelCustomerReturn,
   cancelReturnImpact,
   correctLenderPayment,
+  cancelTransfer,
+  cancelTransferImpact,
   exportBackup,
   importBackup,
   SHOP_BOX
@@ -952,6 +954,50 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('قرض قبلی اصلاح شد — مجموع داده‌شده ۳۰۰', (await db.suppliers.get(lenderId))!.balance, 1700)
       eq('صندوق دست نخورد', await cashBalance(), 7000)
       eq('دفتر صندوق برابر است', await cashLedgerEnd(), 7000)
+    }
+  },
+  {
+    name: 'ابطال امن انتقال صندوق — هر دو نیمه با هم',
+    run: async () => {
+      await seedCash(5000)
+      await transferCash(SHOP_BOX, 'خانه', 1200)
+      eq('دکان پس از انتقال', await cashBalance(SHOP_BOX), 3800)
+      eq('خانه پس از انتقال', await cashBalance('خانه'), 1200)
+
+      // از خانه خرج شود؛ ابطال انتقال اول رد گردد
+      const catId = (await db.expenseCategories.add({ name: 'چای' })) as number
+      await addExpense({ date: Date.now(), type: 'business', categoryId: catId, categoryName: 'چای', amount: 500, box: 'خانه' } as Expense)
+      eq('خانه بعد از مصرف', await cashBalance('خانه'), 700)
+      const t1 = (await db.cashMovements.filter((m) => !m.deleted && m.type === 'transfer' && m.amount > 0).first())!
+      const im1 = (await cancelTransferImpact(t1.id!))!
+      eq('پیش‌نمایش: خانه منفی می‌شد', im1.toBalanceAfter, -500)
+      await throws(
+        'ابطال وقتی پول خرج شده رد شود',
+        () => cancelTransfer(t1.id!, 'دیر شد')
+      )
+      eq('شکست: خانه تغییری نکرد', await cashBalance('خانه'), 700)
+      eq('شکست: دکان تغییری نکرد', await cashBalance(SHOP_BOX), 3800)
+      eq('شکست: سندها زنده ماندند', Boolean((await db.cashMovements.get(t1.id!))!.deleted), false)
+
+      // انتقال دوم ابطال شود — هر دو نیمه با هم جمع شوند
+      await transferCash(SHOP_BOX, 'صراف کابل', 800)
+      eq('صراف کابل پس از انتقال', await cashBalance('صراف کابل'), 800)
+      const t2 = (await db.cashMovements.filter((m) => !m.deleted && m.type === 'transfer' && m.box === 'صراف کابل').first())!
+      await cancelTransfer(t2.id!, 'اشتباهی بود')
+      eq('دکان پس از ابطال', await cashBalance(SHOP_BOX), 3800)
+      eq('صراف کابل صفر شد', await cashBalance('صراف کابل'), 0)
+
+      // سند کهنهٔ بدون پیوند — از راه جفت‌یابی پیدا شود
+      await db.cashMovements.bulkAdd([
+        { date: Date.now(), type: 'transfer', box: SHOP_BOX, amount: -400, note: 'کهنه' },
+        { date: Date.now(), type: 'transfer', box: 'خانه', amount: 400, note: 'کهنه' }
+      ])
+      const legacyIn = (await db.cashMovements.filter((m) => !m.deleted && m.type === 'transfer' && m.box === 'خانه' && m.amount === 400).first())!
+      await cancelTransfer(legacyIn.id!, 'سند کهنه')
+      eq('کهنه: هر دو نیمه علامت خورد', Boolean((await db.cashMovements.get(legacyIn.id!))!.deleted), true)
+      eq('کهنه: خانه به قبل از انتقال برگشت', await cashBalance('خانه'), 700)
+      eq('کهنه: دکان به قبل از انتقال برگشت', await cashBalance(SHOP_BOX), 3800)
+      eq('پول کل ثابت ماند', (await boxBalances()).total, 4500)
     }
   },
   {
