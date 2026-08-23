@@ -3,7 +3,7 @@ import { chromium } from 'playwright-core'
 
 const URL = process.env.URL ?? 'http://localhost:4173/'
 const page = await (
-  await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
+  await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
 page.on('pageerror', (e) => console.error('خطای صفحه:', e.message))
 const fail = (m) => {

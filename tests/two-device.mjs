@@ -19,7 +19,7 @@ const check = (name, got, want) => {
   if (!ok) bad++
   console.log(`${ok ? '✅' : '❌'} ${name}: ${got}${ok ? '' : ` (باید ${want})`}`)
 }
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 
 async function newDevice() {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } })
@@ -41,24 +41,34 @@ async function newDevice() {
   return { ctx, page }
 }
 async function configureServer(page) {
-  await page.waitForSelector('nav >> text=داشبورد')
-  await page.click('button[aria-label="تنظیمات"]')
-  await page.click('button:has-text("تنظیم سرور")')
-  await page.fill('input[placeholder="https://xxxx.supabase.co"]', SUPA_URL)
-  await page.fill('input[placeholder="eyJhbGciOi..."]', SUPA_KEY)
-  await page.click('button:has-text("ذخیره و اتصال")')
-  await page.waitForSelector('text=ورود به حساب', { timeout: 20000 })
+  // دستگاه تازه حالا با کانفیگ پیش‌فرض فروشگاه پشت صفحهٔ ورود است؛
+  // تنظیم سرور مستقیم از ماژول انجام می‌شود (مثل restore-two-device)
+  await page.evaluate(async ({ url, anonKey }) => {
+    const { setServerConfig } = await import('/src/lib/supa.ts')
+    await setServerConfig({ url, anonKey })
+  }, { url: SUPA_URL, anonKey: SUPA_KEY })
 }
 async function fullSync(page) {
-  await page.click('nav >> text=داشبورد')
-  await page.waitForTimeout(400)
-  for (let i = 0; i < 3; i++) {
-    await page.waitForFunction(() => { const b = document.querySelector('button[aria-label="sync"]'); return b && !b.textContent.includes('⏳') }, { timeout: 60000 })
-    await page.click('button[aria-label="sync"]')
-    await page.waitForTimeout(1000)
-    await page.waitForFunction(() => { const b = document.querySelector('button[aria-label="sync"]'); return b && !b.textContent.includes('⏳') }, { timeout: 90000 })
-  }
+  // دکمهٔ sync در UI نیست — همگام‌سازی مستقیم از ماژول (الگوی restore-two-device)
+  await page.evaluate(async () => {
+    const { syncNow } = await import('/src/lib/sync.ts')
+    await syncNow(true)
+  })
   await page.waitForTimeout(800)
+}
+
+async function serverCounts(page) {
+  return page.evaluate(async () => {
+    const { getSupa } = await import('/src/lib/supa.ts')
+    const supa = await getSupa()
+    const tables = ['sales', 'purchases', 'payments', 'customers', 'cashmovements', 'variants', 'suppliers']
+    const out = {}
+    for (const t of tables) {
+      const { count, error } = await supa.from(t).select('*', { count: 'exact', head: true })
+      out[t] = error ? 'ERR:' + error.message : count
+    }
+    return out
+  })
 }
 const read = (page, fn) => page.evaluate(fn)
 
@@ -71,7 +81,7 @@ await A.page.locator('label:has-text("نام دکان *") input').fill(`دکان
 await A.page.locator('label:has-text("ایمیل *") input').fill(OWNER)
 await A.page.locator('label:has-text("رمز عبور *") input').fill('test123456')
 await A.page.click('button:has-text("ثبت‌نام")')
-await A.page.waitForSelector('nav >> text=داشبورد', { timeout: 30000 })
+await A.page.waitForSelector('nav >> text=خانه', { timeout: 30000 })
 log('الف ثبت‌نام شد:', OWNER)
 
 const m = (p) => p.locator('.fixed.inset-0').last()
@@ -89,14 +99,12 @@ await A.page.click('button:has-text("ذخیره")')
 await A.page.waitForSelector('text=اسپرتکس')
 log('الف: جنس با ۵۰ جوړه')
 
-// تأمین‌کننده + خرید «در راه» ۳۰ جوړه، بعد رسید  ← همان باگی که اصلاح شد
-await A.page.click('nav >> text=خرید')
-await A.page.click('button:has-text("تأمین‌کنندگان")')
-await A.page.locator('button:has-text("تأمین‌کننده")').last().click()
-await m(A.page).locator('label:has-text("نام *") input').fill('تأمین‌کننده')
-await A.page.click('button:has-text("ذخیره")')
-await A.page.waitForTimeout(800)
-await A.page.click('button:has-text("خریدها")')
+// تأمین‌کننده (از راه ماژول — مستقل از ناوبری) + خرید «در راه» ۳۰ جوړه، بعد رسید
+await A.page.evaluate(async () => {
+  const db = (await import('/src/db.ts')).db
+  await db.suppliers.add({ name: 'تأمین‌کننده', balance: 0, createdAt: Date.now(), localUpdatedAt: Date.now() })
+})
+await A.page.click('nav >> text=خانه')
 await A.page.click('button:has-text("خرید جدید")')
 await m(A.page).locator('select').first().selectOption({ index: 1 })
 await m(A.page).locator('input[placeholder="نام، سایز یا رنگ..."]').fill('42')
@@ -109,7 +117,7 @@ await A.page.waitForTimeout(300)
 await m(A.page).locator('input[type="checkbox"]').first().uncheck()
 await A.page.waitForTimeout(300)
 await m(A.page).locator('label:has-text("مبلغ پرداختی") input').fill('0')
-await A.page.click('button:has-text("ثبت خرید")')
+await A.page.click('button:text-is("ثبت خرید")')
 await A.page.waitForTimeout(1000)
 await A.page.click('button:has-text("جنس رسید")')
 await A.page.waitForTimeout(1000)
@@ -126,11 +134,13 @@ await A.page.click('button:has-text("＋ مشتری جدید")')
 await m(A.page).locator('label:has-text("مبلغ دریافتی") input').click()
 await m(A.page).locator('label:has-text("مبلغ دریافتی") input').fill('700')
 await A.page.click('button:has-text("ثبت فروش")')
-await A.page.waitForSelector('text=➕ فروش بعدی')
-await A.page.click('button:has-text("بستن")')
+await A.page.waitForSelector('text=＋ فروش بعدی')
+await A.page.locator('button:text-is("✕")').first().click()
 log('الف: فروش ۳ جوړه × ۹۰۰، نقد ۷۰۰، قرض ۲٬۰۰۰')
 
-await A.page.click('nav >> text=مصارف'); await A.page.click('button:has-text("صندوق")')
+await A.page.click('nav >> text=بیشتر')
+await A.page.click('text=مصارف و صندوق')
+await A.page.click('button:has-text("صندوق")')
 await A.page.click('text=انتقال پول بین جاها')
 await m(A.page).locator('select').nth(1).selectOption({ label: 'خانه (جای نو)' })
 await m(A.page).locator('label:has-text("مبلغ") input').fill('300')
@@ -163,17 +173,20 @@ check('قرض مشتری', snapA.debt, 2000)
 check('قرض ما به تأمین‌کننده', snapA.supp, 15000)
 
 await fullSync(A.page)
+console.log('[diag] server counts:', JSON.stringify(await serverCounts(A.page)))
 log('الف همگام شد')
 
 // ── دستگاه ب ────────────────────────────────────────────────
 const B = await newDevice()
 await configureServer(B.page)
-await B.page.locator('label:has-text("ایمیل") input').fill(OWNER)
-await B.page.locator('label:has-text("رمز") input').fill('test123456')
-await B.page.click('button:has-text("ورود"):not(:has-text("حساب"))')
-await B.page.waitForSelector('nav >> text=داشبورد', { timeout: 30000 })
-log('ب وارد شد')
+await B.page.evaluate(async ({ email, password }) => {
+  const { login } = await import('/src/lib/supa.ts')
+  await login(email, password)
+}, { email: OWNER, password: 'test123456' })
+await B.page.reload()
+await B.page.waitForSelector('nav >> text=خانه', { timeout: 30000 })
 await fullSync(B.page)
+log('ب وارد شد')
 
 const snapB = await read(B.page, async () => {
   const db = (await import('/src/db.ts')).db
@@ -209,8 +222,8 @@ await B.page.click('button:has-text("فروش جدید")')
 await B.page.fill('input[placeholder="نام، سایز، رنگ یا کود..."]', '42')
 await B.page.click('.fixed.inset-0 button:has-text("×۲")')
 await B.page.click('button:has-text("ثبت فروش")')
-await B.page.waitForSelector('text=➕ فروش بعدی')
-await B.page.click('button:has-text("بستن")')
+await B.page.waitForSelector('text=＋ فروش بعدی')
+await B.page.locator('button:text-is("✕")').first().click()
 log('ب: فروش نقدی ۲ جوړه × ۹۰۰')
 await fullSync(B.page)
 await fullSync(A.page)
