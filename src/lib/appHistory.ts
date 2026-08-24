@@ -28,21 +28,19 @@ window.addEventListener('popstate', () => {
     return
   }
   if (depth > 0) depth--
-  const { modal } = stateInfo()
-  if (modal) {
-    // برگشت تلیفون: بالاترین مودال بسته شود
-    const top = modalStack[modalStack.length - 1]
-    if (top) {
-      top.popped()
-      top.close()
-      modalStack.pop()
-    }
-  } else {
-    // به تب قبلی برگرد
-    const { tab } = stateInfo()
-    suppress = true
-    tabBack?.(tab)
+  // بعد از Back، history.state مربوط به مقصد است و دیگر modal ندارد؛ منبع درست
+  // این استکِ مودال‌های واقعاً باز است. این تفاوت فقط در build تولیدی آشکار می‌شد.
+  const top = modalStack[modalStack.length - 1]
+  if (top) {
+    top.popped()
+    modalStack.pop()
+    top.close()
+    return
   }
+  // به تب قبلی برگرد
+  const { tab } = stateInfo()
+  suppress = true
+  tabBack?.(tab)
 })
 
 /** ثبت پلهٔ تب — از افکت [tab] در App صدا زده می‌شود؛ suppress یعنی خودِ popstate این تغییر را ساخت */
@@ -80,18 +78,18 @@ export function addModal(close: CloseFn, markPopped: () => void): void {
 
 export function removeModal(close: CloseFn): void {
   const i = modalStack.findIndex((m) => m.close === close)
-  if (i >= 0) modalStack.splice(i, 1)
+  if (i < 0) return
+  modalStack.splice(i, 1)
   depth = Math.max(0, depth - 1)
-  if (modalStack.length === 0 && depth === 0) {
-    // آخرین مودال با دکمهٔ ✕ بسته شد — پله‌اش را پس بگیر (با کمی تأخیر تا StrictMode هم بماند)
-    if (pendingBack == null && stateInfo().modal) {
-      pendingBack = setTimeout(() => {
-        pendingBack = null
-        if (stateInfo().modal) {
-          suppress = true
-          history.back()
-        }
-      }, 80)
-    }
+  // مودال با ✕/پس‌زمینه بسته شد — پلهٔ history همان مودال را نیز پس بگیر.
+  // در StrictMode، mount دوم پیش از ۸۰ms همین پله را دوباره استفاده می‌کند.
+  if (pendingBack == null && stateInfo().modal) {
+    pendingBack = setTimeout(() => {
+      pendingBack = null
+      if (stateInfo().modal) {
+        suppress = true
+        history.back()
+      }
+    }, 80)
   }
 }

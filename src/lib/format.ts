@@ -14,10 +14,54 @@ const AF_MONTHS = ['حمل', 'ثور', 'جوزا', 'سرطان', 'اسد', 'سن
 
 const faDigits = (s: string | number): string => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
 
-function jalali(ts: number): { y: number; m: number; d: number } {
-  const parts = new Intl.DateTimeFormat('en-US-u-ca-persian', { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(ts)
+const persianParts = new Intl.DateTimeFormat('en-US-u-ca-persian', {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric'
+})
+const persianMonthLabel = new Intl.DateTimeFormat('fa-AF-u-ca-persian', {
+  year: 'numeric',
+  month: 'long'
+})
+
+export function jalaliDateParts(ts: number): { y: number; m: number; d: number } {
+  const parts = persianParts.formatToParts(ts)
   const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0)
   return { y: get('year'), m: get('month'), d: get('day') }
+}
+
+/** یک روز تقویمی محلی جلو/عقب؛ برخلاف جمع میلی‌ثانیه در تغییر ساعت تابستانی نمی‌شکند. */
+export function addCalendarDays(ts: number, amount: number): number {
+  const date = new Date(ts)
+  date.setDate(date.getDate() + amount)
+  return date.setHours(0, 0, 0, 0)
+}
+
+/**
+ * روزهای واقعی یک ماه هجری شمسی به شکل timestamp میلادیِ محلی.
+ * ذخیرهٔ اسناد همچنان timestamp است؛ فقط مرز و خانه‌های تقویم از تقویم فارسی می‌آید.
+ */
+export function jalaliMonthWindow(
+  now = Date.now(),
+  monthOffset = 0
+): { year: number; month: number; label: string; days: number[] } {
+  const current = jalaliDateParts(now)
+  const absoluteMonth = current.y * 12 + current.m - 1 + monthOffset
+  const year = Math.floor(absoluteMonth / 12)
+  const month = ((absoluteMonth % 12) + 12) % 12 + 1
+  // ۳۰٫۴۴ روز میانگین ماه خورشیدی است؛ بازهٔ ±۴۵ روز تمام ماه هدف را می‌پوشاند.
+  const approximate = addCalendarDays(now, Math.round(monthOffset * 30.44))
+  const days: number[] = []
+  for (let delta = -45; delta <= 45; delta++) {
+    const day = addCalendarDays(approximate, delta)
+    const parts = jalaliDateParts(day)
+    if (parts.y === year && parts.m === month) days.push(day)
+  }
+  days.sort((a, b) => a - b)
+  if (days.length < 29 || jalaliDateParts(days[0]).d !== 1) {
+    throw new Error('مرز ماه هجری شمسی پیدا نشد')
+  }
+  return { year, month, label: persianMonthLabel.format(days[0]), days }
 }
 
 /** ساعت ۱۲ ساعته */
@@ -35,12 +79,12 @@ export function fmtDate(ts: number): string {
 
 /** کلید و نام ماه هجری شمسی — برای راپور ماه‌به‌ماه */
 export function jalaliMonth(ts: number): { key: string; label: string } {
-  const { y, m } = jalali(ts)
+  const { y, m } = jalaliDateParts(ts)
   return { key: `${y}-${String(m).padStart(2, '0')}`, label: `${AF_MONTHS[m - 1] ?? ''} ${faDigits(y)}` }
 }
 
 export function fmtDateShort(ts: number): string {
-  const { y, m, d } = jalali(ts)
+  const { y, m, d } = jalaliDateParts(ts)
   return `${faDigits(d)} ${AF_MONTHS[m - 1] ?? ''} ${faDigits(y)}`
 }
 

@@ -89,7 +89,7 @@ import { dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
-import { pageOrder, familyPages } from '../src/lib/format'
+import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -242,6 +242,32 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'تقویم مصارف — ماه و روز واقعی هجری شمسی را بسازد',
+    run: async () => {
+      const now = new Date(2026, 7, 24, 12).getTime()
+      const today = jalaliDateParts(now)
+      const month = jalaliMonthWindow(now)
+      eq('۲۴ آگست ۲۰۲۶ روز دوم سنبله است', today.d, 2)
+      eq('ماه سنبله است', today.m, 6)
+      eq('سال ۱۴۰۵ است', today.y, 1405)
+      eq('ماه سنبله ۳۱ روز دارد', month.days.length, 31)
+      eq('اولین خانه روز ۱ هجری شمسی است', jalaliDateParts(month.days[0]).d, 1)
+      eq('آخرین خانه روز ۳۱ هجری شمسی است', jalaliDateParts(month.days[30]).d, 31)
+      is('عنوان ماه سنبله را دارد', month.label.includes('سنبله'), true)
+      let oldMonthsValid = true
+      for (let offset = -240; offset <= 0; offset++) {
+        const window = jalaliMonthWindow(now, offset)
+        oldMonthsValid =
+          oldMonthsValid &&
+          window.days.length >= 29 &&
+          window.days.length <= 31 &&
+          jalaliDateParts(window.days[0]).d === 1 &&
+          jalaliDateParts(window.days[window.days.length - 1]).m === window.month
+      }
+      is('بیست سال ماه‌های قبلی مرز کامل دارد', oldMonthsValid, true)
+    }
+  },
   {
     name: 'فروش معطل — فقط پیش‌نویس محلی است و هیچ اثر مالی ندارد',
     run: async () => {

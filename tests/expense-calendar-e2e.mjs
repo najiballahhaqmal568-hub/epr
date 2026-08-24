@@ -45,12 +45,25 @@ await page.click('button:has-text("تقویم")')
 await page.waitForSelector('text=لمس کنید تا مصارف روز باز شود', { timeout: 10000 })
 check('تقویم باز شد', true, true)
 
+// عنوان و شمارهٔ امروز باید واقعاً هجری شمسی باشد، نه ماه/روز میلادی با برچسب دری.
+const persianParts = new Intl.DateTimeFormat('en-US-u-ca-persian', {
+  year: 'numeric', month: 'numeric', day: 'numeric'
+}).formatToParts(Date.now())
+const persianPart = (type) => Number(persianParts.find((part) => part.type === type)?.value ?? 0)
+const expectedMonth = new Intl.DateTimeFormat('fa-AF-u-ca-persian', {
+  year: 'numeric', month: 'long'
+}).format(Date.now())
+const calendarText = await page.locator('div.rounded-2xl.bg-white').filter({ hasText: 'لمس کنید تا مصارف روز باز شود' }).first().innerText()
+check('عنوان ماه هجری شمسی درست است', calendarText.includes(expectedMonth), true)
+
 // هفت روز هفته — سرستون‌ها
 const weekdayCount = await page.locator('span:text-is("ش")').count()
 check('سرستون شنبه هست', weekdayCount >= 1, true)
 
 // لمس خانهٔ امروز (حلقهٔ ring دارد) — آخرین خانهٔ فعال با متن عدد
 const todayCell = page.locator('button.ring-2').first()
+const expectedDay = persianPart('day').toLocaleString('fa-AF')
+check('شمارهٔ خانهٔ امروز هجری شمسی است', (await todayCell.innerText()).split('\n')[0], expectedDay)
 await todayCell.click()
 await page.waitForSelector('text=مصرف برای این روز', { timeout: 10000 })
 await page.click('button:has-text("مصرف برای این روز")')

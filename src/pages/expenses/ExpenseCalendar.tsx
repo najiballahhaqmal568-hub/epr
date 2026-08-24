@@ -1,17 +1,25 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Expense } from '../../db'
-import { fmtMoney, fmtNum, startOfDay } from '../../lib/format'
+import {
+  addCalendarDays,
+  fmtDateShort,
+  fmtMoney,
+  fmtNum,
+  jalaliDateParts,
+  jalaliMonthWindow,
+  startOfDay
+} from '../../lib/format'
 import { setShopClosed } from '../../lib/dailyExpenses'
 import { Modal, PrimaryBtn } from '../../components/ui'
 
-const DAY = 86_400_000
 const WEEKDAYS = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'] // هفته از شنبه
 
 type DayStatus = 'ok' | 'some' | 'none' | 'closed' | 'future' | 'neutral'
 
 interface DayCell {
   day: number
+  dayNumber: number
   inMonth: boolean
   total: number
   count: number
@@ -27,18 +35,15 @@ export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) =>
   const [monthOffset, setMonthOffset] = useState(0)
   const [openDay, setOpenDay] = useState<number | null>(null)
 
-  const base = new Date()
-  base.setDate(1)
-  base.setMonth(base.getMonth() + monthOffset)
-  const year = base.getFullYear()
-  const month = base.getMonth()
-  const monthStart = startOfDay(new Date(year, month, 1).getTime())
-  const monthEnd = startOfDay(new Date(year, month + 1, 0).getTime())
+  const monthWindow = jalaliMonthWindow(Date.now(), monthOffset)
+  const monthStart = monthWindow.days[0]
+  const monthEnd = monthWindow.days[monthWindow.days.length - 1]
+  const monthAfter = addCalendarDays(monthEnd, 1)
   const today = startOfDay(Date.now())
-  const monthLabel = base.toLocaleDateString('fa-AF', { month: 'long', year: 'numeric' })
+  const monthLabel = monthWindow.label
 
   const rows = useLiveQuery(
-    () => db.expenses.where('date').between(monthStart, monthEnd + DAY, true, false).toArray(),
+    () => db.expenses.where('date').between(monthStart, monthAfter, true, false).toArray(),
     [monthStart, monthEnd]
   )
   const required = useLiveQuery(
@@ -77,12 +82,21 @@ export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) =>
   }
 
   const cells: DayCell[] = []
-  const lead = (new Date(year, month, 1).getDay() + 1) % 7 // شنبه‌اول
-  for (let i = 0; i < lead; i++) cells.push({ day: monthStart - (lead - i) * DAY, inMonth: false, total: 0, count: 0, status: 'future' })
-  for (let d = new Date(monthStart); d.getMonth() === month; d.setDate(d.getDate() + 1)) {
-    const day = startOfDay(d.getTime())
+  const lead = (new Date(monthStart).getDay() + 1) % 7 // شنبه‌اول
+  for (let i = 0; i < lead; i++) {
+    const day = addCalendarDays(monthStart, -(lead - i))
+    cells.push({ day, dayNumber: jalaliDateParts(day).d, inMonth: false, total: 0, count: 0, status: 'future' })
+  }
+  for (const day of monthWindow.days) {
     const info = byDay.get(day)
-    cells.push({ day, inMonth: true, total: info?.total ?? 0, count: info?.count ?? 0, status: statusOf(day) })
+    cells.push({
+      day,
+      dayNumber: jalaliDateParts(day).d,
+      inMonth: true,
+      total: info?.total ?? 0,
+      count: info?.count ?? 0,
+      status: statusOf(day)
+    })
   }
 
   const statusStyle: Record<DayStatus, string> = {
@@ -133,7 +147,7 @@ export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) =>
                 isToday ? 'ring-2 ring-teal-600' : ''
               }`}
             >
-              <span className="block text-xs font-bold text-slate-700">{fmtNum(new Date(c.day).getDate())}</span>
+              <span className="block text-xs font-bold text-slate-700">{fmtNum(c.dayNumber)}</span>
               {c.inMonth && c.total > 0 && <span className="block text-[10px] text-slate-600">{fmtMoney(c.total)}</span>}
               {c.inMonth && c.status !== 'future' && statusIcon[c.status] && (
                 <span className={`block text-[10px] font-bold ${c.status === 'none' ? 'text-red-600' : c.status === 'ok' ? 'text-teal-700' : 'text-slate-500'}`}>
@@ -149,7 +163,7 @@ export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) =>
       </p>
 
       {openDay != null && (
-        <Modal title={`مصارف ${fmtNum(new Date(openDay).getDate())} ${new Date(openDay).toLocaleDateString('fa-AF', { month: 'long' })}`} onClose={() => setOpenDay(null)}>
+        <Modal title={`مصارف ${fmtDateShort(openDay)}`} onClose={() => setOpenDay(null)}>
           {dayClosed && <p className="mb-2 rounded-xl bg-slate-100 p-2 text-center text-sm font-bold text-slate-600">🔒 این روز تعطیل علامت خورده است.</p>}
           {dayExpenses.filter((e) => !e.shopClosed).length === 0 && !dayClosed && (
             <p className="mb-3 text-sm text-slate-400">این روز مصرفی ثبت نشده.</p>

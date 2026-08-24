@@ -34,7 +34,11 @@ type NavTabId = (typeof tabs)[number]['id']
 type TabId = NavTabId | 'purchases' | 'expenses' | 'customers' | 'settings' | 'reports'
 
 export default function App() {
-  const uiPreview = import.meta.env.DEV && new URLSearchParams(window.location.search).has('ui-preview')
+  // VITE_UI_PREVIEW فقط برای build آزمایشی روی همین کمپیوتر است؛ حتی اگر اشتباهی
+  // در build عمومی تنظیم شود، میزبان GitHub هرگز اجازهٔ دورزدن ورود را ندارد.
+  const previewRequested = new URLSearchParams(window.location.search).has('ui-preview')
+  const localPreviewHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  const uiPreview = previewRequested && (import.meta.env.DEV || (localPreviewHost && import.meta.env.VITE_UI_PREVIEW === '1'))
   const [tab, setTab] = useState<TabId>('dashboard')
   const [openNewSale, setOpenNewSale] = useState(false)
   const [openNewPurchase, setOpenNewPurchase] = useState(false)

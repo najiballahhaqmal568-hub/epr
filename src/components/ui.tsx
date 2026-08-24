@@ -18,7 +18,8 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     }
     addModal(entry.close, entry.popped)
     return () => {
-      removeModal(entry.close)
+      // اگر Back مودال را بسته، appHistory همان پله و استک را جمع کرده است.
+      if (!poppedRef.current) removeModal(entry.close)
     }
   }, [])
 
