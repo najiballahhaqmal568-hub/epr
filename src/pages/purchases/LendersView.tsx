@@ -375,15 +375,22 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
 
       {mode === 'loan' && (
         <div className="mb-3 rounded-xl border border-teal-200 p-3">
+          {owed < 0 && loanReceipt === 'cash' && (
+            <p className="mb-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800">
+              💰 حساب این شخص منفی است (طلب ما {fmtMoney(Math.abs(owed))}). این مبلغ طلبِ ما را کم می‌کند — یعنی برگشتِ پولِ خودش.
+            </p>
+          )}
           <Field label="این قرض چگونه بوده؟">
             <select className={inputCls} value={loanReceipt} onChange={(e) => setLoanReceipt(e.target.value as LoanReceiptMode)}>
-              <option value="cash">پول اکنون وارد صندوق شد</option>
+              <option value="cash">{owed < 0 ? 'پول را خودش برگرداند — حالا وارد صندوق شد' : 'پول اکنون وارد صندوق شد'}</option>
               <option value="opening">قرض قبلی — پول قبلاً برای جنس مصرف شده</option>
             </select>
           </Field>
           <p className="mb-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
             {loanReceipt === 'cash'
-              ? 'صندوق به همین مبلغ زیاد می‌شود و قرض ما به او بالا می‌رود.'
+              ? owed < 0
+                ? 'صندوق به این مبلغ زیاد و طلبِ ما از او کم می‌شود.'
+                : 'صندوق به همین مبلغ زیاد می‌شود و قرض ما به او بالا می‌رود.'
               : 'برای جنس موجودی اولیه یا بکاپ: فقط قرض ثبت می‌شود و صندوق تغییر نمی‌کند.'}
           </p>
           <Field label="مبلغ *">
@@ -407,7 +414,11 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
               }
             }}
           >
-            {loanReceipt === 'cash' ? 'ثبت دریافت نقدی قرض' : 'ثبت قرض قبلی بدون تغییر صندوق'}
+            {loanReceipt === 'cash'
+              ? owed < 0
+                ? 'ثبت برگشت پول توسط او'
+                : 'ثبت دریافت نقدی قرض'
+              : 'ثبت قرض قبلی بدون تغییر صندوق'}
           </PrimaryBtn>
         </div>
       )}
@@ -470,6 +481,12 @@ function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () 
 
       {mode === 'repay' && (
         <div className="mb-3 rounded-xl border border-amber-200 p-3">
+          {owed < 0 && (
+            <p className="mb-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800">
+              💰 حساب این شخص منفی است (طلب ما {fmtMoney(Math.abs(owed))}). اگر او پول برگردانده، از بخش
+              «گرفتن قرض» ثبت کنید — همان‌جا دکمهٔ «برگشت پول توسط او» است.
+            </p>
+          )}
           <Field label="این پول چگونه حساب شود؟">
             <select className={inputCls} value={cashMode} onChange={(e) => setCashMode(e.target.value as LenderCashOutMode)}>
               <option value="cashRepayment">پرداخت قرض ما به او</option>
