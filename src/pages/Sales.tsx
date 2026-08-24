@@ -10,6 +10,7 @@ import ReturnModal from './sales/ReturnModal'
 import ExchangeModal from './sales/ExchangeModal'
 import NewSaleModal from './sales/NewSaleModal'
 import ReceiptModal from './sales/Receipt'
+import InvoiceModal from './sales/InvoiceModal'
 
 export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean; openNew?: boolean }) {
   const [view, setView] = useState<'list' | 'stats'>('list')
@@ -17,6 +18,8 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
   const [returning, setReturning] = useState<Sale | null>(null)
   const [exchanging, setExchanging] = useState<Sale | null>(null)
   const [receiptFor, setReceiptFor] = useState<Sale | null>(null)
+  // فاکتورِ کاغذی برای چاپ/اشتراک
+  const [invoiceFor, setInvoiceFor] = useState<Sale | null>(null)
   const [justSaved, setJustSaved] = useState<Sale | null>(null)
   const [drafts, setDrafts] = useState<SaleDraft[]>(() => readSaleDrafts())
   const [activeDraft, setActiveDraft] = useState<SaleDraft | null>(null)
@@ -147,6 +150,12 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
               🧾 رسید
             </button>
             <button
+              onClick={() => setInvoiceFor(justSaved)}
+              className="flex-1 rounded-lg bg-slate-800 py-2 text-sm font-bold text-white"
+            >
+              فاکتور
+            </button>
+            <button
               onClick={() => {
                 setJustSaved(null)
                 setShowNew(true)
@@ -192,6 +201,9 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
               <button className="text-xs font-bold text-slate-600" onClick={() => setReceiptFor(s)}>
                 🧾 رسید
               </button>
+              <button className="text-xs font-bold text-slate-800" onClick={() => setInvoiceFor(s)}>
+                فاکتور
+              </button>
               <button
                 className="text-xs text-red-500"
                 onClick={() => void confirmDelete(s)}
@@ -235,6 +247,7 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
       )}
       {returning && <ReturnModal sale={returning} onClose={() => setReturning(null)} />}
       {exchanging && <ExchangeModal sale={exchanging} onClose={() => setExchanging(null)} />}
+      {invoiceFor && <InvoiceModal sale={invoiceFor} onClose={() => setInvoiceFor(null)} />}
     </div>
   )
 }
