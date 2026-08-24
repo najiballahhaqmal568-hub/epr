@@ -1,7 +1,27 @@
-import { type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { accessFlags } from '../db'
+import { addModal, pushModal, removeModal } from '../lib/appHistory'
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  // دکمهٔ برگشتِ تلیفون مودال را می‌بندد، نه اینکه از اپ بیرون بزند.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  const poppedRef = useRef(false)
+
+  useEffect(() => {
+    pushModal()
+    const entry = {
+      close: () => closeRef.current(),
+      popped: () => {
+        poppedRef.current = true
+      }
+    }
+    addModal(entry.close, entry.popped)
+    return () => {
+      removeModal(entry.close)
+    }
+  }, [])
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
       <div

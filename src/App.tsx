@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { pushTab, registerTabBack } from './lib/appHistory'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, accessFlags } from './db'
 import { PinPad, hashPin } from './components/PinLock'
@@ -51,6 +52,14 @@ export default function App() {
   const [relogin, setRelogin] = useState(false)
   const [passwordRecovery, setPasswordRecovery] = useState(isPasswordRecoveryUrl)
   const reminder = useExpenseReminder()
+
+  // دکمهٔ برگشتِ تلیفون = یک قدم عقب داخل اپ (نه خروج) — هماهنگ در lib/appHistory
+  useEffect(() => {
+    pushTab(tab)
+  }, [tab])
+  useEffect(() => registerTabBack((t) => {
+    if (typeof t === 'string') setTab(t as TabId)
+  }), [])
   const debtReminder = useDebtReminder()
   const integrity = useIntegrityCheck()
 

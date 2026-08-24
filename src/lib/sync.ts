@@ -200,10 +200,14 @@ async function pushTable(
   generation: number,
   mergeOnly: boolean
 ): Promise<number> {
+  // پنجرهٔ اطمینان: سندی که مُهرش کمی قبل از شروع اسکن است ممکن است بعد از اسکن
+  // commit شده باشد (تراکنش Dexie) — ۶۰ ثانیه همپوشانی این مسابقه را کور می‌کند.
+  // فرستادن دوباره با uuid بی‌ضرر است (upsert).
+  const OVERLAP = 60_000
   const supa = (await getSupa())!
   const cursor = ((await getState(`push:${table}`)) as number | undefined) ?? 0
   const scanStart = Date.now()
-  const rows = await db.table(table).where('localUpdatedAt').above(cursor).toArray()
+  const rows = await db.table(table).where('localUpdatedAt').above(Math.max(0, cursor - OVERLAP)).toArray()
   if (!rows.length) return 0
   const payload = []
   for (const r of rows) {
