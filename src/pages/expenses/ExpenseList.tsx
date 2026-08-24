@@ -10,6 +10,9 @@ import CategoryManager from './CategoryManager'
 import ExpenseCreditors from './ExpenseCreditors'
 import DailyExpenseChecklist from './DailyExpenseChecklist'
 import CorrectExpenseModal from './CorrectExpenseModal'
+import ExpenseCalendar from './ExpenseCalendar'
+
+const VIEW_KEY = 'expense_view'
 
 export function ExpenseList({
   openNew = false,
@@ -27,6 +30,16 @@ export function ExpenseList({
   const [filter, setFilter] = useState<number | 'all' | ExpenseType>('all')
   // مصرفی که مالک می‌خواهد اصلاح کند (مبلغ/نقد-قرض/طلبکار/تاریخ) — بدون پاک کردن
   const [toCorrect, setToCorrect] = useState<Expense | null>(null)
+  // نمای تقویم یا فهرست — آخرین انتخاب یاد می‌ماند
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>(() =>
+    localStorage.getItem(VIEW_KEY) === 'calendar' ? 'calendar' : 'list'
+  )
+  const setView = (v: 'calendar' | 'list') => {
+    setViewMode(v)
+    localStorage.setItem(VIEW_KEY, v)
+  }
+  // روز انتخاب‌شده از تقویم — فورم مصرف با همان تاریخ باز شود
+  const [newPresetDate, setNewPresetDate] = useState<number | undefined>(undefined)
   const monthStart = startOfMonth()
   const dayStart = startOfDay()
 
@@ -92,6 +105,30 @@ export function ExpenseList({
       <DailyExpenseChecklist />
       <ExpenseCreditors />
 
+      {/* سوییچ تقویم | فهرست — تقویم ۳۰ روزهٔ مصارف */}
+      <div className="mb-2 flex gap-2">
+        <button
+          onClick={() => setView('calendar')}
+          className={`flex-1 rounded-xl py-2 text-sm font-bold ${viewMode === 'calendar' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+        >
+          📅 تقویم
+        </button>
+        <button
+          onClick={() => setView('list')}
+          className={`flex-1 rounded-xl py-2 text-sm font-bold ${viewMode === 'list' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+        >
+          📋 فهرست
+        </button>
+      </div>
+      {viewMode === 'calendar' ? (
+        <ExpenseCalendar
+          onAddForDay={(day) => {
+            setNewPresetDate(day)
+            setShowNew(true)
+          }}
+        />
+      ) : (
+        <>
       <div className="mb-3 rounded-2xl bg-white p-3 shadow-sm">
         <div className="mb-2 flex items-center justify-between">
           <p className="font-bold text-slate-800">کتگوری‌های پرکاربرد</p>
@@ -178,7 +215,17 @@ export function ExpenseList({
           </div>
         </div>
       ))}
-      {showNew && <NewExpenseModal onClose={() => setShowNew(false)} />}
+      </>
+      )}
+      {showNew && (
+        <NewExpenseModal
+          preset={newPresetDate ? { date: newPresetDate } : undefined}
+          onClose={() => {
+            setShowNew(false)
+            setNewPresetDate(undefined)
+          }}
+        />
+      )}
       {showCats && <CategoryManager onClose={() => setShowCats(false)} />}
       {toCorrect && <CorrectExpenseModal expense={toCorrect} onClose={() => setToCorrect(null)} />}
     </>
