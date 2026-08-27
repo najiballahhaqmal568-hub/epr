@@ -95,6 +95,7 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
   const suppliers: number[] = []
   const sarrafs: number[] = []
   const lenders: number[] = []
+  const expenseCreditors: number[] = []
   let partner = ''
 
   for (let i = 0; i < 3; i++) {
@@ -120,6 +121,7 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
   for (let i = 0; i < 2; i++)
     suppliers.push((await db.suppliers.add({ name: `تأمین${i}`, balance: 0 })) as number)
   sarrafs.push((await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number)
+  expenseCreditors.push((await db.suppliers.add({ name: 'طلبکار مصرف', balance: 0, kind: 'expenseCreditor' })) as number)
 
   // پول اولیه در هر جای پول
   for (const box of BOXES) await reconcile(int(50000, 200000), 'موجودی اولیه', undefined, box)
@@ -336,10 +338,34 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
       run: async () => {
         const box = pick(BOXES)
         const bal = (await boxBalances()).boxes.find((b) => b.name === box)?.balance ?? 0
-        if (bal <= 0) return
         const type = pick(['business', 'home', 'personal', 'withdrawal'] as const)
+        if (type === 'withdrawal') {
+          if (bal <= 0) return
+          await addExpense(
+            { date: Date.now(), amount: int(1, Math.floor(bal)), type, note: 'آزمایش', box },
+            partner || undefined
+          )
+          return
+        }
+        const useCredit = rand() < 0.6
+        if (!useCredit && bal <= 0) return
+        const maxCash = Math.max(0, Math.floor(bal))
+        const amount = useCredit ? int(1, Math.max(1, maxCash + 2000)) : int(1, maxCash)
+        const cashPaid = useCredit ? int(0, Math.min(amount, maxCash)) : amount
+        const creditAmount = amount - cashPaid
         await addExpense(
-          { date: Date.now(), amount: int(1, Math.floor(bal)), type, note: 'آزمایش', box },
+          {
+            date: Date.now(),
+            amount,
+            type,
+            note: 'آزمایش',
+            box,
+            cashPaid,
+            creditAmount,
+            ...(creditAmount > 0
+              ? { creditorId: expenseCreditors[0], creditorName: 'طلبکار مصرف' }
+              : {})
+          },
           type === 'business' ? undefined : partner || undefined
         )
       }
@@ -619,12 +645,13 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
     const bad = (rule: string, detail: string): FuzzFailure => ({ seed, step, op, rule, detail, log: log.slice(-12) })
 
     const live = <T extends { deleted?: boolean }>(rows: T[]) => rows.filter((r) => !r.deleted)
-    const [sales, purchases, payments, adjustments, returns, vars, custs, supps] = await Promise.all([
+    const [sales, purchases, payments, adjustments, returns, expenses, vars, custs, supps] = await Promise.all([
       db.sales.toArray().then(live),
       db.purchases.toArray().then(live),
       db.payments.toArray().then(live),
       db.adjustments.toArray().then(live),
       db.returns.toArray().then(live),
+      db.expenses.toArray().then(live),
       db.variants.toArray().then(live),
       db.customers.toArray().then(live),
       db.suppliers.toArray().then(live)
@@ -660,7 +687,7 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
       if (Math.abs(c.balance - want) > 0.5)
         return bad('کنترل حساب‌ها — قرض مشتری', `مشتری ${c.id} ذخیره ${c.balance} ولی از اسناد ${want}`)
     }
-    const sb = computeSupplierBalances(purchases, payments, returns)
+    const sb = computeSupplierBalances(purchases, payments, returns, expenses)
     for (const s of supps) {
       if (s.kind === 'partner') continue
       const want = sb.get(s.id!) ?? 0
@@ -682,7 +709,8 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
       ['sales', sales],
       ['payments', payments],
       ['adjustments', adjustments],
-      ['returns', returns]
+      ['returns', returns],
+      ['expenses', expenses]
     ] as const)
       for (const r of rows) await applyDocEffects(table, r as unknown as Record<string, unknown>, false)
 

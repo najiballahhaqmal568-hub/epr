@@ -56,10 +56,12 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
         catId = undefined
       }
       const e: Expense = { date: preset?.date ? preset.date + 12 * 60 * 60 * 1000 : Date.now(), categoryId: catId, categoryName: catName, amount: amt, note: note.trim() || undefined, type }
-      if (mode === 'business') {
+      if (mode !== 'withdrawal') {
         const cashPaid = paymentMode === 'cash' ? amt : paymentMode === 'credit' ? 0 : parseNum(cashPart)
         const creditAmount = amt - cashPaid
         if (cashPaid < 0 || cashPaid > amt) return setError('بخش نقدی نمی‌تواند بیشتر از تمام مصرف باشد')
+        if (paymentMode === 'mixed' && (cashPaid <= 0 || creditAmount <= 0))
+          return setError('در حالت نقد و قرض، هر دو بخش باید بیشتر از صفر باشد')
         if (creditAmount > 0) {
           if (!creditorId) return setError('طلبکار مصرف را انتخاب کنید')
           const creditor = await db.suppliers.get(Number(creditorId))
@@ -95,7 +97,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
           ? 'از مفاد تجارت کم می‌شود.'
           : mode === 'partner'
             ? 'برداشت/مصرف شریک — آخر سال از سهم فایدهٔ همان شریک کم می‌شود.'
-            : 'از صندوق کم می‌شود اما در مفاد تجارت حساب نمی‌شود.'}
+            : 'در مفاد تجارت حساب نمی‌شود و کل مبلغ از سهم مالک/شریک انتخاب‌شده کم می‌شود.'}
         {needsPartner && mode !== 'partner' && ' این پول آخر سال از سهم همان شریک کم می‌شود.'}
       </p>
 
@@ -151,7 +153,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
       <Field label="مبلغ *">
         <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </Field>
-      {mode === 'business' && (
+      {mode !== 'withdrawal' && mode !== 'partner' && (
         <>
           <Field label="پرداخت مصرف چگونه است؟">
             <div className="grid grid-cols-3 gap-1">
@@ -216,7 +218,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
             </>
           )}
           <p className="mb-3 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
-            تمام مبلغ امروز مصرف حساب می‌شود؛ فقط بخش نقدی از صندوق کم و باقی به حساب طلبکار ثبت می‌شود.
+            تمام مبلغ امروز {mode === 'business' ? 'مصرف تجارت' : mode === 'home' ? 'مصرف خانه' : 'مصرف شخصی'} حساب می‌شود؛ فقط بخش نقدی از صندوق کم و باقی به حساب طلبکار ثبت می‌شود.
           </p>
         </>
       )}

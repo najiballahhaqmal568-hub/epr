@@ -32,6 +32,10 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
 
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
   const movements = useLiveQuery(() => db.cashMovements.filter((m) => !m.deleted).toArray(), [])
+  const privateExpenses = useLiveQuery(
+    () => db.expenses.filter((e) => e.type === 'home' || e.type === 'personal').toArray(),
+    []
+  )
   const nw = useLiveQuery(() => netWorth(), [])
   const yearStart = useLiveQuery(async () => Number((await db.settings.get('partnershipStart'))?.value ?? 0), [])
 
@@ -45,16 +49,40 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
   const assets = nw?.assets ?? 0
 
   const start = yearStart ?? 0
-  // هر پول که از تجارت بیرون رفته: برداشت، مصرف خانه، مصرف شخصی
-  const DRAW_TYPES = ['withdrawal', 'homeExpense', 'personalExpense']
-  const draws = movements?.filter((m) => DRAW_TYPES.includes(m.type) && m.date >= start) ?? []
-  const wSince = (n: string) => draws.filter((m) => m.partnerName === n).reduce((s, m) => s - m.amount, 0)
+  // سندهای نوِ خانه/شخصی کل مبلغ را نگه می‌دارند، حتی اگر بخشی قرض باشد.
+  // حرکت صندوقِ همان سند دوباره جمع نمی‌شود؛ سندهای قدیمی همچنان از حرکت صندوق خوانده می‌شوند.
+  const legacyDraws = movements?.filter((m) =>
+    m.date >= start && (m.type === 'withdrawal' || ((m.type === 'homeExpense' || m.type === 'personalExpense') && !m.drawAccountedByExpense))
+  ) ?? []
+  const allExpenseDraws = privateExpenses?.filter((e) => !e.deleted && typeof e.drawAmount === 'number') ?? []
+  const expenseDraws = allExpenseDraws.filter((e) => e.date >= start)
+  const wSince = (n: string) =>
+    legacyDraws.filter((m) => m.partnerName === n).reduce((s, m) => s - m.amount, 0)
+    + expenseDraws.filter((e) => e.partnerName === n).reduce((s, e) => s + (e.drawAmount ?? 0), 0)
   const capSum = partners?.reduce((s, p) => s + (p.capital ?? 0), 0) ?? 0
   // برداشت‌های بی‌نام (مصرف خانه/شخصی مالک) هم باید در مفاد سال حساب شود
-  const untaggedDraw = draws.filter((m) => !m.partnerName).reduce((s, m) => s - m.amount, 0)
+  const untaggedDraw = legacyDraws.filter((m) => !m.partnerName).reduce((s, m) => s - m.amount, 0)
+    + expenseDraws.filter((e) => !e.partnerName).reduce((s, e) => s + (e.drawAmount ?? 0), 0)
   const wSum = (partners?.reduce((s, p) => s + wSince(p.name), 0) ?? 0) + untaggedDraw
   const yearProfit = assets + wSum - capSum
   const shareSum = partners?.reduce((s, p) => s + (p.share ?? 0), 0) ?? 0
+
+  const historyRows = historyFor
+    ? [
+        ...(movements ?? [])
+          .filter((m) => m.partnerName === historyFor && !m.drawAccountedByExpense)
+          .map((m) => ({ key: `movement-${m.id}`, date: m.date, amount: m.amount, note: m.note, label: m.type === 'capitalIn' ? 'سرمایه‌گذاری' : 'برداشت/مصرف' })),
+        ...allExpenseDraws
+          .filter((e) => e.partnerName === historyFor)
+          .map((e) => ({
+            key: `expense-${e.id}`,
+            date: e.date,
+            amount: -(e.drawAmount ?? 0),
+            note: e.note ? `${e.categoryName} — ${e.note}` : e.categoryName,
+            label: e.type === 'home' ? 'مصرف خانه' : 'مصرف شخصی'
+          }))
+      ].sort((a, b) => b.date - a.date)
+    : []
 
   // سرمایهٔ باقی‌مانده = دارایی خالص منهای سرمایهٔ شرکای ثبت‌شده.
   // اگر مجموع سرمایه‌ها از دارایی بیشتر شود، مفاد روز اول به‌غلط منفی می‌شود.
@@ -296,20 +324,17 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
 
       {historyFor && (
         <Modal title={`جزئیات — ${historyFor}`} onClose={() => setHistoryFor(null)}>
-          {(movements ?? [])
-            .filter((m) => m.partnerName === historyFor)
-            .sort((a, b) => b.date - a.date)
-            .map((m) => (
-              <div key={m.id} className="mb-1 flex items-center justify-between rounded-lg bg-slate-50 p-2 text-sm">
+          {historyRows.map((row) => (
+              <div key={row.key} className="mb-1 flex items-center justify-between rounded-lg bg-slate-50 p-2 text-sm">
                 <span>
-                  <b>{m.type === 'capitalIn' ? 'سرمایه‌گذاری' : 'برداشت/مصرف'}</b>
-                  {m.note && <span className="text-slate-500"> — {m.note}</span>}
-                  <span className="block text-xs text-slate-400">{fmtDate(m.date)}</span>
+                  <b>{row.label}</b>
+                  {row.note && <span className="text-slate-500"> — {row.note}</span>}
+                  <span className="block text-xs text-slate-400">{fmtDate(row.date)}</span>
                 </span>
-                <span className={`font-bold ${m.amount >= 0 ? 'text-teal-700' : 'text-amber-700'}`}>{fmtMoney(Math.abs(m.amount))}</span>
+                <span className={`font-bold ${row.amount >= 0 ? 'text-teal-700' : 'text-amber-700'}`}>{fmtMoney(Math.abs(row.amount))}</span>
               </div>
             ))}
-          {!(movements ?? []).some((m) => m.partnerName === historyFor) && <p className="text-sm text-slate-400">سندی ثبت نشده.</p>}
+          {historyRows.length === 0 && <p className="text-sm text-slate-400">سندی ثبت نشده.</p>}
         </Modal>
       )}
 

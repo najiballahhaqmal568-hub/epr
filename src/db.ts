@@ -297,6 +297,10 @@ export interface Expense extends Synced {
   creditAmount?: number
   creditorId?: number
   creditorName?: string
+  /** کل مبلغ مصرف خانه/شخصی که از سهم مالک یا شریک حساب می‌شود. وجود این فیلد سندهای نو را از سندهای قدیمی جدا می‌کند. */
+  drawAmount?: number
+  /** مالک یا شریکی که کل مصرف خانه/شخصی از سهم او کم می‌شود. */
+  partnerName?: string
   /** جای پول بخش نقدی. */
   box?: string
   note?: string
@@ -353,6 +357,8 @@ export interface CashMovement extends Synced {
   note?: string
   /** برای سرمایه‌گذاری و برداشت شریک */
   partnerName?: string
+  /** سهم شریک از روی سند مصرف حساب شده؛ این حرکت فقط صندوق را تغییر می‌دهد و در برداشت دوباره جمع نمی‌شود. */
+  drawAccountedByExpense?: boolean
   /** پیوند دو نیمهٔ یک انتقال بین جاها */
   transferUuid?: string
   /** وقتی سند ابطال شده باشد: دلیل و وقتش — سند برای رد حساب می‌ماند */

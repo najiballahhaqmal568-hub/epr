@@ -2022,7 +2022,19 @@ export async function addExpense(expense: Expense, partnerName?: string): Promis
   if (cashPaid < 0 || creditAmount < 0 || cashPaid + creditAmount !== expense.amount) {
     throw new Error('جمع بخش نقدی و قرضی باید دقیقاً برابر مبلغ مصرف باشد')
   }
+  if (expense.type === 'home' || expense.type === 'personal') {
+    expense.drawAmount = expense.amount
+    expense.partnerName = partnerName?.trim() || undefined
+  }
   return db.transaction('rw', db.expenses, db.cashMovements, db.suppliers, async () => {
+    if (expense.drawAmount !== undefined) {
+      const activePartners = await db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray()
+      if (activePartners.length > 0) {
+        const partner = activePartners.find((x) => x.name === expense.partnerName)
+        if (!partner) throw new Error('انتخاب کنید این مصرف از سهم کدام شریک کم شود')
+        expense.partnerName = partner.name
+      }
+    }
     if (creditAmount > 0) {
       if (!expense.creditorId) throw new Error('طلبکار مصرف را انتخاب کنید')
       const creditor = await db.suppliers.get(expense.creditorId)
@@ -2040,6 +2052,7 @@ export async function addExpense(expense: Expense, partnerName?: string): Promis
         refId: id,
         amount: -cashPaid,
         box: expense.box,
+        drawAccountedByExpense: expense.drawAmount !== undefined,
         // مصرف خانه/شخصی و برداشت باید به نام یک شریک ثبت شود، وگرنه آخر سال
         // از سهم هیچ‌کس کم نمی‌شود و بار آن روی همهٔ شرکا می‌افتد
         ...(partnerName ? { partnerName } : {}),
@@ -2183,6 +2196,7 @@ export async function deleteExpense(expenseId: number): Promise<void> {
         refId: expenseId,
         amount: cashPaid,
         box: orig ? boxOf(orig) : e.box,
+        drawAccountedByExpense: e.drawAmount !== undefined,
         note: `حذف: ${e.categoryName}`
       })
     }

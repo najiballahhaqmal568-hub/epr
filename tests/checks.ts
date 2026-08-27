@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
+import PartnersCard from '../src/pages/reports/PartnersCard'
 import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
 import CategoryManager from '../src/pages/expenses/CategoryManager'
 import PurchasePriceCorrectionModal from '../src/pages/purchases/PurchasePriceCorrectionModal'
@@ -144,6 +145,12 @@ function fillInput(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
   setter?.call(input, value)
   input.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function chooseSelect(select: HTMLSelectElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+  setter?.call(select, value)
+  select.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 async function makeVariant(over: Partial<Variant> = {}): Promise<number> {
@@ -466,7 +473,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // مصرف تجارت ۳٬۰۰۰، مصرف خانهٔ مالک ۲٬۰۰۰، برداشت شریک ۵٬۰۰۰
       const catId = (await db.expenseCategories.add({ name: 'کرایه' })) as number
       await addExpense({ date: Date.now(), type: 'business', categoryId: catId, categoryName: 'کرایه', amount: 3000 } as Expense)
-      await addExpense({ date: Date.now(), type: 'home', categoryId: catId, categoryName: 'کرایه', amount: 2000 } as Expense)
+      await addExpense({ date: Date.now(), type: 'home', categoryId: catId, categoryName: 'کرایه', amount: 2000 } as Expense, 'شریک الف')
       await addPartnerWithdrawal('شریک الف', 5000)
 
       const s = await settlement()
@@ -1257,6 +1264,214 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
         creditorRoot.unmount()
         creditorHost.remove()
       }
+    }
+  },
+  {
+    name: 'مصارف خانه و شخصی — نقدی، قرضی و ترکیبی از سهم شریک',
+    run: async () => {
+      const now = Date.now()
+      const catId = (await db.expenseCategories.add({ name: 'مصرف خانه' })) as number
+      const creditorId = (await db.suppliers.add({ name: 'دوکاندار محل', balance: 0, kind: 'expenseCreditor' } as never)) as number
+      await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', capital: 0, share: 100 } as never)
+      await seedCash(10000)
+
+      await throws('با وجود شریک، مصرف خانهٔ بی‌نام رد می‌شود', () => addExpense({
+        date: now - 1,
+        type: 'home',
+        categoryId: catId,
+        categoryName: 'مصرف خانهٔ بی‌نام',
+        amount: 100,
+        cashPaid: 100,
+        creditAmount: 0,
+        box: SHOP_BOX
+      } as Expense))
+
+      const homeId = await addExpense({
+        date: now,
+        type: 'home',
+        categoryId: catId,
+        categoryName: 'مصرف خانه',
+        amount: 5000,
+        cashPaid: 2000,
+        creditAmount: 3000,
+        creditorId,
+        box: SHOP_BOX
+      } as Expense, 'مالک')
+      const personalId = await addExpense({
+        date: now + 1,
+        type: 'personal',
+        categoryId: catId,
+        categoryName: 'مصرف شخصی',
+        amount: 1200,
+        cashPaid: 0,
+        creditAmount: 1200,
+        creditorId,
+        box: SHOP_BOX
+      } as Expense, 'مالک')
+
+      eq('فقط بخش نقدی مصرف خانه از صندوق کم شد', await cashBalance(), 8000)
+      eq('بخش‌های قرضی خانه و شخصی به حساب طلبکار نشست', (await db.suppliers.get(creditorId))!.balance, 4200)
+      const home = (await db.expenses.get(homeId)) as Expense & { drawAmount?: number; partnerName?: string }
+      const personal = (await db.expenses.get(personalId)) as Expense & { drawAmount?: number; partnerName?: string }
+      eq('کل مصرف ترکیبی خانه از سهم شریک حساب می‌شود', home.drawAmount ?? 0, 5000)
+      eq('کل مصرف قرضی شخصی از سهم شریک حساب می‌شود', personal.drawAmount ?? 0, 1200)
+      is('مصرف خانه به نام شریک ذخیره شد', home.partnerName, 'مالک')
+      is('مصرف شخصی به نام شریک ذخیره شد', personal.partnerName, 'مالک')
+
+      const expenseHost = document.createElement('div')
+      document.body.append(expenseHost)
+      const expenseRoot = createRoot(expenseHost)
+      try {
+        expenseRoot.render(createElement(NewExpenseModal, { onClose: () => undefined }))
+        await waitUntil(() => expenseHost.textContent?.includes('خانه') === true)
+        const homeButton = Array.from(expenseHost.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'خانه')
+        homeButton?.click()
+        await waitUntil(() => homeButton?.className.includes('bg-amber-600') === true)
+        is('فرم مصرف خانه گزینه نقد و قرض دارد', expenseHost.textContent?.includes('نقد و قرض'), true)
+
+        const personalButton = Array.from(expenseHost.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'شخصی')
+        personalButton?.click()
+        await waitUntil(() => personalButton?.className.includes('bg-amber-600') === true)
+        is('فرم مصرف شخصی گزینه نقد و قرض دارد', expenseHost.textContent?.includes('نقد و قرض'), true)
+      } finally {
+        expenseRoot.unmount()
+        expenseHost.remove()
+      }
+
+      const partnersHost = document.createElement('div')
+      document.body.append(partnersHost)
+      const partnersRoot = createRoot(partnersHost)
+      try {
+        partnersRoot.render(createElement(PartnersCard, { netProfit: 0 }))
+        await waitUntil(() => partnersHost.textContent?.includes('برداشت/مصرف امسال') === true)
+        const drawLine = Array.from(partnersHost.querySelectorAll('p')).find((p) => p.textContent?.includes('برداشت/مصرف امسال'))
+        is('راپور شریک کل ۶۲۰۰ افغانی خانه و شخصی را نشان می‌دهد', drawLine?.textContent?.includes('۶٬۲۰۰'), true)
+        const detailsButton = Array.from(partnersHost.querySelectorAll('button')).find((button) => button.textContent?.includes('جزئیات'))
+        detailsButton?.click()
+        await waitUntil(() => partnersHost.textContent?.includes('جزئیات — مالک') === true)
+        is('جزئیات شریک کل مصرف ترکیبی خانه را نشان می‌دهد', partnersHost.textContent?.includes('مصرف خانه') && partnersHost.textContent?.includes('۵٬۰۰۰'), true)
+        is('جزئیات شریک کل مصرف قرضی شخصی را نشان می‌دهد', partnersHost.textContent?.includes('مصرف شخصی') && partnersHost.textContent?.includes('۱٬۲۰۰'), true)
+
+        await db.settings.put({ key: 'partnershipStart', value: now + 1000 })
+        await waitUntil(() => drawLine?.textContent?.includes(': ۰ ؋') === true)
+        is('بعد از شروع سال نو، خلاصهٔ امسال صفر می‌شود', drawLine?.textContent?.includes(': ۰ ؋'), true)
+        const historyLabels = Array.from(partnersHost.querySelectorAll('b')).map((node) => node.textContent?.trim())
+        is('بعد از شروع سال نو، مصرف خانه در جزئیات تاریخی می‌ماند', historyLabels.includes('مصرف خانه'), true)
+        is('بعد از شروع سال نو، مصرف شخصی در جزئیات تاریخی می‌ماند', historyLabels.includes('مصرف شخصی'), true)
+        is('بعد از شروع سال نو، جزئیات تاریخی خالی نمی‌شود', partnersHost.textContent?.includes('سندی ثبت نشده.'), false)
+      } finally {
+        partnersRoot.unmount()
+        partnersHost.remove()
+      }
+
+      await db.settings.put({ key: 'partnershipStart', value: 0 })
+      await deleteExpense(personalId)
+      eq('حذف مصرف قرضی شخصی، قرض طلبکار را برمی‌گرداند', (await db.suppliers.get(creditorId))!.balance, 3000)
+      eq('حذف مصرف کاملاً قرضی، صندوق را تغییر نمی‌دهد', await cashBalance(), 8000)
+
+      const legacyId = (await db.expenses.add({
+        date: now - 1000,
+        type: 'home',
+        categoryId: catId,
+        categoryName: 'مصرف قدیمی',
+        amount: 700
+      } as Expense)) as number
+      await db.cashMovements.add({
+        date: now - 1000,
+        type: 'homeExpense',
+        refId: legacyId,
+        amount: -700,
+        box: SHOP_BOX,
+        partnerName: 'مالک',
+        note: 'مصرف قدیمی'
+      })
+      const legacyHost = document.createElement('div')
+      document.body.append(legacyHost)
+      const legacyRoot = createRoot(legacyHost)
+      try {
+        legacyRoot.render(createElement(PartnersCard, { netProfit: 0 }))
+        await waitUntil(() => legacyHost.textContent?.includes('برداشت/مصرف امسال') === true)
+        const legacyDrawLine = Array.from(legacyHost.querySelectorAll('p')).find((p) => p.textContent?.includes('برداشت/مصرف امسال'))
+        is('سند قدیمی بدون نشانگر همراه سند نو یک‌بار حساب می‌شود', legacyDrawLine?.textContent?.includes('۵٬۷۰۰'), true)
+      } finally {
+        legacyRoot.unmount()
+        legacyHost.remove()
+      }
+    }
+  },
+  {
+    name: 'فرم خانه و شخصی — ثبت واقعی پرداخت ترکیبی و قرضی',
+    run: async () => {
+      const catId = (await db.expenseCategories.add({ name: 'خوراک خانه' })) as number
+      const creditorId = (await db.suppliers.add({ name: 'فروشندهٔ محل', balance: 0, kind: 'expenseCreditor' } as never)) as number
+      await db.suppliers.add({ name: 'مالک', balance: 0, kind: 'partner', capital: 0, share: 100 } as never)
+      await seedCash(5000)
+
+      async function submit(mode: 'خانه' | 'شخصی', payment: 'قرضی' | 'نقد و قرض', total: string, cash?: string) {
+        const host = document.createElement('div')
+        document.body.append(host)
+        const root = createRoot(host)
+        let closed = false
+        try {
+          root.render(createElement(NewExpenseModal, { onClose: () => { closed = true } }))
+          await waitUntil(() => host.textContent?.includes('خوراک خانه') === true)
+          Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === mode)?.click()
+          await waitUntil(() => Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === payment))
+          const selectsBeforePayment = host.querySelectorAll('select')
+          chooseSelect(selectsBeforePayment[1], String(catId))
+          fillInput(host.querySelector('input[inputmode="numeric"]')!, total)
+          Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === payment)?.click()
+          await waitUntil(() => host.querySelectorAll('select').length === 3)
+          if (cash !== undefined) {
+            const moneyInputs = host.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]')
+            fillInput(moneyInputs[1], cash)
+          }
+          chooseSelect(host.querySelectorAll('select')[2], String(creditorId))
+          Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'ذخیره')?.click()
+          await waitUntil(() => closed)
+        } finally {
+          root.unmount()
+          host.remove()
+        }
+      }
+
+      const invalidHost = document.createElement('div')
+      document.body.append(invalidHost)
+      const invalidRoot = createRoot(invalidHost)
+      let invalidClosed = false
+      try {
+        invalidRoot.render(createElement(NewExpenseModal, { onClose: () => { invalidClosed = true } }))
+        await waitUntil(() => invalidHost.textContent?.includes('خوراک خانه') === true)
+        Array.from(invalidHost.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'خانه')?.click()
+        await waitUntil(() => Array.from(invalidHost.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'نقد و قرض'))
+        chooseSelect(invalidHost.querySelectorAll('select')[1], String(catId))
+        fillInput(invalidHost.querySelector('input[inputmode="numeric"]')!, '1000')
+        Array.from(invalidHost.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'نقد و قرض')?.click()
+        await waitUntil(() => invalidHost.querySelectorAll('select').length === 3)
+        const invalidMoneyInputs = invalidHost.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]')
+        fillInput(invalidMoneyInputs[1], '0')
+        chooseSelect(invalidHost.querySelectorAll('select')[2], String(creditorId))
+        Array.from(invalidHost.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'ذخیره')?.click()
+        await waitUntil(() => invalidHost.textContent?.includes('هر دو بخش باید بیشتر از صفر باشد') === true)
+        is('پرداخت ترکیبی با بخش نقدی صفر رد می‌شود', invalidClosed, false)
+        eq('پرداخت ترکیبی نامعتبر هیچ مصرفی نساخت', await db.expenses.count(), 0)
+      } finally {
+        invalidRoot.unmount()
+        invalidHost.remove()
+      }
+
+      await submit('خانه', 'نقد و قرض', '1000', '400')
+      await submit('شخصی', 'قرضی', '800')
+      const saved = await db.expenses.orderBy('date').toArray()
+      const home = saved.find((e) => e.type === 'home')!
+      const personal = saved.find((e) => e.type === 'personal')!
+      eq('فرم خانه بخش نقدی ترکیبی را درست ذخیره کرد', home.cashPaid ?? -1, 400)
+      eq('فرم خانه بخش قرضی ترکیبی را درست ذخیره کرد', home.creditAmount ?? -1, 600)
+      eq('فرم شخصی پرداخت کاملاً قرضی را درست ذخیره کرد', personal.creditAmount ?? -1, 800)
+      eq('هر دو فرم فقط ۴۰۰ افغانی از صندوق کم کردند', await cashBalance(), 4600)
+      eq('هر دو فرم مجموع ۱۴۰۰ افغانی قرض ساختند', (await db.suppliers.get(creditorId))!.balance, 1400)
+      eq('فرم خانه کل مبلغ را از سهم مالک حساب کرد', home.drawAmount ?? 0, 1000)
+      eq('فرم شخصی کل مبلغ را از سهم مالک حساب کرد', personal.drawAmount ?? 0, 800)
     }
   },
   {
