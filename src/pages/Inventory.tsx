@@ -120,13 +120,12 @@ export default function Inventory({
 
   return (
     <div className="p-4">
-      <h1 className="mb-3 text-xl font-bold text-slate-800">گدام</h1>
+      <div className="page-heading"><div><h1>گدام و خرید</h1><p>موجودی، خرید و سفارش مجدد</p></div></div>
 
-      <section className="mb-3 rounded-3xl bg-teal-800 p-5 text-white shadow-sm">
-        <p className="text-sm text-teal-100">موجودی گدام</p>
-        <p className="mt-1 text-3xl font-bold">{fmtNum(totalPairs)} جوړه</p>
-        <p className="mt-1 text-sm text-teal-100">ارزش به قیمت خرید: {fmtMoney(totalValue)}</p>
-        {noPricePairs > 0 && <p className="mt-1 text-xs font-bold text-amber-200">{fmtNum(noPricePairs)} جوړه هنوز قیمت خرید ندارد</p>}
+      <section className="mb-3 surface p-4">
+        <div className="flex flex-wrap justify-between gap-3"><span className="text-sm text-slate-600">موجودی <strong className="ms-2 text-lg text-slate-900">{fmtNum(totalPairs)} جوړه</strong></span>
+        <span className="text-sm text-slate-600">ارزش خرید <strong className="ms-2 text-slate-900">{fmtMoney(totalValue)}</strong></span></div>
+        {noPricePairs > 0 && <p className="mt-2 text-xs font-bold text-amber-700">{fmtNum(noPricePairs)} جوړه هنوز قیمت خرید ندارد</p>}
       </section>
 
       <div className="mb-3 grid grid-cols-3 gap-2">

@@ -1,22 +1,43 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
 import { addSale } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
-import { saveSaleDraft, type SaleDraft } from '../../lib/saleDrafts'
+import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
+import { Icon } from '../../components/Icon'
+
+function EmbeddedSale({ children }: { children: ReactNode; title: string; onClose: () => void }) {
+  return <div className="sale-embedded">{children}</div>
+}
 
 export function NewSaleModal({
   onClose,
   onSaved,
   onHeld,
-  draft
+  onPendingChange,
+  draft: suppliedDraft,
+  embedded = false
 }: {
   onClose: () => void
   onSaved?: (sale: Sale) => void
   onHeld?: (draft: SaleDraft) => void
+  onPendingChange?: (pending: boolean) => void
   draft?: SaleDraft
+  embedded?: boolean
 }) {
+  const [draft] = useState(() => suppliedDraft ?? (embedded ? readWorkingSale() ?? undefined : undefined))
+  const pendingRef = useRef(false)
+  const completedRef = useRef(false)
+  const [pending, setPending] = useState(false)
+  useEffect(() => { onPendingChange?.(pending) }, [pending, onPendingChange])
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (pendingRef.current && !completedRef.current) { event.preventDefault(); event.returnValue = '' } }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
+  const [draftStatus, setDraftStatus] = useState(draft ? 'پیش‌نویس بازیابی شد' : 'آماده برای فروش جدید')
+  const Shell = embedded ? EmbeddedSale : Modal
   const [saleType, setSaleType] = useState<'retail' | 'wholesale'>(draft?.saleType ?? 'retail')
   const [customerId, setCustomerId] = useState<number | ''>(draft?.customerId ?? '')
   const [custSearch, setCustSearch] = useState('')
@@ -32,6 +53,8 @@ export function NewSaleModal({
   const [pageTouched, setPageTouched] = useState(false)
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'center' }) }, [error])
   const [pickerFor, setPickerFor] = useState<number | null>(null)
   // در عمده اول می‌پرسد: کارتن کامل یا نیم کارتن (خانه‌پری سایزها تا نصف کارتن)
   const [pickerMode, setPickerMode] = useState<'choice' | 'single' | 'half'>('single')
@@ -69,7 +92,7 @@ export function NewSaleModal({
   const quickProducts = [...byProd.values()]
     .filter((e) => e.stock > 0)
     .sort((a, b) => (b.sold !== a.sold ? b.sold - a.sold : b.stock - a.stock))
-    .slice(0, 6)
+    .slice(0, 24)
 
   const matches =
     search.trim() && variants && products
@@ -153,6 +176,29 @@ export function NewSaleModal({
   const total = subtotal - discount
   const paid = paidTouched ? parseNum(paidStr) : total
   const remainder = total - paid
+  const paymentMode = paidTouched && !paidStr.trim() ? 'mixed' : !paidTouched || paid >= total ? 'cash' : paid === 0 ? 'credit' : 'mixed'
+
+  useEffect(() => {
+    if (!embedded || completedRef.current) return
+    try {
+      writeWorkingSale({ saleType, customerId: customerId || undefined, lines, paidStr, paidTouched, discountStr, promise, bookPage }, draft)
+      setDraftStatus(lines.length ? 'پیش‌نویس در همین نشست محفوظ است' : 'آماده برای فروش جدید')
+    } catch {
+      setDraftStatus('پیش‌نویس محفوظ نشد؛ پیش از خروج ثبت یا معطل کنید')
+    }
+  }, [embedded, saleType, customerId, lines, paidStr, paidTouched, discountStr, promise, bookPage, draft])
+
+  function discard() {
+    if (pendingRef.current || !confirm('این سبد پاک شود؟ فروش ثبت نشده از گدام یا صندوق کم نمی‌شود.')) return
+    try {
+      if (draft && draft.id !== 'working') deleteSaleDraft(draft.id)
+      clearWorkingSale()
+      completedRef.current = true
+      onClose()
+    } catch {
+      setError('پیش‌نویس پاک نشد؛ دوباره کوشش کنید')
+    }
+  }
 
   function addLine(v: Variant, n = 1) {
     const p = productMap.get(v.productId)!
@@ -166,6 +212,7 @@ export function NewSaleModal({
   }
 
   function hold() {
+    if (pendingRef.current) return
     if (!lines.length) return setError('برای معطل‌کردن، حداقل یک جنس انتخاب کنید')
     try {
       const held = saveSaleDraft(
@@ -179,8 +226,10 @@ export function NewSaleModal({
           promise,
           bookPage
         },
-        draft
+        draft?.id === 'working' ? undefined : draft
       )
+      completedRef.current = true
+      try { clearWorkingSale() } catch { /* Explicit held copy is already durable. */ }
       onHeld?.(held)
       onClose()
     } catch {
@@ -189,7 +238,9 @@ export function NewSaleModal({
   }
 
   async function save() {
+    if (pendingRef.current) return
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
+    if (paidTouched && !paidStr.trim()) return setError('مبلغ نقد دریافتی را وارد کنید؛ اگر هیچ نقد نگرفته‌اید، گزینهٔ قرض را انتخاب کنید.')
     if (remainder > 0 && !customerId) {
       setShowCust(true)
       return setError('برای فروش قرضی باید مشتری انتخاب شود')
@@ -208,24 +259,49 @@ export function NewSaleModal({
       // صفحه فقط برای فروش قرضی معنا دارد — فروش نقدی در دفتر قرض نمی‌نشیند
       bookPage: remainder > 0 && bookPage.trim() ? bookPage.trim() : undefined
     }
+    pendingRef.current = true
+    setPending(true)
+    setError('')
     try {
       const id = await addSale(sale)
       sale.id = id
-      // صفحهٔ فعلیِ مشتری همان صفحه‌ای می‌شود که تازه در آن نوشتیم،
-      // تا فروش بعدی خودش همان را پیشنهاد کند
-      if (sale.bookPage && customer?.id && customer.bookPage?.trim() !== sale.bookPage) {
-        await db.customers.update(customer.id, { bookPage: sale.bookPage })
-      }
-      if (onSaved) onSaved(sale)
-      else onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      pendingRef.current = false
+      setPending(false)
+      return
     }
+    // The transaction has committed. Ancillary preference/storage errors must
+    // never present the sale as failed or offer a retry that duplicates it.
+    completedRef.current = true
+    const warnings: string[] = []
+    try {
+      clearWorkingSale()
+    } catch { warnings.push('پیش‌نویس پاک نشد؛ آن را دوباره ثبت نکنید.') }
+    if (draft && draft.id !== 'working') {
+      try { deleteSaleDraft(draft.id) }
+      catch { warnings.push('فروش معطل پاک نشد؛ آن را دوباره ثبت نکنید.') }
+    }
+    if (sale.bookPage && customer?.id && customer.bookPage?.trim() !== sale.bookPage) {
+      try { await db.customers.update(customer.id, { bookPage: sale.bookPage }) }
+      catch { warnings.push('صفحهٔ پیش‌فرض مشتری تغییر نکرد؛ صفحه در خود فروش محفوظ است.') }
+    }
+    if (warnings.length) alert(`فروش ثبت شد. ${warnings.join(' ')}`)
+    if (onSaved) onSaved(sale)
+    else onClose()
   }
 
   return (
-    <Modal title="فروش جدید" onClose={onClose}>
-      {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
+    <Shell title="فروش جدید" onClose={() => { if (!pendingRef.current) onClose() }}>
+      {error && <p ref={errorRef} role="alert" className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">{error}</p>}
+      <div className="sale-draft-status mb-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+        <span role="status">{pending ? 'در حال ثبت؛ لطفاً منتظر بمانید' : draftStatus}</span>
+        {lines.length > 0 && <button disabled={pending} onClick={discard} className="text-red-600">پاک‌کردن سبد</button>}
+      </div>
+      <fieldset disabled={pending} className="min-w-0">
+      <div className={embedded ? 'sale-workspace' : ''}>
+      <section className="sale-finder">
+      <h2 className="mb-4 text-xl font-bold">انتخاب جنس</h2>
       <div className="mb-3 flex gap-2">
         {(['retail', 'wholesale'] as const).map((t) => (
           <button
@@ -248,74 +324,22 @@ export function NewSaleModal({
         ))}
       </div>
 
-      {selectedCustomer ? (
-        <div className="mb-3 flex items-center justify-between rounded-xl bg-teal-50 p-2.5">
-          <div>
-            <p className="font-bold text-teal-800">👤 {selectedCustomer.name}</p>
-            {selectedCustomer.balance > 0 && (
-              <p className="text-xs text-red-600">قرض فعلی: {fmtMoney(selectedCustomer.balance)}</p>
-            )}
-          </div>
-          <button
-            className="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-500"
-            onClick={() => {
-              setCustomerId('')
-              setShowCust(false)
-            }}
-            aria-label="حذف مشتری"
-          >
-            ✕
-          </button>
-        </div>
-      ) : showCust ? (
-        <Field label="مشتری (خالی = نقدی؛ برای قرضی لازمی)">
-          <input
-            className={inputCls}
-            autoFocus
-            value={custSearch}
-            onChange={(e) => setCustSearch(e.target.value)}
-            placeholder="جستجوی نام یا تلفن مشتری..."
-          />
-        </Field>
-      ) : (
-        // فروش نقدی پیش‌فرض است — خانهٔ مشتری فقط وقتی لازم شود باز می‌شود
-        <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-          <span className="text-sm font-bold text-slate-600">💵 فروش نقدی</span>
-          <button onClick={() => setShowCust(true)} className="rounded-full bg-amber-100 px-4 py-1.5 text-sm font-bold text-amber-800">
-            قرضی؟ انتخاب مشتری
-          </button>
-        </div>
-      )}
-      {!selectedCustomer && custSearch.trim() && (
-        <div className="-mt-2 mb-3 overflow-hidden rounded-xl border border-slate-200">
-          {custMatches.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => {
-                setCustomerId(c.id!)
-                setCustSearch('')
-                if (!pageTouched) setBookPage(c.bookPage?.trim() ?? '')
-              }}
-              className="flex w-full items-center justify-between border-b border-slate-100 bg-white px-3 py-2 text-right last:border-0 active:bg-teal-50"
-            >
-              <span>{c.name}</span>
-              {c.balance > 0 ? (
-                <span className="text-xs text-red-600">قرض: {fmtMoney(c.balance)}</span>
-              ) : (
-                <span className="text-xs text-slate-400">{c.phone}</span>
-              )}
-            </button>
-          ))}
-          <button onClick={() => void quickAddCustomer()} className="w-full bg-teal-50 px-3 py-2 text-right font-bold text-teal-800">
-            ＋ مشتری جدید: «{custSearch.trim()}»
-          </button>
-        </div>
-      )}
-
+      <Field label="جستجوی جنس">
+        <div className="relative"><span className="pointer-events-none absolute right-3 top-3 text-slate-400"><Icon name="search" /></span><input
+          className={`${inputCls} pr-10`}
+          autoFocus={!embedded}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="نام، سایز، رنگ یا کود..."
+        /></div>
+      </Field>
+      {products === undefined && <p role="status" className="py-8 text-center text-slate-500">در حال بارگذاری اجناس…</p>}
+      {products?.length === 0 && <p className="py-8 text-center text-slate-500">هنوز جنسی در گدام نیست. نخست جنس اضافه کنید.</p>}
+      {search.trim() && products && matches.length === 0 && <p className="py-8 text-center text-slate-500">جنسی با این جستجو پیدا نشد.</p>}
       {quickProducts.length > 0 && !search.trim() && (
         <>
-          <p className="mb-1 text-sm font-bold text-slate-700">🔥 پرفروش‌ها — ضربه بزنید و سایز را انتخاب کنید</p>
-          <div className="mb-3 grid grid-cols-3 gap-2">
+          <p className="mb-3 text-sm text-slate-500">اجناس موجود · مدل را انتخاب کنید، سپس سایز و رنگ</p>
+          <div className="sale-product-grid mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {quickProducts.map((e) => {
               const inStock = e.vs.filter((v) => v.stockQty > 0)
               const minPrice = Math.min(...inStock.map((v) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)))
@@ -327,14 +351,14 @@ export function NewSaleModal({
                     setPickerMode(saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0 ? 'choice' : 'single')
                     setHalfQtys({})
                   }}
-                  className="rounded-xl border border-slate-200 bg-white p-2 text-center active:bg-teal-50"
+                  className="sale-product-card rounded-xl border border-slate-200 bg-white p-3 text-right active:bg-teal-50"
                 >
                   {e.p.photo ? (
-                    <img src={e.p.photo} alt="" className="mx-auto mb-1 h-12 w-12 rounded-lg object-cover" />
+                    <img src={e.p.photo} alt={e.p.name} className="mb-3 h-28 w-full rounded-lg object-cover" />
                   ) : (
-                    <span className="mb-1 block text-2xl">👞</span>
+                    <span className="sale-product-placeholder mb-3 flex h-28 items-center justify-center rounded-lg bg-slate-50 text-3xl text-slate-400" aria-hidden="true">{e.p.name.slice(0, 2)}</span>
                   )}
-                  <p className="truncate text-xs font-bold text-slate-800">{e.p.name}</p>
+                  <p className="truncate text-sm font-bold text-slate-800">{e.p.name}</p>
                   <p className="truncate text-xs text-slate-500">
                     {fmtNum(inStock.length)} سایز · {fmtNum(e.stock)} جوړه
                   </p>
@@ -346,15 +370,6 @@ export function NewSaleModal({
         </>
       )}
 
-      <Field label="جستجوی جنس">
-        <input
-          className={inputCls}
-          autoFocus
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="نام، سایز، رنگ یا کود..."
-        />
-      </Field>
       {saleType === 'wholesale' &&
         cartonProducts.map((p) => {
           const pairs = p.carton!.items.reduce((s, it) => s + it.qty, 0)
@@ -366,7 +381,7 @@ export function NewSaleModal({
               className="mb-2 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate">📦 {p.name}</p>
+                <p className="truncate">{p.name}</p>
                 <p className="block text-xs font-normal">
                   هر کارتن {fmtNum(pairs)} جوړه
                   {p.carton!.price ? ` · کارتنی: ${fmtMoney(p.carton!.price)}` : ''} ·{' '}
@@ -435,6 +450,10 @@ export function NewSaleModal({
         </div>
       )}
 
+      </section>
+      <section className="sale-checkout">
+      <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
+      {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
       {lines.map((l, i) => (
         <div key={l.variantId} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2">
           <div className="flex-1">
@@ -444,30 +463,96 @@ export function NewSaleModal({
             <input
               className="mt-1 w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm"
               inputMode="numeric"
+              aria-label={`قیمت ${l.productName} ${l.size}`}
               value={l.unitPrice}
               onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(e.target.value) } : x)))}
             />
             <span className="mr-1 text-xs text-slate-500">قیمت فی جوړه</span>
           </div>
           <div className="flex items-center gap-2">
-            <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>
+            <button aria-label={`کاهش تعداد ${l.productName}`} className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>
               −
             </button>
             <input
               className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
               inputMode="numeric"
               value={l.qty}
+              aria-label={`تعداد ${l.productName} ${l.size}`}
               onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
             />
-            <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
+            <button aria-label={`افزایش تعداد ${l.productName}`} className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
               ＋
             </button>
-            <button className="mr-1 text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
-              ✕
+            <button aria-label={`حذف ${l.productName} از سبد`} className="mr-1 text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+              <Icon name="trash" />
             </button>
           </div>
         </div>
       ))}
+
+      {selectedCustomer ? (
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-teal-50 p-2.5">
+          <div>
+            <p className="font-bold text-teal-800">{selectedCustomer.name}</p>
+            {selectedCustomer.balance > 0 && (
+              <p className="text-xs text-red-600">قرض فعلی: {fmtMoney(selectedCustomer.balance)}</p>
+            )}
+          </div>
+          <button
+            className="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-500"
+            onClick={() => {
+              setCustomerId('')
+              setShowCust(false)
+            }}
+            aria-label="حذف مشتری"
+          >
+            ✕
+          </button>
+        </div>
+      ) : showCust ? (
+        <Field label="مشتری (خالی = نقدی؛ برای قرضی لازمی)">
+          <input
+            className={inputCls}
+            autoFocus
+            value={custSearch}
+            onChange={(e) => setCustSearch(e.target.value)}
+            placeholder="جستجوی نام یا تلفن مشتری..."
+          />
+        </Field>
+      ) : (
+        // فروش نقدی پیش‌فرض است — خانهٔ مشتری فقط وقتی لازم شود باز می‌شود
+        <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+          <span className="text-sm font-bold text-slate-600">{remainder > 0 ? 'انتخاب مشتری برای قرض' : 'مشتری نقدی'}</span>
+          <button onClick={() => setShowCust(true)} className="rounded-full bg-amber-100 px-4 py-1.5 text-sm font-bold text-amber-800">
+            قرضی؟ انتخاب مشتری
+          </button>
+        </div>
+      )}
+      {!selectedCustomer && custSearch.trim() && (
+        <div className="-mt-2 mb-3 overflow-hidden rounded-xl border border-slate-200">
+          {custMatches.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => {
+                setCustomerId(c.id!)
+                setCustSearch('')
+                if (!pageTouched) setBookPage(c.bookPage?.trim() ?? '')
+              }}
+              className="flex w-full items-center justify-between border-b border-slate-100 bg-white px-3 py-2 text-right last:border-0 active:bg-teal-50"
+            >
+              <span>{c.name}</span>
+              {c.balance > 0 ? (
+                <span className="text-xs text-red-600">قرض: {fmtMoney(c.balance)}</span>
+              ) : (
+                <span className="text-xs text-slate-400">{c.phone}</span>
+              )}
+            </button>
+          ))}
+          <button onClick={() => void quickAddCustomer()} className="w-full bg-teal-50 px-3 py-2 text-right font-bold text-teal-800">
+            ＋ مشتری جدید: «{custSearch.trim()}»
+          </button>
+        </div>
+      )}
 
       <div className="mt-3 rounded-xl bg-teal-50 p-3">
         <div className="flex justify-between text-slate-600">
@@ -498,6 +583,13 @@ export function NewSaleModal({
         <div className="flex items-center justify-between font-bold text-slate-800">
           <span>قابل پرداخت{discount > 0 ? ` (با ${fmtMoney(discount)} تخفیف)` : ''}</span>
           <span className="text-xl">{fmtMoney(total)}</span>
+        </div>
+        <div role="group" aria-label="روش پرداخت" className="my-4 flex gap-2">
+          {(['cash', 'credit', 'mixed'] as const).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} className={`flex-1 rounded-xl px-2 py-2 text-sm font-bold ${paymentMode === mode ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`} onClick={() => {
+            setPaidTouched(mode !== 'cash')
+            setPaidStr(mode === 'credit' ? '0' : '')
+            if (mode !== 'cash') setShowCust(true)
+          }}>{mode === 'cash' ? 'نقد' : mode === 'credit' ? 'قرض' : 'نقد و قرض'}</button>)}
         </div>
         <Field label="مبلغ دریافتی (نقد)">
           <input
@@ -536,7 +628,7 @@ export function NewSaleModal({
       </div>
 
       {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
-      <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
+      <div data-empty={!lines.length} className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">قابل پرداخت</p>
           <p className="text-2xl font-bold text-teal-700">{fmtMoney(total)}</p>
@@ -544,19 +636,22 @@ export function NewSaleModal({
         </div>
         <button
           onClick={hold}
-          disabled={!lines.length}
+          disabled={!lines.length || pending}
           className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800 active:bg-amber-100 disabled:opacity-40"
         >
-          ⏸ معطل
+          معطل
         </button>
         <button
           onClick={save}
-          disabled={!lines.length}
+          disabled={!lines.length || pending}
           className="rounded-xl bg-teal-700 px-5 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
         >
-          ثبت فروش
+          {pending ? 'در حال ثبت…' : 'ثبت فروش'}
         </button>
       </div>
+      </section>
+      </div>
+      </fieldset>
       {pickerFor != null &&
         (() => {
           const p = productMap.get(pickerFor)
@@ -569,7 +664,7 @@ export function NewSaleModal({
             const avail = cartonsInStock(p)
             const n = cartonCountOf(p.id!)
             return (
-              <Modal title={`📦 ${p.name}`} onClose={() => setPickerFor(null)}>
+              <Modal title={`${p.name}`} onClose={() => setPickerFor(null)}>
                 <div className="mb-2 flex items-center justify-center gap-3 rounded-xl bg-slate-50 p-2">
                   <button
                     className="h-9 w-9 rounded-full bg-white font-bold"
@@ -596,7 +691,7 @@ export function NewSaleModal({
                   className="mb-2 w-full rounded-xl bg-teal-700 p-4 text-right font-bold text-white active:bg-teal-800 disabled:opacity-40"
                 >
                   <span className="block text-lg">
-                    📦 {fmtNum(n)} کارتن ({fmtNum(pairs * n)} جوړه)
+                    {fmtNum(n)} کارتن ({fmtNum(pairs * n)} جوړه)
                   </span>
                   <span className="text-sm font-normal opacity-90">
                     {avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل موجود نیست'}
@@ -607,7 +702,7 @@ export function NewSaleModal({
                   onClick={() => setPickerMode('half')}
                   className="w-full rounded-xl bg-amber-100 p-4 text-right font-bold text-amber-800 active:bg-amber-200"
                 >
-                  <span className="block text-lg">✋ نیم کارتن ({fmtNum(Math.round(pairs / 2))} جوړه)</span>
+                  <span className="block text-lg">نیم کارتن ({fmtNum(Math.round(pairs / 2))} جوړه)</span>
                   <span className="text-sm font-normal">سایزها را خودتان تا نصف کارتن انتخاب کنید</span>
                 </button>
               </Modal>
@@ -620,16 +715,16 @@ export function NewSaleModal({
             const setQ = (id: number, q: number, max: number) =>
               setHalfQtys((hq) => ({ ...hq, [id]: Math.min(max, Math.max(0, q)) }))
             return (
-              <Modal title={`✋ نیم کارتن — ${p.name}`} onClose={() => setPickerFor(null)}>
+              <Modal title={`نیم کارتن — ${p.name}`} onClose={() => setPickerFor(null)}>
                 <p
                   className={`mb-2 rounded-xl p-2 text-center text-sm font-bold ${
                     filled === target ? 'bg-teal-50 text-teal-700' : filled > target ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
                   }`}
                 >
                   {filled === target
-                    ? `✅ پوره شد: ${fmtNum(target)} جوړه`
+                    ? `پوره شد: ${fmtNum(target)} جوړه`
                     : filled > target
-                      ? `⚠️ ${fmtNum(filled - target)} جوړه زیادتر از نیم کارتن!`
+                      ? `${fmtNum(filled - target)} جوړه زیادتر از نیم کارتن!`
                       : `${fmtNum(filled)} از ${fmtNum(target)} جوړه`}
                 </p>
                 {vs.map((v) => (
@@ -714,7 +809,7 @@ export function NewSaleModal({
             </Modal>
           )
         })()}
-    </Modal>
+    </Shell>
   )
 }
 

@@ -1,14 +1,19 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { Icon } from './Icon'
 import { accessFlags } from '../db'
 import { addModal, pushModal, removeModal } from '../lib/appHistory'
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
   // دکمهٔ برگشتِ تلیفون مودال را می‌بندد، نه اینکه از اپ بیرون بزند.
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   const poppedRef = useRef(false)
 
   useEffect(() => {
+    const dialog = dialogRef.current
+    dialog?.showModal()
     pushModal()
     const entry = {
       close: () => closeRef.current(),
@@ -18,26 +23,24 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     }
     addModal(entry.close, entry.popped)
     return () => {
+      dialog?.close()
       // اگر Back مودال را بسته، appHistory همان پله و استک را جمع کرده است.
       if (!poppedRef.current) removeModal(entry.close)
     }
   }, [])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
-      <div
-        className="w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-2xl bg-white p-4 pb-8"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-800">{title}</h2>
-          <button onClick={onClose} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
-            ✕
+    <dialog ref={dialogRef} className="modal-dialog" aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); onClose() }}>
+      <div className="modal-body">
+        <div className="modal-heading">
+          <h2 id={titleId}>{title}</h2>
+          <button onClick={onClose} aria-label="بستن">
+            <Icon name="close" />
           </button>
         </div>
         {children}
       </div>
-    </div>
+    </dialog>
   )
 }
 
@@ -72,9 +75,9 @@ export function Fab({ onClick, label }: { onClick: () => void; label?: string })
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-20 left-4 z-40 flex items-center gap-1 rounded-full bg-teal-700 px-5 py-3.5 text-lg font-bold text-white shadow-lg active:bg-teal-800"
+      className="premium-fab"
     >
-      ＋ {label}
+      <Icon name="plus" /> {label}
     </button>
   )
 }
@@ -85,7 +88,9 @@ export function Empty({ text }: { text: string }) {
 
 export function Card({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className="mb-2 rounded-xl bg-white p-3 shadow-sm active:bg-slate-50">
+    <div onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick() } } : undefined}
+      className="mb-2 rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50">
       {children}
     </div>
   )

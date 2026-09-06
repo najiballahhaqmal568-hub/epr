@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { pushTab, registerTabBack } from './lib/appHistory'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, accessFlags } from './db'
@@ -21,17 +21,19 @@ import { useIntegrityCheck } from './lib/useIntegrityCheck'
 import { fmtNum, fmtMoney } from './lib/format'
 import { getSupa, getProfile, getServerConfig, isPasswordRecoveryUrl, type Profile } from './lib/supa'
 import { startSync, syncNow } from './lib/sync'
+import { Icon } from './components/Icon'
+import { SyncIndicator } from './components/SyncIndicator'
 
 const tabs = [
-  { id: 'dashboard', label: 'خانه' },
-  { id: 'sales', label: 'فروش' },
-  { id: 'inventory', label: 'گدام' },
-  { id: 'accounts', label: 'حساب‌ها' },
-  { id: 'more', label: 'بیشتر' }
+  { id: 'sales', label: 'فروش', icon: 'sale' },
+  { id: 'inventory', label: 'گدام و خرید', icon: 'stock' },
+  { id: 'accounts', label: 'حساب‌ها', icon: 'accounts' },
+  { id: 'expenses', label: 'پول و مصارف', icon: 'wallet' },
+  { id: 'more', label: 'مدیریت', icon: 'settings' }
 ] as const
 
 type NavTabId = (typeof tabs)[number]['id']
-type TabId = NavTabId | 'purchases' | 'expenses' | 'customers' | 'settings' | 'reports'
+type TabId = NavTabId | 'dashboard' | 'purchases' | 'customers' | 'settings' | 'reports'
 
 export default function App() {
   // VITE_UI_PREVIEW فقط برای build آزمایشی روی همین کمپیوتر است؛ حتی اگر اشتباهی
@@ -39,7 +41,10 @@ export default function App() {
   const previewRequested = new URLSearchParams(window.location.search).has('ui-preview')
   const localPreviewHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   const uiPreview = previewRequested && (import.meta.env.DEV || (localPreviewHost && import.meta.env.VITE_UI_PREVIEW === '1'))
-  const [tab, setTab] = useState<TabId>('dashboard')
+  const [tab, setTab] = useState<TabId>('sales')
+  const [salePending, setSalePending] = useState(false)
+  const salePendingRef = useRef(false)
+  salePendingRef.current = salePending
   const [openNewSale, setOpenNewSale] = useState(false)
   const [openNewPurchase, setOpenNewPurchase] = useState(false)
   const [openNewExpense, setOpenNewExpense] = useState(false)
@@ -62,6 +67,7 @@ export default function App() {
     pushTab(tab)
   }, [tab])
   useEffect(() => registerTabBack((t) => {
+    if (salePendingRef.current) { pushTab('sales'); return }
     if (typeof t === 'string') setTab(t as TabId)
   }), [])
   const debtReminder = useDebtReminder()
@@ -103,10 +109,9 @@ export default function App() {
 
   const activeNav: NavTabId =
     tab === 'customers' ||
-    (tab === 'purchases' && purchaseBack === 'accounts') ||
-    (tab === 'expenses' && expensesBack === 'accounts')
+    (tab === 'purchases' && purchaseBack === 'accounts')
       ? 'accounts'
-      : tab === 'expenses' || tab === 'settings' || tab === 'reports'
+      : tab === 'dashboard' || tab === 'settings' || tab === 'reports'
         ? 'more'
         : tab === 'purchases'
           ? 'inventory'
@@ -246,7 +251,7 @@ export default function App() {
             : undefined
         }
         onDone={async () => {
-          setTab('dashboard')
+          setTab('sales')
           const profile = await getProfile().catch(() => null)
           if (profile) await db.settings.put({ key: 'cachedProfile', value: profile })
           setAuth(profile ?? 'anon')
@@ -282,7 +287,12 @@ export default function App() {
   }
 
   return (
-    <div className="mx-auto min-h-dvh max-w-lg pb-20">
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-brand">اتل<small>فروشگاه کفش</small></div>
+        <SyncIndicator onDetails={() => { if (salePending) return; setSettingsSection('account'); setTab('settings') }} />
+      </header>
+      <main className="app-content" id="main-content">
       {relogin && (
         <div className="flex items-center gap-2 bg-amber-500 p-2.5 text-white">
           <span className="flex-1 text-sm font-bold">
@@ -299,16 +309,17 @@ export default function App() {
           </button>
         </div>
       )}
-      {(integrity.show || (tab !== 'dashboard' && (reminder.show || debtReminder.show))) && (
-        <div className="pointer-events-none fixed right-0 left-0 bottom-36 z-50 mx-auto flex max-w-lg flex-col gap-2 px-3">
+      {(tab === 'more' || tab === 'dashboard') && (integrity.show || reminder.show || debtReminder.show) && (
+        <div className="flex flex-col gap-2 px-4 pt-4">
           {integrity.show && (
-            <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-purple-700 p-3 text-white shadow-lg">
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
               <span className="flex-1 text-sm font-bold">
-                ⚠️ کنترل حساب‌ها: {fmtNum(integrity.count)} عدد با اسناد نمی‌خواند
+                کنترل حساب‌ها: {fmtNum(integrity.count)} عدد با اسناد نمی‌خواند
               </span>
               <button
                 className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
                 onClick={() => {
+                  setSettingsSection('integrity')
                   setTab('settings')
                   integrity.dismiss()
                 }}
@@ -321,9 +332,9 @@ export default function App() {
             </div>
           )}
           {tab !== 'dashboard' && debtReminder.show && (
-            <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-red-600 p-3 text-white shadow-lg">
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
               <span className="flex-1 text-sm font-bold">
-                ⏰ {fmtNum(debtReminder.count)} مشتری قرضدار — {fmtMoney(debtReminder.total)}. امروز تقاضا کنید!
+                {fmtNum(debtReminder.count)} مشتری قرضدار — {fmtMoney(debtReminder.total)}
               </span>
               <button
                 className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
@@ -340,8 +351,8 @@ export default function App() {
             </div>
           )}
           {tab !== 'dashboard' && reminder.show && (
-            <div className="pointer-events-auto flex items-center gap-2 rounded-xl bg-amber-500 p-3 text-white shadow-lg">
-              <span className="flex-1 text-sm font-bold">💵 {fmtNum(reminder.count)} مصرف روزانه ثبت نشده است!</span>
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
+              <span className="flex-1 text-sm font-bold">{fmtNum(reminder.count)} مصرف روزانه ثبت نشده است</span>
               <button
                 className="rounded-lg bg-white/20 px-3 py-1 text-sm font-bold"
                 onClick={() => {
@@ -370,7 +381,7 @@ export default function App() {
           debtTotal={debtReminder.show ? debtReminder.total : 0}
         />
       )}
-      {tab === 'sales' && <Sales isStaff={isStaff} openNew={openNewSale} />}
+      {tab === 'sales' && <Sales isStaff={isStaff} openNew={openNewSale} pending={salePending} onPendingChange={setSalePending} />}
       {tab === 'inventory' && (
         <Inventory
           onOpenPurchases={() => openPurchases('history', 'inventory')}
@@ -392,7 +403,9 @@ export default function App() {
       {tab === 'more' && (
         <More
           isStaff={isStaff}
+          pendingExpenseCount={reminder.show ? reminder.count : 0}
           goTo={(target) => {
+            if (target === 'dashboard') { setTab('dashboard'); return }
             if (target === 'expenses') {
               setExpensesBack('more')
               setOpenNewExpense(false)
@@ -422,24 +435,24 @@ export default function App() {
       )}
       {tab === 'expenses' && <Expenses openNew={openNewExpense} onBack={() => setTab(expensesBack)} />}
       {tab === 'customers' && <Customers onBack={() => setTab('accounts')} />}
-      {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => setAuth('anon')} />}
+      {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => { try { sessionStorage.removeItem('epr_sale_working_v1') } catch { /* storage unavailable */ } setAuth('anon') }} />}
       {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('more')} />}
-
-      <nav className="fixed bottom-0 right-0 left-0 z-40 mx-auto flex max-w-lg border-t border-slate-200 bg-white">
+      </main>
+      <nav className="app-nav" aria-label="بخش‌های اصلی">
+        <div className="app-nav-brand app-brand">اتل<small>فروشگاه کفش</small></div>
         {tabs.map((t) => (
           <button
             key={t.id}
+            disabled={salePending}
             aria-current={activeNav === t.id ? 'page' : undefined}
             onClick={() => {
               if (t.id === 'sales') setOpenNewSale(false)
+              if (t.id === 'expenses') { setOpenNewExpense(false); setExpensesBack('more') }
               setTab(t.id)
             }}
             onPointerUp={(event) => event.currentTarget.blur()}
-            className={`m-1 flex min-h-12 flex-1 items-center justify-center rounded-2xl px-1 py-2 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-700 focus-visible:ring-offset-2 ${
-              activeNav === t.id ? 'bg-teal-50 font-bold text-teal-800' : 'text-slate-500'
-            }`}
           >
-            {t.label}
+            <Icon name={t.icon} /><span>{t.label}</span>
           </button>
         ))}
       </nav>

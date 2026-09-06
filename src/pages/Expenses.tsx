@@ -14,15 +14,13 @@ export default function Expenses({ onBack, openNew = false }: { onBack?: () => v
           </button>
         )}
         <div>
-          <h1 className="text-xl font-bold text-slate-800">{view === 'expenses' ? 'مصارف' : view === 'cash' ? 'صندوق' : 'راپور مصارف'}</h1>
+          <h1 className="text-2xl font-bold text-slate-800">پول و مصارف</h1>
           <p className="text-xs text-slate-500">ثبت و بررسی پول‌های بیرون‌شده از دکان</p>
         </div>
       </div>
-      {view !== 'expenses' && (
-        <button onClick={() => setView('expenses')} className="mb-3 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-600">
-          برگشت به مصارف
-        </button>
-      )}
+      <div className="segmented mb-4" aria-label="بخش‌های پول و مصارف">
+        {([{ id: 'expenses', label: 'مصارف' }, { id: 'cash', label: 'صندوق' }, { id: 'stats', label: 'راپور مصارف' }] as const).map(item => <button key={item.id} aria-pressed={view === item.id} onClick={() => setView(item.id)}>{item.label}</button>)}
+      </div>
       {view === 'expenses' ? (
         <ExpenseList openNew={openNew} onOpenCash={() => setView('cash')} onOpenStats={() => setView('stats')} />
       ) : view === 'cash' ? (

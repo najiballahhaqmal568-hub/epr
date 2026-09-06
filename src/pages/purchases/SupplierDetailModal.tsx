@@ -4,12 +4,13 @@ import { accessFlags, db, type Payment, type ReturnDoc, type Supplier } from '..
 import { addOpeningDebt, deletePayment, deletePaymentImpact, cancelSupplierReturn } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
-import { CorrectSupplierPaymentModal } from './SupplierModals'
+import { CorrectSupplierPaymentModal, PaySupplierModal } from './SupplierModals'
 import CorrectOpeningDebtModal from './CorrectOpeningDebtModal'
 
 /** تاریخچهٔ کامل حساب یک تأمین‌کننده یا صراف */
 export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
   const [showDebt, setShowDebt] = useState(false)
+  const [showPay, setShowPay] = useState(false)
   const [debtStr, setDebtStr] = useState('')
   const [debtNote, setDebtNote] = useState('')
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
@@ -40,6 +41,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     [supplier.id]
   )
 
+  if (showPay) return <PaySupplierModal supplierId={supplier.id!} onClose={() => setShowPay(false)} />
   if (editingPayment) {
     return <CorrectSupplierPaymentModal payment={editingPayment} onClose={() => setEditingPayment(null)} />
   }
@@ -118,7 +120,8 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
 
   const bal = live?.balance ?? supplier.balance
   return (
-    <Modal title={supplier.kind === 'sarraf' ? `💱 ${supplier.name}` : supplier.name} onClose={onClose}>
+    <Modal title={supplier.name} onClose={onClose}>
+      {!accessFlags.readOnly && <button className="mb-4 w-full rounded-xl bg-teal-700 p-3 font-bold text-white" onClick={() => setShowPay(true)}>ثبت پرداخت</button>}
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
         <p className="text-sm text-slate-500">{bal > 0 ? 'قرض ما' : bal < 0 ? 'طلب ما (پیشکی)' : 'حساب تصفیه است'}</p>
         <p className={`text-2xl font-bold ${bal > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(bal))}</p>

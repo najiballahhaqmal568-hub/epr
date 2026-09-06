@@ -47,7 +47,7 @@ export default function ExpenseCreditors() {
     </>
   )
 }
-function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onClose: () => void }) {
+export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onClose: () => void }) {
   const [mode, setMode] = useState<'none' | 'cash' | 'goods'>('none')
   const [amount, setAmount] = useState('')
   const [variantId, setVariantId] = useState<number | ''>('')

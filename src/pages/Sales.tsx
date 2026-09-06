@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Sale } from '../db'
+import { accessFlags, db, type Sale } from '../db'
 import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
-import { deleteSaleDraft, readSaleDrafts, saleDraftTotal, type SaleDraft } from '../lib/saleDrafts'
-import { Fab, Empty, Card } from '../components/ui'
+import { clearWorkingSale, readWorkingSale, deleteSaleDraft, readSaleDrafts, saleDraftTotal, type SaleDraft } from '../lib/saleDrafts'
+import { Empty, Card, Modal } from '../components/ui'
+import { Icon } from '../components/Icon'
 import SalesStats from './sales/SalesStats'
 import ReturnModal from './sales/ReturnModal'
 import ExchangeModal from './sales/ExchangeModal'
@@ -12,9 +13,12 @@ import NewSaleModal from './sales/NewSaleModal'
 import ReceiptModal from './sales/Receipt'
 import InvoiceModal from './sales/InvoiceModal'
 
-export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean; openNew?: boolean }) {
-  const [view, setView] = useState<'list' | 'stats'>('list')
-  const [showNew, setShowNew] = useState(openNew)
+export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
+  const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
+  const [workspaceKey, setWorkspaceKey] = useState(openNew ? 1 : 0)
+  const [detail, setDetail] = useState<Sale | null>(null)
+  const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [returning, setReturning] = useState<Sale | null>(null)
   const [exchanging, setExchanging] = useState<Sale | null>(null)
   const [receiptFor, setReceiptFor] = useState<Sale | null>(null)
@@ -31,13 +35,24 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
     `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
 
   function removeDraft(id: string) {
-    deleteSaleDraft(id)
+    try {
+      deleteSaleDraft(id)
+      if (readWorkingSale()?.id === id) clearWorkingSale()
+      setDrafts(readSaleDrafts())
+      if (activeDraft?.id === id) setActiveDraft(null)
+    } catch { setError('پیش‌نویس پاک نشد؛ دوباره کوشش کنید.') }
+  }
+
+  function resetWorkspace() {
+    setActiveDraft(null)
+    setWorkspaceKey((key) => key + 1)
     setDrafts(readSaleDrafts())
-    if (activeDraft?.id === id) setActiveDraft(null)
   }
 
   async function confirmDelete(sale: Sale, isUndo = false) {
-    if (!sale.id) return
+    if (!sale.id || deleting) return
+    setDeleting(true)
+    try {
     const im = await deleteSaleImpact(sale.id)
     let msg = isUndo
       ? 'آخرین فروش برگردانده شود؟ اجناس دوباره به گدام می‌رود و اثر پول و قرض آن هم برعکس می‌شود.'
@@ -53,28 +68,33 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
     }
     if (!confirm(msg)) return
     await deleteSale(sale.id)
+    setDetail(null)
     if (isUndo) setJustSaved(null)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setDeleting(false) }
   }
 
   return (
-    <div className="p-4">
-      <h1 className="mb-3 text-xl font-bold text-slate-800">فروش</h1>
-      <div className="mb-3 flex gap-2">
+    <div className="sales-page p-4">
+      <header className="page-heading"><h1>میز فروش</h1><span className="text-sm text-slate-500">پرچون و عمده</span></header>
+      <fieldset disabled={pending} className="sale-tabs mb-5 flex min-w-0 gap-2" aria-label="بخش‌های فروش">
+        {!accessFlags.readOnly && <button onClick={() => setView('new')} className={tabCls('new')}>فروش جدید</button>}
         <button onClick={() => setView('list')} className={tabCls('list')}>
-          فروش‌ها
+          تاریخچه
         </button>
+        {!accessFlags.readOnly && <button onClick={() => setView('held')} className={tabCls('held')}>معطل ({fmtNum(drafts.length)})</button>}
         <button onClick={() => setView('stats')} className={tabCls('stats')}>
           آمار
         </button>
-      </div>
+      </fieldset>
+      {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {view === 'stats' && <SalesStats isStaff={isStaff} />}
-      {view === 'list' && (
-        <>
-      {drafts.length > 0 && (
+      {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." />}
+      {view === 'held' && drafts.length > 0 && (
         <section className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <h2 className="font-bold text-amber-900">⏸ فروش‌های معطل ({fmtNum(drafts.length)})</h2>
+              <h2 className="font-bold text-amber-900">فروش‌های معطل ({fmtNum(drafts.length)})</h2>
               <p className="text-xs text-amber-700">فقط در همین دستگاه؛ هنوز از گدام و صندوق کم نشده است.</p>
             </div>
           </div>
@@ -98,8 +118,11 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
                   <button
                     className="flex-1 rounded-lg bg-teal-700 py-2 text-sm font-bold text-white"
                     onClick={() => {
+                      const working = readWorkingSale()
+                      if (working && working.id !== draft.id && !confirm('سبد جاری با این فروش معطل جایگزین شود؟ برای نگه‌داشتن سبد جاری، نخست آن را معطل کنید.')) return
                       setActiveDraft(draft)
-                      setShowNew(true)
+                      setWorkspaceKey((key) => key + 1)
+                      setView('new')
                     }}
                   >
                     ادامه و ثبت
@@ -122,13 +145,14 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
         <div className="mb-3 rounded-xl bg-teal-50 p-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="font-bold text-teal-800">✅ فروش ثبت شد — {fmtMoney(justSaved.total)}</p>
+              <p className="font-bold text-teal-800">فروش ثبت شد — {fmtMoney(justSaved.total)}</p>
+              <p className="mt-1 text-xs text-teal-700">سبد تازه برای مشتری بعدی آماده است.</p>
               <p className="truncate text-xs text-teal-700">
                 {justSaved.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
               </p>
             </div>
-            <button onClick={() => setJustSaved(null)} className="shrink-0 text-teal-700">
-              ✕
+            <button aria-label="بستن تأیید فروش" onClick={() => setJustSaved(null)} className="shrink-0 text-teal-700">
+              <Icon name="close" />
             </button>
           </div>
           <div className="mt-2 flex gap-2">
@@ -137,7 +161,7 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
                 onClick={() => void confirmDelete(justSaved, true)}
                 className="rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-600"
               >
-                ↶ برگشت
+                برگرداندن
               </button>
             )}
             <button
@@ -147,7 +171,7 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
               }}
               className="flex-1 rounded-lg bg-white py-2 text-sm font-bold text-teal-800"
             >
-              🧾 رسید
+              رسید
             </button>
             <button
               onClick={() => setInvoiceFor(justSaved)}
@@ -158,20 +182,23 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
             <button
               onClick={() => {
                 setJustSaved(null)
-                setShowNew(true)
+                setView('new')
               }}
               className="flex-1 rounded-lg bg-teal-700 py-2 text-sm font-bold text-white"
             >
-              ＋ فروش بعدی
+              فروش بعدی
             </button>
           </div>
         </div>
       )}
+      {view === 'list' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><div className="mb-4"><h2 className="font-bold">تاریخچه فروش</h2><p className="mt-1 text-xs text-slate-500">آخرین ۱۰۰ فروش · برای جزئیات، یک فروش را باز کنید.</p></div>
+      {sales === undefined && <p role="status">در حال بارگذاری…</p>}
       {sales?.length === 0 && <Empty text="هنوز فروشی ثبت نشده." />}
       {sales?.map((s) => {
         const remainder = s.total - s.paid
         return (
           <Card key={s.id}>
+            <button onClick={() => setDetail(s)} className="sale-history-row w-full text-right" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-bold text-slate-800">
@@ -191,57 +218,34 @@ export default function Sales({ isStaff, openNew = false }: { isStaff?: boolean;
             <p className="mt-1 text-sm text-slate-600">
               {s.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
             </p>
-            <div className="mt-1 flex gap-4">
-              <button className="text-xs font-bold text-teal-700" onClick={() => setReturning(s)}>
-                مرجوعی
-              </button>
-              <button className="text-xs font-bold text-amber-700" onClick={() => setExchanging(s)}>
-                تبادله
-              </button>
-              <button className="text-xs font-bold text-slate-600" onClick={() => setReceiptFor(s)}>
-                🧾 رسید
-              </button>
-              <button className="text-xs font-bold text-slate-800" onClick={() => setInvoiceFor(s)}>
-                فاکتور
-              </button>
-              <button
-                className="text-xs text-red-500"
-                onClick={() => void confirmDelete(s)}
-              >
-                حذف فروش
-              </button>
-            </div>
+            <span className="mt-2 block text-xs font-bold text-teal-700">نمایش جزئیات و رسید</span>
+            </button>
           </Card>
         )
       })}
-      <Fab
-        onClick={() => {
-          setActiveDraft(null)
-          setShowNew(true)
-        }}
-        label="فروش جدید"
-      />
-        </>
-      )}
-      {showNew && (
+      </section>}
+      {!accessFlags.readOnly && <div hidden={view !== 'new'}>
         <NewSaleModal
-          key={activeDraft?.id ?? 'new-sale'}
+          key={`${workspaceKey}-${activeDraft?.id ?? 'new-sale'}`}
+          embedded
+          onPendingChange={onPendingChange}
           draft={activeDraft ?? undefined}
-          onClose={() => {
-            setShowNew(false)
-            setActiveDraft(null)
-          }}
-          onHeld={() => setDrafts(readSaleDrafts())}
+          onClose={resetWorkspace}
+          onHeld={() => { setDrafts(readSaleDrafts()); setView('held') }}
           onSaved={(sale) => {
-            if (activeDraft) removeDraft(activeDraft.id)
-            setShowNew(false)
-            setActiveDraft(null)
+            resetWorkspace()
             // رسید خودبه‌خود باز نمی‌شود — در وقت شلوغی یک قدم اضافی بود.
             // فقط یک تأیید کوتاه، و اگر رسید خواستند از همان‌جا باز می‌شود.
             setJustSaved(sale)
           }}
         />
-      )}
+      </div>}
+      {detail && <Modal title={`جزئیات فروش ${fmtNum(detail.id ?? 0)}`} onClose={() => setDetail(null)}>
+        <p className="font-bold">{detail.customerName || 'مشتری نقدی'}</p><p className="mb-4 text-xs text-slate-500">{fmtDate(detail.date)} · {detail.saleType === 'retail' ? 'پرچون' : 'عمده'}</p>
+        <div className="divide-y divide-slate-100">{detail.lines.map((line, index) => <div key={index} className="flex justify-between gap-3 py-3 text-sm"><span>{line.productName} {line.size} {line.color}<span className="block text-xs text-slate-500">{fmtNum(line.qty)} × {fmtMoney(line.unitPrice)}</span></span><strong>{fmtMoney(line.qty * line.unitPrice)}</strong></div>)}</div>
+        <div className="my-4 rounded-xl bg-teal-50 p-3"><p className="flex justify-between font-bold"><span>مجموع</span><span>{fmtMoney(detail.total)}</span></p>{(detail.discount ?? 0) > 0 && <p className="mt-2 text-sm">تخفیف: {fmtMoney(detail.discount!)}</p>}<p className="mt-2 text-sm">دریافتی: {fmtMoney(detail.paid)}</p>{detail.total > detail.paid && <p className="mt-2 text-sm text-red-600">قرض: {fmtMoney(detail.total - detail.paid)}</p>}{detail.bookPage && <p className="mt-2 text-sm">صفحهٔ دفتر: {detail.bookPage}</p>}</div>
+        <div className="grid grid-cols-2 gap-2"><button className="rounded-xl bg-teal-700 py-3 font-bold text-white" onClick={() => { setReceiptFor(detail); setDetail(null) }}>رسید</button><button className="rounded-xl bg-slate-100 py-3 font-bold" onClick={() => { setInvoiceFor(detail); setDetail(null) }}>فاکتور</button>{!accessFlags.readOnly && <><button className="rounded-xl bg-slate-100 py-3 font-bold" onClick={() => { setReturning(detail); setDetail(null) }}>مرجوعی</button><button className="rounded-xl bg-amber-50 py-3 font-bold text-amber-800" onClick={() => { setExchanging(detail); setDetail(null) }}>تبادله</button><button disabled={deleting} className="col-span-2 rounded-xl bg-red-50 py-3 text-red-600" onClick={() => void confirmDelete(detail)}>{deleting ? 'در حال بررسی…' : 'حذف فروش'}</button></>}</div>
+      </Modal>}
       {receiptFor && (
         <ReceiptModal sale={receiptFor} onClose={() => setReceiptFor(null)} />
       )}

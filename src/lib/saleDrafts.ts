@@ -3,6 +3,35 @@ import { parseNum } from './format'
 
 const STORAGE_KEY = 'epr_sale_drafts_v1'
 const MAX_DRAFTS = 20
+// Current checkout is scoped to this browser tab; logout also clears this key.
+// Held drafts retain their existing, explicit device-local persistence.
+export const WORKING_SALE_KEY = 'epr_sale_working_v1'
+let recoverySuppressed = false
+
+export function readWorkingSale(): SaleDraft | null {
+  if (recoverySuppressed) return null
+  try {
+    return normalizeDraft(JSON.parse(sessionStorage.getItem(WORKING_SALE_KEY) ?? 'null'))
+  } catch {
+    return null
+  }
+}
+
+export function clearWorkingSale(): void {
+  // Never re-open a committed cart during this session if browser storage
+  // becomes unavailable between writing and deleting the recovery record.
+  recoverySuppressed = true
+  sessionStorage.removeItem(WORKING_SALE_KEY)
+}
+
+export function writeWorkingSale(input: SaleDraftInput, previous?: Pick<SaleDraft, 'id' | 'createdAt'>): void {
+  if (!input.lines.length) return clearWorkingSale()
+  const now = Date.now()
+  sessionStorage.setItem(WORKING_SALE_KEY, JSON.stringify({
+    ...input, id: previous?.id ?? 'working', createdAt: previous?.createdAt ?? now, updatedAt: now
+  }))
+  recoverySuppressed = false
+}
 
 export interface SaleDraft {
   id: string

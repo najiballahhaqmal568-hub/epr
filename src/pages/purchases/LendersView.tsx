@@ -112,7 +112,7 @@ function NewLenderModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () => void }) {
+export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClose: () => void }) {
   const [mode, setMode] = useState<'none' | 'loan' | 'repay' | 'goods' | 'opening' | 'direct' | 'partner' | 'edit'>('none')
   const [amount, setAmount] = useState('')
   const [dateStr, setDateStr] = useState(toDateInput(Date.now()))

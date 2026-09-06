@@ -111,13 +111,13 @@ export function ExpenseList({
           onClick={() => setView('calendar')}
           className={`flex-1 rounded-xl py-2 text-sm font-bold ${viewMode === 'calendar' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
         >
-          📅 تقویم
+          تقویم
         </button>
         <button
           onClick={() => setView('list')}
           className={`flex-1 rounded-xl py-2 text-sm font-bold ${viewMode === 'list' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
         >
-          📋 فهرست
+          فهرست
         </button>
       </div>
       {viewMode === 'calendar' ? (
