@@ -1,10 +1,11 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
+import ProductPhotoPicker from './ProductPhotoPicker'
 import { useState } from 'react'
 import { db, type Product, type Variant } from '../../db'
 import { addVariant, setOpeningStock, setPurchaseCost } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
-import { emptyVariant, downscalePhoto, type VariantForm, type ProductDraft } from './helpers'
+import { emptyVariant, type VariantForm, type ProductDraft } from './helpers'
 import { DEFAULT_PAIRS_PER_CARTON, DEFAULT_REORDER_CARTONS, pairsPerCartonOf, reorderCartonsOf } from '../../lib/reorder'
 
 export function ProductModal({
@@ -178,31 +179,7 @@ export function ProductModal({
 
   return (
     <Modal title={product ? 'ویرایش بوت' : 'بوت جدید'} onClose={onClose}>
-      <div className="mb-3 flex items-center gap-3">
-        {photo ? (
-          <img src={photo} alt="" className="h-16 w-16 rounded-xl object-cover" />
-        ) : (
-          <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-slate-100 text-2xl">👞</div>
-        )}
-        <label className="cursor-pointer rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
-          {photo ? 'تغییر عکس' : '📷 عکس بوت'}
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={async (e) => {
-              const f = e.target.files?.[0]
-              if (f) setPhoto(await downscalePhoto(f))
-              e.target.value = ''
-            }}
-          />
-        </label>
-        {photo && (
-          <button className="text-sm text-red-500" onClick={() => setPhoto(undefined)}>
-            حذف عکس
-          </button>
-        )}
-      </div>
+      <ProductPhotoPicker photo={photo} onChange={setPhoto} />
 
       <Field label="نام بوت *">
         <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً بوت چرمی مردانه" />

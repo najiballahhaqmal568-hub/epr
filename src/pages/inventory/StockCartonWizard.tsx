@@ -1,10 +1,11 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
+import ProductPhotoPicker from './ProductPhotoPicker'
 import { useState } from 'react'
 import { db } from '../../db'
 import { addVariant } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls } from '../../components/ui'
-import { downscalePhoto, type ProductDraft } from './helpers'
+import { type ProductDraft } from './helpers'
 
 /**
  * ثبت جنس کارتنی در گدام — همان ترتیب ویزارد خرید:
@@ -104,26 +105,7 @@ export function StockCartonWizard({
       {step === 1 && (
         <>
           <p className="mb-2 text-sm font-bold text-slate-700">۱) مشخصات جنس</p>
-          <div className="mb-3 flex items-center gap-3">
-            {photo ? (
-              <img src={photo} alt="" className="h-14 w-14 rounded-xl object-cover" />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-slate-100 text-2xl">👞</div>
-            )}
-            <label className="cursor-pointer rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
-              {photo ? 'تغییر عکس' : '📷 عکس'}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const f = e.target.files?.[0]
-                  if (f) setPhoto(await downscalePhoto(f))
-                  e.target.value = ''
-                }}
-              />
-            </label>
-          </div>
+      <ProductPhotoPicker photo={photo} onChange={setPhoto} />
           <Field label="نام جنس *">
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً اسکچرز" />
           </Field>

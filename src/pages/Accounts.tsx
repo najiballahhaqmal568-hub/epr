@@ -28,7 +28,11 @@ export default function Accounts({ openCustomers, openPurchases, openExpenses }:
   return <div className="p-4">
     <div className="page-heading"><div><h1>حساب‌ها</h1><p>شخص را جستجو کنید و دفتر حساب او را باز کنید.</p></div></div>
     <input className={inputCls} aria-label="جستجوی حساب" placeholder="نام یا شمارهٔ تماس…" value={search} onChange={e => setSearch(e.target.value)} />
+    <details className="surface my-4 p-4"><summary className="font-bold">افزودن و مدیریت حساب‌ها</summary><div className="mt-3 grid grid-cols-2 gap-2">
+      <button className="surface p-3" onClick={openCustomers}>مشتریان</button><button className="surface p-3" onClick={() => openPurchases('suppliers')}>تأمین‌کنندگان</button><button className="surface p-3" onClick={() => openPurchases('sarrafs')}>صراف‌ها</button><button className="surface p-3" onClick={() => openPurchases('lenders')}>قرض‌دهندگان</button><button className="surface p-3" onClick={openExpenses}>طلبکاران مصارف</button>
+    </div></details>
     <dl className="summary-strip">
+
       <div><dt>طلب ما — تمام حساب‌ها</dt><dd className="text-teal-700">{fmtMoney(accounts?.reduce((n, a) => n + a.receivable, 0) ?? 0)}</dd></div>
       <div><dt>قرض ما — تمام حساب‌ها</dt><dd>{fmtMoney(accounts?.reduce((n, a) => n + a.payable, 0) ?? 0)}</dd></div>
     </dl>
@@ -40,9 +44,6 @@ export default function Accounts({ openCustomers, openPurchases, openExpenses }:
         <span className="shrink-0 text-sm"><strong>{fmtMoney(a.receivable || a.payable)}</strong><small>{a.receivable > 0 ? 'طلب ما' : a.payable > 0 ? 'قرض ما' : 'تصفیه'}</small></span>
       </button>)}
     </section>
-    <details className="surface mt-5 p-4"><summary className="font-bold">افزودن و مدیریت حساب‌ها</summary><div className="mt-3 grid grid-cols-2 gap-2">
-      <button className="surface p-3" onClick={openCustomers}>مشتریان</button><button className="surface p-3" onClick={() => openPurchases('suppliers')}>تأمین‌کنندگان</button><button className="surface p-3" onClick={() => openPurchases('sarrafs')}>صراف‌ها</button><button className="surface p-3" onClick={() => openPurchases('lenders')}>قرض‌دهندگان</button><button className="surface p-3" onClick={openExpenses}>طلبکاران مصارف</button>
-    </div></details>
     {account?.kind === 'customer' && <CustomerDetail customer={account.person as Customer} onClose={close} />}
     {account?.kind === 'lender' && <LenderDetailModal lender={account.person as Supplier} onClose={close} />}
     {account?.kind === 'expenseCreditor' && <CreditorDetail creditor={account.person as Supplier} onClose={close} />}
