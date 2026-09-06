@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { accessFlags, db, type Sale } from '../db'
+import { accessFlags, type Sale } from '../db'
 import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { clearWorkingSale, readWorkingSale, deleteSaleDraft, readSaleDrafts, saleDraftTotal, type SaleDraft } from '../lib/saleDrafts'
@@ -12,6 +11,7 @@ import ExchangeModal from './sales/ExchangeModal'
 import NewSaleModal from './sales/NewSaleModal'
 import ReceiptModal from './sales/Receipt'
 import InvoiceModal from './sales/InvoiceModal'
+import SaleHistory from './sales/SaleHistory'
 
 export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
   const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
@@ -29,7 +29,6 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
   const [activeDraft, setActiveDraft] = useState<SaleDraft | null>(null)
   // کفشِ قرض‌دهنده از دفتر همان شخص حذف/اصلاح می‌شود؛ در آمار مفاد می‌ماند
   // اما در این لیست عملیاتی نمی‌آید تا مرجوعی/تبادله حساب پیوندشده را نیمه‌کاره نکند.
-  const sales = useLiveQuery(() => db.sales.orderBy('date').reverse().filter((s) => !s.deleted && !s.lenderAction).limit(100).toArray(), [])
 
   const tabCls = (v: string) =>
     `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
@@ -191,10 +190,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
           </div>
         </div>
       )}
-      {view === 'list' && <section className="rounded-2xl border border-slate-200 bg-white p-4"><div className="mb-4"><h2 className="font-bold">تاریخچه فروش</h2><p className="mt-1 text-xs text-slate-500">آخرین ۱۰۰ فروش · برای جزئیات، یک فروش را باز کنید.</p></div>
-      {sales === undefined && <p role="status">در حال بارگذاری…</p>}
-      {sales?.length === 0 && <Empty text="هنوز فروشی ثبت نشده." />}
-      {sales?.map((s) => {
+      {view === 'list' && <SaleHistory>{(s) => {
         const remainder = s.total - s.paid
         return (
           <Card key={s.id}>
@@ -222,8 +218,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
             </button>
           </Card>
         )
-      })}
-      </section>}
+      }}</SaleHistory>}
       {!accessFlags.readOnly && <div hidden={view !== 'new'}>
         <NewSaleModal
           key={`${workspaceKey}-${activeDraft?.id ?? 'new-sale'}`}
