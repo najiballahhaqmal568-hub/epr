@@ -352,6 +352,13 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
           if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
           await db.table(table).update(existing.id, merged)
           if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+        } else if (table === 'expenses' && (existing.shippingPaymentUuid || rec.shippingPaymentUuid)) {
+          // Concurrent freight corrections share deterministic child UUIDs. The
+          // winning shop share must replace the old value, including a zero share.
+          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
+          if (!existing.deleted) await applyDocEffects(table, existing as Record<string, unknown>, true)
+          await db.table(table).update(existing.id, merged)
+          if (!row.deleted) await applyDocEffects(table, merged as Record<string, unknown>, false)
         } else if (table === 'cashMovements') {
           // حرکت‌های صندوقِ اصلاح نیز uuid ثابت دارند؛ آخرین نسخه جای قبلی می‌نشیند.
           await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid })

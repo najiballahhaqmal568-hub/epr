@@ -216,6 +216,10 @@ export function landingUnpaidOf(p: Purchase): number {
 }
 
 export interface Payment extends Synced {
+  /** Freight receipt: amount = −unpaid customer share; stable sale link, no local IDs. */
+  shipping?: { saleUuid: string; total: number; customerShare: number; received: number }
+  cancelledReason?: string
+  cancelledAt?: number
   id?: number
   date: number
   partyType: 'customer' | 'supplier'
@@ -262,6 +266,7 @@ export interface Payment extends Synced {
     amount: number
     via?: Payment['via']
     cashDelta: number
+    shipping?: Payment['shipping']
     sarrafName?: string
     sarrafAmount?: number
     lenderName?: string
@@ -286,6 +291,8 @@ export interface ExpenseCategory extends Synced {
 export type ExpenseType = 'business' | 'home' | 'personal' | 'withdrawal'
 
 export interface Expense extends Synced {
+  /** Managed together with the freight payment, never as an independent expense. */
+  shippingPaymentUuid?: string
   id?: number
   date: number
   categoryId?: number
@@ -348,6 +355,9 @@ export type CashMovementType =
   | 'transfer'
 
 export interface CashMovement extends Synced {
+  /** Stable freight link; refId alone is device-local and not sufficient. */
+  shippingPaymentUuid?: string
+  shippingRole?: 'paid' | 'received' | 'reversal'
   id?: number
   date: number
   type: CashMovementType

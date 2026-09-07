@@ -1,5 +1,6 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
+import { calculateShipping, type ShippingAmounts } from './shipping'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
@@ -197,6 +198,9 @@ export async function deleteSale(saleId: number): Promise<void> {
   return db.transaction('rw', [db.sales, db.payments, db.variants, db.customers, db.suppliers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const sale = await db.sales.get(saleId)
     if (!sale || sale.deleted) return
+    if (sale.uuid && await db.payments.filter((p) => !p.deleted && p.shipping?.saleUuid === sale.uuid).first()) {
+      throw new Error('این فروش کرایهٔ بار دارد؛ ابتدا سند کرایه را بررسی کنید. مرجوعی جنس کرایه را خودکار پس نمی‌دهد.')
+    }
     for (const line of sale.lines) {
       const v = await db.variants.get(line.variantId)
       if (v) await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty })
@@ -1293,6 +1297,158 @@ export async function correctOpeningDebt(paymentId: number, input: OpeningDebtCo
   })
 }
 
+/** Freight amounts are separate from the sale's shoe payment. */
+export interface SaleShippingInput extends ShippingAmounts {
+  date: number
+  box?: string
+  note?: string
+}
+
+async function shippingSale(saleId: number): Promise<Sale> {
+  const sale = await db.sales.get(saleId)
+  if (!sale || sale.deleted || !sale.uuid || sale.saleType !== 'wholesale' || sale.groupUuid || sale.lenderAction || sale.expenseCreditorId) {
+    throw new Error('فروش عمدهٔ مربوط به کرایه یافت نشد')
+  }
+  const customer = sale.customerId ? await db.customers.get(sale.customerId) : undefined
+  if (!customer || customer.deleted) throw new Error('برای ثبت کرایه، فروش باید مشتری مشخص داشته باشد')
+  return sale
+}
+
+/** All child rows use UUID links, not the originating device's numeric IDs. */
+async function insertSaleShipping(sale: Sale, input: SaleShippingInput, uuid = newUuid()): Promise<number> {
+  const amounts = calculateShipping(input)
+  if (!Number.isFinite(input.date) || input.date <= 0 || !Number.isFinite(new Date(input.date).getTime())) throw new Error('تاریخ درست را وارد کنید')
+  const box = boxOf(input)
+  const customer = (await db.customers.get(sale.customerId!))!
+  const note = input.note?.trim() || undefined
+  const id = (await db.payments.add({
+    uuid, date: input.date, partyType: 'customer', partyId: customer.id!, partyName: customer.name,
+    amount: -amounts.customerDebt, via: 'cash', cashDelta: amounts.cashDelta, box,
+    note, bookPage: sale.bookPage,
+    shipping: { saleUuid: sale.uuid!, total: amounts.total, customerShare: amounts.customerShare, received: amounts.received }
+  })) as number
+  const payment = (await db.payments.get(id))!
+  for (const effect of effectsOf('payments', payment)) {
+    await db.customers.update(effect.id!, { balance: customer.balance + effect.delta })
+  }
+  // A zero-valued shop-share row is intentional: deterministic correction/replay
+  // must replace the same set of child UUIDs when the allocation changes to zero.
+  await db.expenses.add({
+    uuid: correctionUuid(`shipping-expense:${uuid}`), shippingPaymentUuid: uuid,
+    date: input.date, type: 'business', categoryName: 'کرایهٔ بار مشتری',
+    amount: amounts.shopExpense, cashPaid: amounts.shopExpense, creditAmount: 0, box,
+    note: [customer.name, note].filter(Boolean).join(' — ')
+  })
+  // Immediate reimbursement may fund the freight. Both gross entries stay visible,
+  // including zero receipts, so replay/correction keeps a fixed set of documents.
+  await db.cashMovements.add({
+    uuid: correctionUuid(`shipping-received:${uuid}`), shippingPaymentUuid: uuid, shippingRole: 'received',
+    date: input.date, type: 'customerPayment', refId: id, amount: amounts.received, box,
+    note: `دریافت کرایه — ${customer.name}`
+  })
+  await movement({
+    uuid: correctionUuid(`shipping-paid:${uuid}`), shippingPaymentUuid: uuid, shippingRole: 'paid',
+    date: input.date, type: 'customerPayment', refId: id, amount: -amounts.total, box,
+    note: `پرداخت کرایهٔ بار — ${customer.name}`
+  })
+  return id
+}
+
+/** Freight, customer balance, shop expense and cash commit or roll back together. */
+export async function addSaleShipping(saleId: number, input: SaleShippingInput): Promise<number> {
+  return db.transaction('rw', [db.sales, db.customers, db.payments, db.expenses, db.cashMovements], async () =>
+    insertSaleShipping(await shippingSale(saleId), input))
+}
+
+/** Use this at checkout: no saved sale or stock deduction if freight fails. */
+export async function addSaleWithShipping(sale: Sale, input: SaleShippingInput): Promise<number> {
+  return db.transaction('rw', [db.sales, db.variants, db.customers, db.payments, db.expenses, db.cashMovements], async () => {
+    const saleId = await addSale(sale)
+    await addSaleShipping(saleId, input)
+    return saleId
+  })
+}
+
+/** Refuse mutation while a freight bundle is incomplete or inconsistent after sync. */
+async function reverseSaleShipping(current: Payment, reason: string, replacementUuid?: string): Promise<void> {
+  if (!current.shipping || !current.uuid || current.partyType !== 'customer') throw new Error('سند کرایه یافت نشد')
+  // The replacement can arrive before its original's tombstone during a pull.
+  // Dexie's UUID index is not unique; never insert a second copy in that window.
+  if (await db.payments.where('uuid').equals(correctionUuid(`shipping-correction:${current.uuid}`)).first()) {
+    throw new Error('اصلاح این کرایه قبلاً رسیده است؛ همگام‌سازی را تکمیل و سند تازه را باز کنید')
+  }
+  const amounts = calculateShipping(current.shipping)
+  const expenses = await db.expenses.filter((e) => !e.deleted && e.shippingPaymentUuid === current.uuid).toArray()
+  const cash = await db.cashMovements.filter((m) => !m.deleted && m.shippingPaymentUuid === current.uuid).toArray()
+  const paid = cash.find((m) => m.shippingRole === 'paid')
+  const received = cash.find((m) => m.shippingRole === 'received')
+  if (current.amount !== -amounts.customerDebt || current.cashDelta !== amounts.cashDelta ||
+      expenses.length !== 1 || expenses[0].amount !== amounts.shopExpense ||
+      expenses[0].cashPaid !== amounts.shopExpense || (expenses[0].creditAmount ?? 0) !== 0 ||
+      expenses[0].type !== 'business' || boxOf(expenses[0]) !== boxOf(current) ||
+      cash.length !== 2 || paid?.amount !== -amounts.total || received?.amount !== amounts.received ||
+      boxOf(paid) !== boxOf(current) || boxOf(received) !== boxOf(current)) {
+    throw new Error('سندهای کرایه کامل یا هماهنگ نیستند؛ همگام‌سازی را تکمیل و دوباره بررسی کنید')
+  }
+  const customer = await db.customers.get(current.partyId)
+  if (!customer || customer.deleted) throw new Error('حساب مشتری کرایه یافت نشد')
+  for (const effect of effectsOf('payments', current)) {
+    await db.customers.update(effect.id!, { balance: customer.balance - effect.delta })
+  }
+  const now = Date.now()
+  await db.payments.update(current.id!, {
+    deleted: true, correctedByUuid: replacementUuid,
+    ...(replacementUuid ? { correctedAt: now } : { cancelledAt: now, cancelledReason: reason })
+  })
+  await db.expenses.update(expenses[0].id!, {
+    deleted: true, correctedAt: now, correctionReason: reason,
+    correctedByUuid: replacementUuid ? correctionUuid(`shipping-expense:${replacementUuid}`) : undefined
+  })
+  // One deterministic reversal serves both correction and cancellation. Original
+  // cash entries remain as audit history; repeating cancellation adds nothing.
+  await db.cashMovements.add({
+    uuid: correctionUuid(`shipping-reverse:${current.uuid}`),
+    shippingPaymentUuid: current.uuid, shippingRole: 'reversal',
+    date: now, type: 'customerPayment', refId: current.id,
+    amount: -amounts.cashDelta, box: boxOf(current),
+    note: `${replacementUuid ? 'اصلاح' : 'لغو'} کرایه — ${reason}`
+  })
+}
+
+export async function correctSaleShipping(paymentId: number, input: SaleShippingInput & { reason: string }): Promise<number> {
+  if (!input.reason.trim()) throw new Error('دلیل اصلاح کرایه را بنویسید')
+  return db.transaction('rw', [db.sales, db.customers, db.payments, db.expenses, db.cashMovements], async () => {
+    const current = await db.payments.get(paymentId)
+    if (!current || current.deleted || !current.shipping || !current.uuid) throw new Error('سند فعال کرایه یافت نشد')
+    const saleRow = await db.sales.where('uuid').equals(current.shipping.saleUuid).first()
+    if (!saleRow) throw new Error('فروش مربوط به کرایه یافت نشد')
+    const sale = await shippingSale(saleRow.id!)
+    if (sale.customerId !== current.partyId) throw new Error('مشتری فروش و کرایه یکسان نیست؛ حساب را بررسی کنید')
+    const uuid = correctionUuid(`shipping-correction:${current.uuid}`)
+    await reverseSaleShipping(current, input.reason.trim(), uuid)
+    const id = await insertSaleShipping(sale, input, uuid)
+    await db.payments.update(id, {
+      correctionOfUuid: current.uuid, correctionReason: input.reason.trim(), correctedAt: Date.now(),
+      correctionPrevious: {
+        date: current.date, amount: current.amount, cashDelta: current.cashDelta!,
+        via: current.via, box: current.box, note: current.note, shipping: current.shipping
+      }
+    })
+    return id
+  })
+}
+
+/** Cancel an erroneous entry, not a carrier refund or a customer's shoe return. */
+export async function cancelSaleShipping(paymentId: number, reason: string): Promise<void> {
+  if (!reason.trim()) throw new Error('دلیل لغو کرایه را بنویسید')
+  return db.transaction('rw', [db.customers, db.payments, db.expenses, db.cashMovements], async () => {
+    const current = await db.payments.get(paymentId)
+    if (current?.deleted && current.cancelledAt) return
+    if (!current || current.deleted || !current.shipping) throw new Error('سند فعال کرایه یافت نشد')
+    await reverseSaleShipping(current, reason.trim())
+  })
+}
+
 /** ثبت پرداخت/دریافت: کاهش قرض طرف حساب + حرکت صندوق */
 export async function addPayment(payment: Payment): Promise<number> {
   payment.amount = afn(payment.amount)
@@ -1364,6 +1520,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
   return db.transaction('rw', [db.payments, db.sales, db.variants, db.customers, db.suppliers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const p = await db.payments.get(paymentId)
     if (!p || p.deleted) return
+    if (p.shipping) throw new Error('کرایه را از بخش کرایهٔ بار اصلاح یا لغو کنید تا صندوق و مصرف هم یکجا برگردد')
     for (const e of effectsOf('payments', p)) {
       const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
       if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
@@ -2182,6 +2339,7 @@ export async function deleteExpense(expenseId: number): Promise<void> {
   return db.transaction('rw', db.expenses, db.cashMovements, db.suppliers, async () => {
     const e = await db.expenses.get(expenseId)
     if (!e || e.deleted) return
+    if (e.shippingPaymentUuid) throw new Error('این مصرف سهم دکان از کرایه است؛ سند کرایه را از بخش فروش اصلاح یا لغو کنید')
     const cashPaid = expenseCashPaid(e)
     const creditAmount = expenseCreditAmount(e)
     if (creditAmount > 0 && e.creditorId) {
@@ -2224,6 +2382,7 @@ export interface ExpenseCorrectionPreview {
 
 /** Legacy private expenses derive ownership from cash movements; don't guess it. */
 export function expenseCorrectionBlockedReason(expense: Expense): string | null {
+  if (expense.shippingPaymentUuid) return 'این مصرف به کرایهٔ بار وصل است؛ اصلاح را از سند کرایه در فروش انجام دهید'
   if (expense.deleted || expense.shopClosed || !Number.isFinite(expense.amount) || expense.amount <= 0 || !['business', 'home', 'personal'].includes(expense.type)) {
     return 'این نوع مصرف از اینجا قابل اصلاح نیست'
   }

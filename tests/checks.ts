@@ -83,6 +83,7 @@ import {
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
 import { calculateShipping } from '../src/lib/shipping'
+import * as shippingOps from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
@@ -250,6 +251,183 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'فروش همراه کرایه — شکست کرایه فروش و گدام را هم برگرداند',
+    run: async () => {
+      const cId = await newCustomer()
+      const vId = await makeVariant({ purchasePrice: 200 })
+      await setOpeningStock(vId, 10)
+      await seedCash(100)
+      const freight = { total: 500, customerShare: 300, received: 100, date: Date.now() }
+      await throws('ثبت ناقص فروش و کرایه ممنوع', () => shippingOps.addSaleWithShipping(
+        sell(vId, 2, 300, { saleType: 'wholesale', customerId: cId, paid: 0 }), freight))
+      eq('فروش ناکام ذخیره نشد', await db.sales.count(), 0)
+      eq('کرایه ناکام ذخیره نشد', await db.payments.count(), 0)
+      eq('گدام فروش ناکام برگردانده شد', await stockOf(vId), 10)
+      eq('صندوق فروش ناکام تغییر نکرد', await cashBalance(), 100)
+      const saleId = await shippingOps.addSaleWithShipping(sell(vId, 2, 300, { saleType: 'wholesale', customerId: cId }), freight)
+      eq('فروش و کرایه با هم ثبت شد', await db.sales.count(), 1)
+      eq('خالص صندوق فروش و کرایه', await cashBalance(), 300)
+      eq('قرض فقط باقی کرایه است', (await db.customers.get(cId))!.balance, 200)
+      eq('گدام فقط دو جوره کم شد', await stockOf(vId), 8)
+      is('فروش قابل مراجعه است', !!(await db.sales.get(saleId)), true)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'حالت‌های کرایه و ورودی نامعتبر — صندوق انتخابی و سهم صفر درست باشد',
+    run: async () => {
+      const cId = await newCustomer()
+      const vId = await makeVariant({ purchasePrice: 200 })
+      await setOpeningStock(vId, 10)
+      await db.cashMovements.add({ date: Date.now(), type: 'capitalIn', amount: 2000, box: 'صندوق دیگر' })
+      const saleId = await addSale(sell(vId, 2, 300, { saleType: 'wholesale', customerId: cId, paid: 0 }))
+      for (const [share, receipt, debt, expense] of [[0, 0, 0, 500], [500, 0, 500, 0], [500, 500, 0, 0]]) {
+        const id = await shippingOps.addSaleShipping(saleId, { total: 500, customerShare: share, received: receipt, date: Date.now(), box: 'صندوق دیگر' })
+        eq('باقی قرض مشتری در هر حالت', (await db.customers.get(cId))!.balance, 600 + debt)
+        eq('مفاد پس از سهم دکان', await profitAndLoss(), 200 - expense)
+        eq('کرایه فقط از صندوق انتخابی رفت', await cashBalance('صندوق دیگر'), 1500 + receipt)
+        eq('صندوق دکان دست نخورد', await cashBalance(SHOP_BOX), 0)
+        await shippingOps.cancelSaleShipping(id, 'پایان حالت آزمایشی')
+        eq('لغو صندوق انتخابی را برگرداند', await cashBalance('صندوق دیگر'), 2000)
+      }
+      const base = { total: 500, customerShare: 0, received: 0, date: Date.now(), box: 'صندوق دیگر' }
+      const count = await db.payments.count()
+      for (const date of [0, NaN, Infinity, 9e15]) await throws('تاریخ نامعتبر رد شد', () => shippingOps.addSaleShipping(saleId, { ...base, date }))
+      await throws('سهم نامعتبر رد شد', () => shippingOps.addSaleShipping(saleId, { ...base, customerShare: 501 }))
+      const retail = await addSale(sell(vId, 1, 300, { saleType: 'retail', customerId: cId, paid: 0 }))
+      await throws('کرایه عمده روی فروش پرچون ثبت نشود', () => shippingOps.addSaleShipping(retail, base))
+      await db.customers.update(cId, { deleted: true })
+      await throws('مشتری حذف‌شده رد شد', () => shippingOps.addSaleShipping(saleId, base))
+      eq('ورودی نامعتبر هیچ سندی نساخت', await db.payments.count(), count)
+    }
+  },
+  {
+    name: 'کرایه در دستگاه دوم — شناسه محلی متفاوت، اصلاح همزمان و بازپخش تکراری',
+    run: async () => {
+      const tables = ['products', 'variants', 'customers', 'sales', 'payments', 'expenses', 'cashMovements', 'adjustments'] as const
+      const snapshot = async () => {
+        const rows: Array<{ table: typeof tables[number]; uuid: string; deleted: boolean; data: Record<string, unknown> }> = []
+        for (const table of tables) for (const row of await db.table(table).toArray()) {
+          rows.push({ table, uuid: row.uuid, deleted: !!row.deleted, data: await encodeRefs(table, row) })
+        }
+        return rows
+      }
+      const cId = await newCustomer()
+      const cUuid = (await db.customers.get(cId))!.uuid!
+      const vId = await makeVariant({ purchasePrice: 200 })
+      await setOpeningStock(vId, 10)
+      await seedCash(2000)
+      const saleId = await addSale(sell(vId, 2, 300, { saleType: 'wholesale', customerId: cId, paid: 0 }))
+      const input = { total: 500, customerShare: 300, received: 100, date: Date.now() }
+      const oldId = await shippingOps.addSaleShipping(saleId, input)
+      const oldUuid = (await db.payments.get(oldId))!.uuid!
+      const initial = await snapshot()
+      const aId = await shippingOps.correctSaleShipping(oldId, { ...input, total: 600, customerShare: 600, received: 200, reason: 'نسخه الف' })
+      const aUuid = (await db.payments.get(aId))!.uuid!
+      const winner = await snapshot()
+      await fresh()
+      await newCustomer('حساب محلی آزمایشی')
+      await makeVariant()
+      for (const row of initial) await applyRemoteRow(row.table, row)
+      const localCustomer = (await db.customers.where('uuid').equals(cUuid).first())!
+      is('شناسه محلی مشتری متفاوت است', localCustomer.id !== cId, true)
+      eq('قرض بعد از دریافت اولیه', localCustomer.balance, 800)
+      const localOld = (await db.payments.where('uuid').equals(oldUuid).first())!
+      is('پرداخت به مشتری همین دستگاه وصل شد', localOld.partyId, localCustomer.id)
+      const bId = await shippingOps.correctSaleShipping(localOld.id!, { ...input, total: 600, customerShare: 500, received: 200, reason: 'نسخه ب' })
+      is('اصلاح همزمان همان شناسه را ساخت', (await db.payments.get(bId))!.uuid, aUuid)
+      const masterWinner = winner.find((row) => row.table === 'payments' && row.uuid === aUuid)!
+      await applyRemoteRow('payments', masterWinner)
+      await throws('اصلاح در دریافت نیمه‌کاره متوقف شود', () => shippingOps.cancelSaleShipping(bId, 'آزمایش دریافت ناقص'))
+      for (let repeat = 0; repeat < 2; repeat++) for (const row of winner) await applyRemoteRow(row.table, row)
+      eq('قرض نسخه برنده فقط یکبار حساب شد', (await db.customers.get(localCustomer.id!))!.balance, 1000)
+      eq('مصرف نسخه برنده صفر است', await profitAndLoss(), 200)
+      eq('صندوق با بازپخش دوباره تغییر نکرد', await cashBalance(), 1600)
+      await shippingOps.cancelSaleShipping(bId, 'لغو از دستگاه دوم')
+      eq('لغو دستگاه دوم قرض کرایه را برداشت', (await db.customers.get(localCustomer.id!))!.balance, 600)
+      eq('لغو با پیوند جهانی صندوق را درست برگرداند', await cashBalance(), 2000)
+      is('حساب دستگاه دوم سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+      await fresh()
+      for (const row of initial) await applyRemoteRow(row.table, row)
+      // A new correction may arrive before the tombstone of its original.
+      await applyRemoteRow('payments', masterWinner)
+      const partialOld = (await db.payments.where('uuid').equals(oldUuid).first())!
+      const partialCount = await db.payments.count()
+      await throws('اصلاح واردشده دوباره ساخته نشود', () => shippingOps.correctSaleShipping(partialOld.id!, { ...input, reason: 'تکراری' }))
+      await throws('اصل سند در دریافت ناقص لغو نشود', () => shippingOps.cancelSaleShipping(partialOld.id!, 'دریافت ناقص'))
+      eq('هیچ شناسه تکراری ساخته نشد', await db.payments.count(), partialCount)
+    }
+  },
+  {
+    name: 'اصلاح و لغو کرایه — رد حساب، پرداخت بعدی مشتری و برگشت کامل حفظ شود',
+    run: async () => {
+      const cId = await newCustomer()
+      const vId = await makeVariant({ purchasePrice: 200 })
+      await setOpeningStock(vId, 10)
+      await seedCash(2000)
+      const saleId = await addSale(sell(vId, 2, 300, { saleType: 'wholesale', customerId: cId, paid: 0 }))
+      const input = { total: 500, customerShare: 300, received: 100, date: Date.now() }
+      const originalId = await shippingOps.addSaleShipping(saleId, input)
+      await addPayment({ date: Date.now(), partyType: 'customer', partyId: cId, partyName: 'مشتری', amount: 50 })
+      const before = await db.payments.count()
+      await throws('اصلاح بدون دلیل رد شود', () => shippingOps.correctSaleShipping(originalId, { ...input, reason: '' }))
+      await throws('اصلاح صندوق ناکافی کامل برگردد', () => shippingOps.correctSaleShipping(originalId, { ...input, total: 9000, reason: 'اشتباه' }))
+      eq('شکست سند جدید نساخت', await db.payments.count(), before)
+      eq('شکست صندوق را تغییر نداد', await cashBalance(), 1650)
+      eq('شکست قرض را تغییر نداد', (await db.customers.get(cId))!.balance, 750)
+      const nextId = await shippingOps.correctSaleShipping(originalId, { ...input, total: 600, customerShare: 600, received: 200, reason: 'سهم مشتری اشتباه بود' })
+      const old = (await db.payments.get(originalId))!
+      const next = (await db.payments.get(nextId))!
+      is('اصل سند نگه داشته و باطل شد', old.deleted, true)
+      is('پیوند به سند درست', old.correctedByUuid, next.uuid)
+      is('پیوند به سند قبلی', next.correctionOfUuid, old.uuid)
+      eq('مقدار اصلی در خلاصه حفظ شد', next.correctionPrevious!.shipping!.total, 500)
+      eq('مصرف قبلی برگشت و سهم دکان صفر شد', await profitAndLoss(), 200)
+      eq('قرض با پرداخت بعدی حفظ شد', (await db.customers.get(cId))!.balance, 950)
+      eq('اصلاح رفت و آمد صندوق را درست نگه داشت', await cashBalance(), 1650)
+      await throws('اصلاح دوباره سند قدیمی ممنوع', () => shippingOps.correctSaleShipping(originalId, { ...input, reason: 'تکراری' }))
+      await shippingOps.cancelSaleShipping(nextId, 'کرایه اشتباه ثبت شده بود')
+      await shippingOps.cancelSaleShipping(nextId, 'تکرار دکمه')
+      eq('لغو کرایه پرداخت بعدی را پس نگرفت', (await db.customers.get(cId))!.balance, 550)
+      eq('لغو فقط خروج خالص کرایه را برگرداند', await cashBalance(), 2050)
+      eq('مفاد فقط همان فروش است', await profitAndLoss(), 200)
+      eq('گدام در اصلاح و لغو دست نخورد', await stockOf(vId), 8)
+      is('دلیل لغو نگه داشته شد', (await db.payments.get(nextId))!.cancelledReason, 'کرایه اشتباه ثبت شده بود')
+      is('حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'ثبت کرایه — صندوق و قرض و مصرف اتمی، بدون تغییر جنس',
+    run: async () => {
+      const cId = await newCustomer()
+      const vId = await makeVariant({ purchasePrice: 200 })
+      await setOpeningStock(vId, 10)
+      await seedCash(2000)
+      const saleId = await addSale(sell(vId, 2, 300, { saleType: 'wholesale', customerId: cId, paid: 0 }))
+      const id = await shippingOps.addSaleShipping(saleId, { total: 500, customerShare: 300, received: 100, date: Date.now(), box: SHOP_BOX })
+      const doc = (await db.payments.get(id))!
+      eq('قرض کفش و باقی کرایه', (await db.customers.get(cId))!.balance, 800)
+      eq('صندوق پس از کرایه و دریافت', await cashBalance(), 1600)
+      eq('مفاد کفش منهای فقط سهم دکان', await profitAndLoss(), 0)
+      eq('گدام فقط بابت فروش کم شد', await stockOf(vId), 8)
+      eq('دفتر مشتری با قرض برابر', await customerLedgerEnd(cId), 800)
+      eq('دفتر صندوق برابر', await cashLedgerEnd(), 1600)
+      is('پیوند فروش با شناسه پایدار', doc.shipping!.saleUuid, (await db.sales.get(saleId))!.uuid)
+      const expense = (await db.expenses.filter((e) => e.shippingPaymentUuid === doc.uuid).first())!
+      eq('مصرف فقط سهم دکان', expense.amount, 200)
+      await throws('حذف تنها نیمه پرداخت ممنوع', () => deletePayment(id))
+      await throws('حذف تنها نیمه مصرف ممنوع', () => deleteExpense(expense.id!))
+      await throws('حذف فروش دارای کرایه نیاز به بررسی دارد', () => deleteSale(saleId))
+      eq('رد حذف اثری بر گدام ندارد', await stockOf(vId), 8)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      const count = await db.payments.count()
+      await throws('صندوق ناکافی همه تغییرات را رد کند', () => shippingOps.addSaleShipping(saleId, { total: 3000, customerShare: 3000, received: 0, date: Date.now() }))
+      eq('سند ناکام ذخیره نشده', await db.payments.count(), count)
+      eq('قرض پس از شکست همان است', (await db.customers.get(cId))!.balance, 800)
+      eq('صندوق پس از شکست همان است', await cashBalance(), 1600)
+    }
+  },
   {
     name: 'کرایهٔ بار — سهم مشتری، مصرف دکان و دریافت نقدی جدا و متوازن باشد',
     run: async () => {
