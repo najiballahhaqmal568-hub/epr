@@ -85,3 +85,21 @@ failed (old expense remained) before the freight-specific sync update branch.
 `node tests/sync-safety.mjs`: passed local pagination, retry and restore guards.
 `npm run build`: passed; existing large-bundle/mixed-import warnings remain.
 No production account, backup or business records were used.
+
+Checkout and existing-sale UI verification (2026-09-07): 1130 checks / 111
+scenarios pass. The isolated browser test covers create/correct/cancel, invalid
+reimbursement, Dari input, responsive layout, held-draft restoration, atomic
+double-click checkout, history and a read-only permission change while editing.
+Production build passes with the existing bundle/import warnings.
+
+## Release and recovery
+
+No schema migration or data reset is required. Refresh all clients before using
+freight. Only synthetic local data was tested; live Supabase permissions and
+multi-device networking were not exercised. Keep the existing sync error UI.
+If a financial inconsistency appears, stop freight mutations and preserve all
+records for diagnosis; do not reset or restore devices as a repair shortcut.
+Before freight records exist, the previous deployed version is `6a87241`.
+After records exist, prefer a forward fix retaining freight labels and mutation
+guards; a blind downgrade would expose old generic deletion paths. Do not delete
+freight records to roll back a release.

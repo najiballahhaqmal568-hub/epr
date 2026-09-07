@@ -252,6 +252,22 @@ async function settlement() {
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
   {
+    name: 'کرایه در فروش معطل — قبل از ثبت محفوظ و بدون اثر حسابداری',
+    run: async () => {
+      const drafts = await import('../src/lib/saleDrafts')
+      const shipping = { total: 500, customerShare: 300, received: 100, date: Date.now(), box: SHOP_BOX, note: 'کرایه آزمایشی' }
+      const input = { saleType: 'wholesale' as const, lines: [{ variantId: 1, productName: 'بوت', size: '40', color: 'سیاه', qty: 1, unitPrice: 800 }], paidStr: '', paidTouched: false, discountStr: '', promise: '', bookPage: '', shipping }
+      const saved = drafts.saveSaleDraft(input)
+      is('کرایه در پیش‌نویس معطل محفوظ', drafts.readSaleDrafts().find(x => x.id === saved.id)?.shipping?.note, shipping.note)
+      drafts.writeWorkingSale(input)
+      eq('سهم کرایه در نشست جاری محفوظ', drafts.readWorkingSale()?.shipping?.customerShare ?? -1, 300)
+      eq('پیش‌نویس کرایه پول را تغییر نداد', await cashBalance(), 0)
+      eq('پیش‌نویس هیچ سند حسابداری نساخت', await db.payments.count(), 0)
+      drafts.deleteSaleDraft(saved.id)
+      drafts.clearWorkingSale()
+    }
+  },
+  {
     name: 'فروش همراه کرایه — شکست کرایه فروش و گدام را هم برگرداند',
     run: async () => {
       const cId = await newCustomer()

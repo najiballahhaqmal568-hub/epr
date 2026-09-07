@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, type Payment, type Sale } from '../../db'
 import { addSaleShipping, boxBalances, boxOf, cancelSaleShipping, correctSaleShipping } from '../../lib/ops'
+import type { SaleShippingInput } from '../../lib/ops'
 import { calculateShipping } from '../../lib/shipping'
 import { fmtDate, fmtMoney, fromDateInput, toDateInput, toLatinDigits } from '../../lib/format'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
@@ -36,15 +37,17 @@ function money(value: string): number {
   return /^(?:\d+\.?\d*|\.\d+)$/.test(normalized) ? Number(normalized) : NaN
 }
 
-function ShippingEditor({ sale, current, onClose }: { sale: Sale; current?: Payment; onClose: () => void }) {
-  const old = current?.shipping
+export function ShippingEditor({ sale, current, prepared, onPrepared, onClose }: {
+  sale: Sale; current?: Payment; prepared?: SaleShippingInput; onPrepared?: (input: SaleShippingInput) => void; onClose: () => void
+}) {
+  const old = current?.shipping ?? prepared
   const [total, setTotal] = useState(old ? String(old.total) : '')
   const [mode, setMode] = useState(old ? (old.customerShare === old.total ? 'customer' : old.customerShare === 0 ? 'shop' : 'split') : 'customer')
   const [share, setShare] = useState(String(old?.customerShare ?? 0))
   const [received, setReceived] = useState(String(old?.received ?? 0))
-  const [box, setBox] = useState(boxOf(current ?? {}))
-  const [date, setDate] = useState(toDateInput(current?.date ?? Date.now()))
-  const [note, setNote] = useState(current?.note ?? '')
+  const [box, setBox] = useState(boxOf(current ?? prepared ?? {}))
+  const [date, setDate] = useState(toDateInput(current?.date ?? prepared?.date ?? Date.now()))
+  const [note, setNote] = useState(current?.note ?? prepared?.note ?? '')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -56,7 +59,7 @@ function ShippingEditor({ sale, current, onClose }: { sale: Sale; current?: Paym
   try { calculated = calculateShipping({ total: money(total), customerShare: mode === 'customer' ? money(total) : mode === 'shop' ? 0 : money(share), received: money(received) }) }
   catch (e) { invalid = e instanceof Error ? e.message : String(e) }
   const cashPreview = balances?.boxes.filter(b => b.name === box || (current && b.name === boxOf(current))).map(b => ({
-    ...b, after: b.balance - (current && b.name === boxOf(current) ? current.cashDelta ?? 0 : 0) + (b.name === box ? calculated?.cashDelta ?? 0 : 0)
+    ...b, after: b.balance + (onPrepared && b.name === boxOf({}) ? sale.paid : 0) - (current && b.name === boxOf(current) ? current.cashDelta ?? 0 : 0) + (b.name === box ? calculated?.cashDelta ?? 0 : 0)
   }))
   const valid = !!calculated && !!date && (!current || !!reason.trim()) && !!customer && !customer.deleted && !!cashPreview?.length && !cashPreview.some(b => b.after < 0)
   async function save() {
@@ -64,7 +67,8 @@ function ShippingEditor({ sale, current, onClose }: { sale: Sale; current?: Paym
     busy.current = true; setSaving(true); setError('')
     try {
       const input = { ...calculated, date: fromDateInput(date), box, note }
-      if (current) await correctSaleShipping(current.id!, { ...input, reason })
+      if (onPrepared) onPrepared(input)
+      else if (current) await correctSaleShipping(current.id!, { ...input, reason })
       else await addSaleShipping(sale.id!, input)
       onClose()
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
@@ -72,6 +76,7 @@ function ShippingEditor({ sale, current, onClose }: { sale: Sale; current?: Paym
   }
   return <Modal title={current ? 'اصلاح کرایهٔ بار' : 'ثبت کرایهٔ بار'} onClose={() => { if (!busy.current) onClose() }}>
     <p className="mb-3 text-sm text-slate-500">{sale.customerName} — جدا از مبلغ و پرداخت کفش</p>
+    {onPrepared && <p className="mb-3 text-sm text-amber-800">این کرایه فقط همراه دکمهٔ «ثبت فروش» ثبت می‌شود؛ فعلاً پیش‌نویس است.</p>}
     <fieldset disabled={saving} className="min-w-0">
       <Field label="کل کرایه (افغانی)"><input className={inputCls} inputMode="decimal" value={total} onChange={e => setTotal(e.target.value)} /></Field>
       <Field label="مسئول کرایه"><select aria-label="مسئول کرایه" className={inputCls} value={mode} onChange={e => { setMode(e.target.value); if (e.target.value === 'shop') setReceived('0') }}>
@@ -85,13 +90,13 @@ function ShippingEditor({ sale, current, onClose }: { sale: Sale; current?: Paym
       {current && <Field label="دلیل اصلاح"><input className={inputCls} value={reason} onChange={e => setReason(e.target.value)} /></Field>}
       {calculated && <div className="mb-3 rounded-xl bg-teal-50 p-3 text-sm" aria-live="polite">
         <p>قرض کرایه: {fmtMoney(calculated.customerDebt)}</p><p>مصرف دکان: {fmtMoney(calculated.shopExpense)}</p>
-        {customer && <p>حساب مشتری: {fmtMoney(customer.balance)} ← {fmtMoney(customer.balance + (current?.amount ?? 0) + calculated.customerDebt)}</p>}
+        {customer && <p>حساب مشتری: {fmtMoney(customer.balance)} ← {fmtMoney(customer.balance + (onPrepared ? Math.max(0, sale.total - sale.paid) : 0) + (current?.amount ?? 0) + calculated.customerDebt)}</p>}
         {cashPreview?.map(b => <p key={b.name}>{b.name}: {fmtMoney(b.balance)} ← {fmtMoney(b.after)}</p>)}
         {cashPreview?.some(b => b.after < 0) && <p role="alert" className="text-red-700">موجودی صندوق کافی نیست.</p>}
       </div>}
       {total && invalid && <p role="alert" className="mb-3 text-sm text-red-700">{invalid}</p>}
       {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
-      <PrimaryBtn onClick={() => void save()} disabled={!valid || saving}>{saving ? 'در حال ذخیره…' : current ? 'ذخیرهٔ اصلاح' : 'ذخیرهٔ کرایه'}</PrimaryBtn>
+      <PrimaryBtn onClick={() => void save()} disabled={!valid || saving}>{saving ? 'در حال ذخیره…' : onPrepared ? 'افزودن کرایه به فروش' : current ? 'ذخیرهٔ اصلاح' : 'ذخیرهٔ کرایه'}</PrimaryBtn>
     </fieldset>
   </Modal>
 }

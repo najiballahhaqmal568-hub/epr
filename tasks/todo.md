@@ -25,5 +25,17 @@ cancel, invalid reimbursement, Dari inputs and 320/768/1024/1440 widths. Screens
 `qa-shipping-form.png` inspected. `npm test`: 1126 checks / 110 scenarios passed;
 `npm run build` passed with existing warnings.
 
-Still pending: checkout freight fields + working/held-draft preservation; full
-Sales-page integration test, read-only/busy interaction tests, final release.
+Checkpoint 3b complete locally: optional freight in checkout, working/held-draft
+preservation and atomic sale-plus-freight save. Full Sales-page browser test
+passed held/resumed checkout, double-click protection, history and read-only
+guard. Mobile sale-details screenshot inspected. `npm test`: 1130 checks / 111
+scenarios passed; `npm run build` passed with existing warnings.
+
+Still pending: final release. No production data used or changed by these tests.
+Release gate 2026-09-07: local sync-safety test passed and GitHub authentication
+works; remote main is still 6a87241. `npm audit --omit=dev --audit-level=high`
+reports five high-severity groups: brace-expansion, browserslist, fast-uri,
+nanoid and postcss. `npm ls` traces them to the existing vite-plugin-pwa build
+toolchain. Browser-runtime exploitability has not been established. Review and
+patch compatible build dependencies, rerun tests/build/audit, then publish;
+do not describe this freight feature as live yet.

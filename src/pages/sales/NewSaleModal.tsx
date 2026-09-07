@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
-import { addSale } from '../../lib/ops'
+import { addSale, addSaleWithShipping, type SaleShippingInput } from '../../lib/ops'
+import { calculateShipping } from '../../lib/shipping'
+import { ShippingEditor } from './SaleShipping'
 import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
 import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
@@ -40,6 +42,8 @@ export function NewSaleModal({
   const [draftStatus, setDraftStatus] = useState(draft ? 'پیش‌نویس بازیابی شد' : 'آماده برای فروش جدید')
   const Shell = embedded ? EmbeddedSale : Modal
   const [saleType, setSaleType] = useState<'retail' | 'wholesale'>(draft?.saleType ?? 'retail')
+  const [shipping, setShipping] = useState<SaleShippingInput | undefined>(draft?.shipping)
+  const [showShipping, setShowShipping] = useState(false)
   const [customerId, setCustomerId] = useState<number | ''>(draft?.customerId ?? '')
   const [custSearch, setCustSearch] = useState('')
   const [showCust, setShowCust] = useState(false)
@@ -192,12 +196,12 @@ export function NewSaleModal({
   useEffect(() => {
     if (!embedded || completedRef.current) return
     try {
-      writeWorkingSale({ saleType, customerId: customerId || undefined, lines, paidStr, paidTouched, discountStr, promise, bookPage }, draft)
+      writeWorkingSale({ saleType, customerId: customerId || undefined, lines, paidStr, paidTouched, discountStr, promise, bookPage, shipping }, draft)
       setDraftStatus(lines.length ? 'پیش‌نویس در همین نشست محفوظ است' : 'آماده برای فروش جدید')
     } catch {
       setDraftStatus('پیش‌نویس محفوظ نشد؛ پیش از خروج ثبت یا معطل کنید')
     }
-  }, [embedded, saleType, customerId, lines, paidStr, paidTouched, discountStr, promise, bookPage, draft])
+  }, [embedded, saleType, customerId, lines, paidStr, paidTouched, discountStr, promise, bookPage, shipping, draft])
 
   function discard() {
     if (pendingRef.current || !confirm('این سبد پاک شود؟ فروش ثبت نشده از گدام یا صندوق کم نمی‌شود.')) return
@@ -236,7 +240,8 @@ export function NewSaleModal({
           paidTouched,
           discountStr,
           promise,
-          bookPage
+          bookPage,
+          shipping
         },
         draft?.id === 'working' ? undefined : draft
       )
@@ -252,6 +257,11 @@ export function NewSaleModal({
   async function save() {
     if (pendingRef.current) return
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
+    if (shipping && (saleType !== 'wholesale' || !customerId)) return setError('کرایه به مشتری عمده مربوط است؛ مشتری را انتخاب کنید یا کرایه را بردارید')
+    if (shipping) {
+      try { calculateShipping(shipping) }
+      catch { return setError('معلومات کرایه درست نیست؛ کرایه را باز و اصلاح کنید') }
+    }
     if (stockInvalid) return setError('موجودی بعضی سایزها کافی نیست یا تعداد درست نیست؛ سبد را اصلاح کنید')
     if (paidTouched && !paidStr.trim()) return setError('مبلغ نقد دریافتی را وارد کنید؛ اگر هیچ نقد نگرفته‌اید، گزینهٔ قرض را انتخاب کنید.')
     if (remainder > 0 && !customerId) {
@@ -276,7 +286,7 @@ export function NewSaleModal({
     setPending(true)
     setError('')
     try {
-      const id = await addSale(sale)
+      const id = shipping ? await addSaleWithShipping(sale, shipping) : await addSale(sale)
       sale.id = id
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -645,9 +655,19 @@ export function NewSaleModal({
       </div>
 
       {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
+      {(saleType === 'wholesale' || shipping) && <div className="mb-3 rounded-xl border border-slate-200 p-3 text-sm">
+        {shipping && <><p>کرایهٔ بار: {fmtMoney(shipping.total)} · سهم مشتری: {fmtMoney(shipping.customerShare)}</p><p>دریافت نقدی کرایه: {fmtMoney(shipping.received)} · باقی قرض کرایه: {fmtMoney(shipping.customerShare - shipping.received)}</p></>}
+        <div className="mt-2 flex gap-2">
+          <button disabled={pending || !customerId || saleType !== 'wholesale'} className="flex-1 rounded-lg bg-teal-50 p-3 font-bold text-teal-800 disabled:opacity-40" onClick={() => setShowShipping(true)}>{shipping ? 'ویرایش کرایهٔ فروش' : 'افزودن کرایهٔ بار'}</button>
+          {shipping && <button className="rounded-lg bg-red-50 p-3 text-red-700" onClick={() => setShipping(undefined)}>برداشتن کرایه</button>}
+        </div>
+        {!customerId && <p className="mt-2 text-slate-500">برای کرایه، مشتری را انتخاب کنید.</p>}
+        {shipping && saleType !== 'wholesale' && <p role="alert" className="mt-2 text-red-700">کرایه برای عمده است؛ نوع فروش را اصلاح کنید یا کرایه را بردارید.</p>}
+      </div>}
+      {showShipping && <ShippingEditor sale={{ date: Date.now(), saleType, customerId: customerId || undefined, customerName: customers?.find(c => c.id === customerId)?.name, lines, total, paid }} prepared={shipping} onPrepared={setShipping} onClose={() => setShowShipping(false)} />}
       <div data-empty={!lines.length} className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
-          <p className="text-xs text-slate-500">قابل پرداخت</p>
+          <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : 'قابل پرداخت'}</p>
           <p className="text-2xl font-bold text-teal-700">{fmtMoney(total)}</p>
           {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
         </div>

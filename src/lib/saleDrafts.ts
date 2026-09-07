@@ -1,5 +1,6 @@
 import { type SaleLine } from '../db'
 import { parseNum } from './format'
+import type { SaleShippingInput } from './ops'
 
 const STORAGE_KEY = 'epr_sale_drafts_v1'
 const MAX_DRAFTS = 20
@@ -34,6 +35,7 @@ export function writeWorkingSale(input: SaleDraftInput, previous?: Pick<SaleDraf
 }
 
 export interface SaleDraft {
+  shipping?: SaleShippingInput
   id: string
   createdAt: number
   updatedAt: number
@@ -102,7 +104,13 @@ function normalizeDraft(value: unknown): SaleDraft | null {
     paidTouched: draft.paidTouched === true,
     discountStr: typeof draft.discountStr === 'string' ? draft.discountStr : '',
     promise: typeof draft.promise === 'string' ? draft.promise : '',
-    bookPage: typeof draft.bookPage === 'string' ? draft.bookPage : ''
+    bookPage: typeof draft.bookPage === 'string' ? draft.bookPage : '',
+    shipping: draft.shipping && typeof draft.shipping === 'object' ? {
+      total: draft.shipping.total, customerShare: draft.shipping.customerShare,
+      received: draft.shipping.received, date: draft.shipping.date,
+      box: typeof draft.shipping.box === 'string' ? draft.shipping.box : undefined,
+      note: typeof draft.shipping.note === 'string' ? draft.shipping.note : undefined
+    } : undefined
   }
 }
 
