@@ -197,6 +197,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
               {r.source?.table === 'payments' && (
                 (() => {
                   const p = (payments ?? []).find((x) => x.id === r.source!.id)
+                  if (p?.shipping) return <p className="mt-1 text-xs text-slate-500">مدیریت کرایه از جزئیات فروش</p>
                   const correctable = !!p && p.amount > 0 && !p.groupUuid && !p.lenderAction && !accessFlags.readOnly
                   return (
                     <>

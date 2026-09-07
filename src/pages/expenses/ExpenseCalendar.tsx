@@ -54,7 +54,7 @@ export function ExpenseCalendar({ onAddForDay, onOpenExpense }: { onAddForDay: (
     []
   )
 
-  const live = (rows ?? []).filter((r) => !r.deleted)
+  const live = (rows ?? []).filter((r) => !r.deleted && !(r.shippingPaymentUuid && r.amount === 0))
   const byDay = new Map<number, { total: number; count: number; cats: Set<number>; closed: boolean }>()
   for (const r of live) {
     const d = startOfDay(r.date)

@@ -37,7 +37,8 @@ export default function ExpenseDetails({ expenseId, onClose, onCorrect }: {
           {expense.partnerName && <p className="mt-2">از سهم: {expense.partnerName}</p>}
           {expense.note && <p className="mt-2 whitespace-pre-wrap break-words text-slate-600">{expense.note}</p>}
         </div>
-        {!accessFlags.readOnly && <>
+        {expense.shippingPaymentUuid && <p className="mb-3 text-sm text-slate-600">این مصرف سهم دکان از کرایهٔ بار است؛ اصلاح و لغو را از جزئیات فروش انجام دهید.</p>}
+        {!accessFlags.readOnly && !expense.shippingPaymentUuid && <>
           {confirmDelete ? <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm">
             <h3 className="font-bold text-red-800">اثر حذف همین سند</h3>
             <p className="mt-2">بخش نقدی به صندوق برمی‌گردد: {fmtMoney(expenseCashPaid(expense))}</p>

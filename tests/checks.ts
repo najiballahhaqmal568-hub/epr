@@ -412,6 +412,9 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('مفاد کفش منهای فقط سهم دکان', await profitAndLoss(), 0)
       eq('گدام فقط بابت فروش کم شد', await stockOf(vId), 8)
       eq('دفتر مشتری با قرض برابر', await customerLedgerEnd(cId), 800)
+      const shippingRow = buildCustomerLedger([], [doc], [])[0]
+      is('عنوان کرایه با قرض قبلی اشتباه نشود', shippingRow.label, 'کرایهٔ بار')
+      is('جزئیات سهم و دریافت در دفتر دیده شود', shippingRow.note?.includes('دریافت نقدی'), true)
       eq('دفتر صندوق برابر', await cashLedgerEnd(), 1600)
       is('پیوند فروش با شناسه پایدار', doc.shipping!.saleUuid, (await db.sales.get(saleId))!.uuid)
       const expense = (await db.expenses.filter((e) => e.shippingPaymentUuid === doc.uuid).first())!

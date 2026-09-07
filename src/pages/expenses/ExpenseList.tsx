@@ -45,7 +45,7 @@ export function ExpenseList({
   const dayStart = startOfDay()
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
-  const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().filter((e) => !e.deleted && !e.shopClosed).limit(300).toArray(), [])
+  const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().filter((e) => !e.deleted && !e.shopClosed && !(e.shippingPaymentUuid && e.amount === 0)).limit(300).toArray(), [])
   // برداشت‌های شریک به شکل حرکت صندوق ثبت می‌شوند — این‌ها را هم در لیست مصارف نشان بده
   const partnerDraws = useLiveQuery(
     () => db.cashMovements.filter((m) => !m.deleted && m.type === 'withdrawal' && Boolean(m.partnerName)).reverse().sortBy('date'),

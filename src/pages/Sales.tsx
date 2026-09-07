@@ -12,6 +12,7 @@ import NewSaleModal from './sales/NewSaleModal'
 import ReceiptModal from './sales/Receipt'
 import InvoiceModal from './sales/InvoiceModal'
 import SaleHistory from './sales/SaleHistory'
+import SaleShipping from './sales/SaleShipping'
 
 export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
   const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
@@ -236,6 +237,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         />
       </div>}
       {detail && <Modal title={`جزئیات فروش ${fmtNum(detail.id ?? 0)}`} onClose={() => setDetail(null)}>
+        <SaleShipping sale={detail} />
         <p className="font-bold">{detail.customerName || 'مشتری نقدی'}</p><p className="mb-4 text-xs text-slate-500">{fmtDate(detail.date)} · {detail.saleType === 'retail' ? 'پرچون' : 'عمده'}</p>
         <div className="divide-y divide-slate-100">{detail.lines.map((line, index) => <div key={index} className="flex justify-between gap-3 py-3 text-sm"><span>{line.productName} {line.size} {line.color}<span className="block text-xs text-slate-500">{fmtNum(line.qty)} × {fmtMoney(line.unitPrice)}</span></span><strong>{fmtMoney(line.qty * line.unitPrice)}</strong></div>)}</div>
         <div className="my-4 rounded-xl bg-teal-50 p-3"><p className="flex justify-between font-bold"><span>مجموع</span><span>{fmtMoney(detail.total)}</span></p>{(detail.discount ?? 0) > 0 && <p className="mt-2 text-sm">تخفیف: {fmtMoney(detail.discount!)}</p>}<p className="mt-2 text-sm">دریافتی: {fmtMoney(detail.paid)}</p>{detail.total > detail.paid && <p className="mt-2 text-sm text-red-600">قرض: {fmtMoney(detail.total - detail.paid)}</p>}{detail.bookPage && <p className="mt-2 text-sm">صفحهٔ دفتر: {detail.bookPage}</p>}</div>

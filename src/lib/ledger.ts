@@ -30,14 +30,14 @@ export interface LedgerRow {
 
 /** دفتر صندوق: هر حرکت با موجودی بعد از آن */
 export function buildCashLedger(movements: CashMovement[], labelOf: (t: CashMovement['type']) => string): LedgerRow[] {
-  const rows = [...movements].sort((a, b) => a.date - b.date || (a.id ?? 0) - (b.id ?? 0))
+  const rows = movements.filter(m => !(m.shippingPaymentUuid && m.amount === 0)).sort((a, b) => a.date - b.date || (a.id ?? 0) - (b.id ?? 0))
   let bal = 0
   return rows.map((m) => {
     bal += m.amount
     return {
       key: `m${m.id}`,
       date: m.date,
-      label: labelOf(m.type),
+      label: m.shippingRole === 'paid' ? 'پرداخت کرایهٔ بار' : m.shippingRole === 'received' ? 'دریافت کرایه' : m.shippingRole === 'reversal' ? 'برگشت ثبت کرایه' : labelOf(m.type),
       note: m.note,
       box: m.box?.trim() || 'دکان',
       type: m.type,
@@ -86,8 +86,10 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
     events.push({
       key: `p${p.id}`,
       date: p.date,
-      label: p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
-      note: p.amount < 0 ? undefined : [p.note, correctionNote].filter(Boolean).join(' · ') || undefined,
+      label: p.shipping ? 'کرایهٔ بار' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
+      note: p.shipping
+        ? [`کل ${fmtNum(p.shipping.total)} — سهم مشتری ${fmtNum(p.shipping.customerShare)} — دریافت نقدی ${fmtNum(p.shipping.received)}`, p.note, correctionNote].filter(Boolean).join(' · ')
+        : p.amount < 0 ? undefined : [p.note, correctionNote].filter(Boolean).join(' · ') || undefined,
       page: p.bookPage?.trim() || undefined,
       source: { table: 'payments', id: p.id! },
       // دریافت پول قرض را کم می‌کند، قرض قبلی (مبلغ منفی) آن را زیاد
