@@ -39,3 +39,10 @@ nanoid and postcss. `npm ls` traces them to the existing vite-plugin-pwa build
 toolchain. Browser-runtime exploitability has not been established. Review and
 patch compatible build dependencies, rerun tests/build/audit, then publish;
 do not describe this freight feature as live yet.
+
+Release gate cleared 2026-09-07: compatible updates to the five build packages,
+plus tar and @xmldom/xmldom in development tooling, are confined to the lockfile.
+Full `npm audit --audit-level=moderate`: zero vulnerabilities. With patched
+dependencies, 1130 checks / 111 scenarios, freight UI, local sync-safety and
+production build pass. Existing bundle/import warnings remain. No APK built.
+Publishing is pending confirmation of the GitHub Pages workflow and live assets.
