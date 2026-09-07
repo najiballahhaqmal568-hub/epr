@@ -6,6 +6,7 @@ import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
 import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { Icon } from '../../components/Icon'
+import StockSelectionSummary from './StockSelectionSummary'
 
 function EmbeddedSale({ children }: { children: ReactNode; title: string; onClose: () => void }) {
   return <div className="sale-embedded">{children}</div>
@@ -67,6 +68,14 @@ export function NewSaleModal({
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
+  const reserved = new Map<number, number>()
+  for (const line of lines) reserved.set(line.variantId, (reserved.get(line.variantId) ?? 0) + line.qty)
+  const selectedQty = (id: number) => reserved.get(id) ?? 0
+  const remainingQty = (v: Variant) => Math.max(0, v.stockQty - selectedQty(v.id!))
+  const stockInvalid = !variants || lines.some(line => {
+    const v = variants.find(item => item.id === line.variantId)
+    return !v || !Number.isInteger(line.qty) || line.qty <= 0 || selectedQty(line.variantId) > v.stockQty
+  })
   // فروش‌های ۳۰ روز اخیر برای کاشی‌های «پرفروش‌ها»
   const recentSales = useLiveQuery(
     () => db.sales.where('date').aboveOrEqual(Date.now() - 30 * 86400000).filter((s) => !s.deleted).toArray(),
@@ -122,15 +131,17 @@ export function NewSaleModal({
   /** چند کارتن کامل از این جنس در گدام موجود است؟ */
   function cartonsInStock(p: Product): number {
     const vs = variants?.filter((v) => v.productId === p.id) ?? []
-    return Math.min(
-      ...p.carton!.items.map((it) => {
-        const v = vs.find((x) => x.size === it.size && x.color === it.color)
-        return v ? Math.floor(v.stockQty / it.qty) : 0
-      })
-    )
+    const required = new Map<Variant, number>()
+    for (const it of p.carton!.items) {
+      const v = vs.find(x => x.size === it.size && x.color === it.color)
+      if (!v || !Number.isInteger(it.qty) || it.qty <= 0) return 0
+      required.set(v, (required.get(v) ?? 0) + it.qty)
+    }
+    return required.size ? Math.min(...[...required].map(([v, qty]) => Math.floor(remainingQty(v) / qty))) : 0
   }
 
   function addCartonSale(p: Product, count = 1) {
+    if (!Number.isInteger(count) || count <= 0 || count > cartonsInStock(p)) return setError('برای این تعداد کارتن، موجودی باقی‌مانده کافی نیست')
     const vs = variants?.filter((v) => v.productId === p.id) ?? []
     setLines((ls) => {
       let out = [...ls]
@@ -201,6 +212,7 @@ export function NewSaleModal({
   }
 
   function addLine(v: Variant, n = 1) {
+    if (n > remainingQty(v)) return setError('تمام موجودی این سایز و رنگ انتخاب شده است')
     const p = productMap.get(v.productId)!
     const price = saleType === 'retail' ? v.retailPrice : v.wholesalePrice
     setLines((ls) => {
@@ -240,6 +252,7 @@ export function NewSaleModal({
   async function save() {
     if (pendingRef.current) return
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
+    if (stockInvalid) return setError('موجودی بعضی سایزها کافی نیست یا تعداد درست نیست؛ سبد را اصلاح کنید')
     if (paidTouched && !paidStr.trim()) return setError('مبلغ نقد دریافتی را وارد کنید؛ اگر هیچ نقد نگرفته‌اید، گزینهٔ قرض را انتخاب کنید.')
     if (remainder > 0 && !customerId) {
       setShowCust(true)
@@ -385,7 +398,9 @@ export function NewSaleModal({
                 <p className="block text-xs font-normal">
                   هر کارتن {fmtNum(pairs)} جوړه
                   {p.carton!.price ? ` · کارتنی: ${fmtMoney(p.carton!.price)}` : ''} ·{' '}
-                  {avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل نیست'}
+                  {avail > 0 ? `${fmtNum(avail)} کارتن باقی‌مانده پس از سبد` : 'کارتن کامل دیگری موجود نیست'}
+                  <span className="block">پس از این انتخاب: {fmtNum(Math.max(0, avail - n))} کارتن باقی می‌ماند</span>
+                  {n > avail && <span role="alert" className="block text-red-700">تعداد کارتن از باقی‌مانده بیشتر است</span>}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
@@ -406,7 +421,7 @@ export function NewSaleModal({
                 </button>
                 <button
                   onClick={() => addCartonSale(p, n)}
-                  disabled={avail <= 0}
+                  disabled={avail <= 0 || n > avail}
                   className="rounded-xl bg-amber-700 px-4 py-2 text-white active:bg-amber-800 disabled:opacity-40"
                 >
                   ＋ افزودن
@@ -423,14 +438,15 @@ export function NewSaleModal({
               <div key={v.id} className="flex items-stretch border-b border-slate-100 bg-white last:border-0">
                 <button
                   onClick={() => addLine(v)}
-                  disabled={v.stockQty <= 0}
+                  disabled={remainingQty(v) <= 0}
                   className="flex flex-1 items-center justify-between px-3 py-2 text-right active:bg-teal-50 disabled:opacity-40"
                 >
                   <span>
                     {p.name} — {v.size} {v.color}
                   </span>
                   <span className="text-sm text-slate-500">
-                    {v.stockQty <= 0 ? 'ناموجود' : `${fmtNum(v.stockQty)} عدد · ${fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}`}
+                    <StockSelectionSummary stock={v.stockQty} selected={selectedQty(v.id!)} />
+                    {fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}
                   </span>
                 </button>
                 {/* تعداد مستقیم از نتیجهٔ جستجو — بدون باز کردن سطر */}
@@ -438,7 +454,7 @@ export function NewSaleModal({
                   <button
                     key={n}
                     onClick={() => addLine(v, n)}
-                    disabled={v.stockQty < n}
+                    disabled={remainingQty(v) < n}
                     className="w-10 shrink-0 border-r border-slate-100 text-sm font-bold text-teal-700 active:bg-teal-50 disabled:opacity-30"
                   >
                     ×{fmtNum(n)}
@@ -455,7 +471,7 @@ export function NewSaleModal({
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
       {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
       {lines.map((l, i) => (
-        <div key={l.variantId} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2">
+        <div key={l.variantId} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-2">
           <div className="flex-1">
             <p className="text-sm font-bold">
               {l.productName} {l.size} {l.color}
@@ -480,13 +496,14 @@ export function NewSaleModal({
               aria-label={`تعداد ${l.productName} ${l.size}`}
               onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
             />
-            <button aria-label={`افزایش تعداد ${l.productName}`} className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
+            <button aria-label={`افزایش تعداد ${l.productName}`} disabled={!variants || selectedQty(l.variantId) >= (variants.find(v => v.id === l.variantId)?.stockQty ?? 0)} className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800 disabled:opacity-40" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
               ＋
             </button>
             <button aria-label={`حذف ${l.productName} از سبد`} className="mr-1 text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
               <Icon name="trash" />
             </button>
           </div>
+          <div className="w-full"><StockSelectionSummary stock={variants ? variants.find(v => v.id === l.variantId)?.stockQty ?? 0 : undefined} selected={selectedQty(l.variantId)} /></div>
         </div>
       ))}
 
@@ -643,7 +660,7 @@ export function NewSaleModal({
         </button>
         <button
           onClick={save}
-          disabled={!lines.length || pending}
+          disabled={!lines.length || pending || stockInvalid}
           className="rounded-xl bg-teal-700 px-5 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
         >
           {pending ? 'در حال ثبت…' : 'ثبت فروش'}
@@ -683,7 +700,7 @@ export function NewSaleModal({
                   </button>
                 </div>
                 <button
-                  disabled={avail <= 0}
+                  disabled={avail <= 0 || n > avail}
                   onClick={() => {
                     addCartonSale(p, n)
                     setPickerFor(null)
@@ -694,10 +711,12 @@ export function NewSaleModal({
                     {fmtNum(n)} کارتن ({fmtNum(pairs * n)} جوړه)
                   </span>
                   <span className="text-sm font-normal opacity-90">
-                    {avail > 0 ? `${fmtNum(avail)} کارتن موجود` : 'کارتن کامل موجود نیست'}
+                    {avail > 0 ? `${fmtNum(avail)} کارتن باقی‌مانده پس از سبد` : 'کارتن کامل دیگری موجود نیست'}
+                    <span className="block">پس از این انتخاب: {fmtNum(Math.max(0, avail - n))} کارتن باقی می‌ماند</span>
                     {p.carton.price ? ` · قیمت کارتنی هر کارتن: ${fmtMoney(p.carton.price)}` : ''}
                   </span>
                 </button>
+                {n > avail && <p role="alert" className="mb-2 text-sm font-bold text-red-700">تعداد کارتن از باقی‌مانده بیشتر است؛ تعداد را کم کنید یا نیم کارتن انتخاب کنید.</p>}
                 <button
                   onClick={() => setPickerMode('half')}
                   className="w-full rounded-xl bg-amber-100 p-4 text-right font-bold text-amber-800 active:bg-amber-200"
@@ -712,8 +731,9 @@ export function NewSaleModal({
             const pairs = p.carton.items.reduce((s, it) => s + it.qty, 0)
             const target = Math.round(pairs / 2)
             const filled = vs.reduce((s, v) => s + (halfQtys[v.id!] ?? 0), 0)
-            const setQ = (id: number, q: number, max: number) =>
-              setHalfQtys((hq) => ({ ...hq, [id]: Math.min(max, Math.max(0, q)) }))
+            const halfInvalid = vs.some(v => !Number.isInteger(halfQtys[v.id!] ?? 0) || (halfQtys[v.id!] ?? 0) > remainingQty(v))
+            const setQ = (id: number, q: number) =>
+              setHalfQtys((hq) => ({ ...hq, [id]: Math.max(0, q) }))
             return (
               <Modal title={`نیم کارتن — ${p.name}`} onClose={() => setPickerFor(null)}>
                 <p
@@ -728,40 +748,42 @@ export function NewSaleModal({
                       : `${fmtNum(filled)} از ${fmtNum(target)} جوړه`}
                 </p>
                 {vs.map((v) => (
-                  <div key={v.id} className="mb-1 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                  <div key={v.id} className="mb-1 flex flex-wrap items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
                     <span className="text-sm font-bold text-slate-800">
                       {v.size} <span className="font-normal text-slate-500">{v.color}</span>
-                      <span className={`block text-xs font-normal ${v.stockQty <= 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                        {fmtNum(v.stockQty)} موجود
-                      </span>
                     </span>
                     <div className="flex items-center gap-1">
                       <button
                         className="h-8 w-8 rounded-full bg-slate-200 font-bold"
-                        onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) - 1, v.stockQty)}
+                        aria-label={`کاهش نیم کارتن ${v.size} ${v.color}`}
+                        onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) - 1)}
                       >
                         −
                       </button>
                       <input
                         className="w-12 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
                         inputMode="numeric"
+                        aria-label={`تعداد نیم کارتن ${v.size} ${v.color}`}
                         value={halfQtys[v.id!] ?? 0}
-                        onChange={(e) => setQ(v.id!, parseNum(e.target.value) || 0, v.stockQty)}
+                        onChange={(e) => setQ(v.id!, parseNum(e.target.value) || 0)}
                       />
                       <button
                         className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800"
-                        disabled={v.stockQty <= (halfQtys[v.id!] ?? 0)}
-                        onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) + 1, v.stockQty)}
+                        aria-label={`افزایش نیم کارتن ${v.size} ${v.color}`}
+                        disabled={remainingQty(v) <= (halfQtys[v.id!] ?? 0)}
+                        onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) + 1)}
                       >
                         ＋
                       </button>
                     </div>
+                    <div className="w-full"><StockSelectionSummary stock={v.stockQty} selected={selectedQty(v.id!) + (halfQtys[v.id!] ?? 0)} /></div>
                   </div>
                 ))}
                 <div className="mt-3">
                   <PrimaryBtn
-                    disabled={filled !== target}
+                    disabled={filled !== target || halfInvalid}
                     onClick={() => {
+                      if (halfInvalid || filled !== target) return
                       setLines((ls) => {
                         let out = [...ls]
                         for (const v of vs) {
@@ -788,7 +810,7 @@ export function NewSaleModal({
               {vs.map((v) => (
                 <button
                   key={v.id}
-                  disabled={v.stockQty <= 0}
+                  disabled={remainingQty(v) <= 0}
                   onClick={() => {
                     addLine(v)
                     setPickerFor(null)
@@ -799,9 +821,7 @@ export function NewSaleModal({
                     {v.size} <span className="text-sm font-normal text-slate-500">{v.color}</span>
                   </span>
                   <span className="text-left text-sm">
-                    <span className={`block font-bold ${v.stockQty <= 0 ? 'text-red-600' : 'text-teal-700'}`}>
-                      {v.stockQty <= 0 ? 'ناموجود' : `${fmtNum(v.stockQty)} موجود`}
-                    </span>
+                    <StockSelectionSummary stock={v.stockQty} selected={selectedQty(v.id!)} />
                     <span className="text-slate-500">{fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}</span>
                   </span>
                 </button>
