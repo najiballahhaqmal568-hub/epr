@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, type Expense, type ExpenseType } from '../../db'
-import { deleteExpense } from '../../lib/ops'
 import { fmtMoney, fmtDate, startOfDay, startOfMonth } from '../../lib/format'
 import { Empty } from '../../components/ui'
 import { TYPE_LABELS, TYPE_COLORS } from './labels'
@@ -11,6 +10,7 @@ import ExpenseCreditors from './ExpenseCreditors'
 import DailyExpenseChecklist from './DailyExpenseChecklist'
 import CorrectExpenseModal from './CorrectExpenseModal'
 import ExpenseCalendar from './ExpenseCalendar'
+import ExpenseDetails from './ExpenseDetails'
 
 const VIEW_KEY = 'expense_view'
 
@@ -30,6 +30,7 @@ export function ExpenseList({
   const [filter, setFilter] = useState<number | 'all' | ExpenseType>('all')
   // مصرفی که مالک می‌خواهد اصلاح کند (مبلغ/نقد-قرض/طلبکار/تاریخ) — بدون پاک کردن
   const [toCorrect, setToCorrect] = useState<Expense | null>(null)
+  const [detailId, setDetailId] = useState<number | null>(null)
   // نمای تقویم یا فهرست — آخرین انتخاب یاد می‌ماند
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>(() =>
     localStorage.getItem(VIEW_KEY) === 'calendar' ? 'calendar' : 'list'
@@ -122,6 +123,7 @@ export function ExpenseList({
       </div>
       {viewMode === 'calendar' ? (
         <ExpenseCalendar
+          onOpenExpense={setDetailId}
           onAddForDay={(day) => {
             setNewPresetDate(day)
             setShowNew(true)
@@ -194,22 +196,10 @@ export function ExpenseList({
             </div>
             <div className="text-left">
               <p className={`font-bold ${TYPE_COLORS[e.type]}`}>{fmtMoney(e.amount)}</p>
-              {!e.partner && !accessFlags.readOnly && (
-                <div className="flex flex-col items-end gap-1">
-                  {e.type === 'business' && !('shopClosed' in e && e.shopClosed) && e.amount > 0 && (
-                    <button className="text-xs font-bold text-teal-700" onClick={() => setToCorrect(e as Expense)}>
-                      اصلاح سند
-                    </button>
-                  )}
-                  <button
-                    className="text-xs text-red-400"
-                    onClick={async () => {
-                      if (confirm('این مصرف حذف شود؟')) await deleteExpense(e.id!)
-                    }}
-                  >
-                    حذف
-                  </button>
-                </div>
+              {!e.partner && (
+                <button className="min-h-11 px-2 text-sm font-bold text-teal-700" aria-label={`جزئیات ${e.categoryName}`} onClick={() => setDetailId(e.id!)}>
+                  جزئیات
+                </button>
               )}
             </div>
           </div>
@@ -228,6 +218,10 @@ export function ExpenseList({
       )}
       {showCats && <CategoryManager onClose={() => setShowCats(false)} />}
       {toCorrect && <CorrectExpenseModal expense={toCorrect} onClose={() => setToCorrect(null)} />}
+      {detailId !== null && <ExpenseDetails expenseId={detailId} onClose={() => setDetailId(null)} onCorrect={(expense) => {
+        setDetailId(null)
+        setToCorrect(expense)
+      }} />}
     </>
   )
 }

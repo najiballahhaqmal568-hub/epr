@@ -31,7 +31,7 @@ interface DayCell {
  * روزانه (سبز/زرد/سرخ/تعطیل). لمس هر روز، مصارفش و افزودن برای همان روز را باز می‌کند.
  * فقط نماست — هیچ قاعدهٔ حسابداری نو.
  */
-export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) => void }) {
+export function ExpenseCalendar({ onAddForDay, onOpenExpense }: { onAddForDay: (day: number) => void; onOpenExpense: (id: number) => void }) {
   const [monthOffset, setMonthOffset] = useState(0)
   const [openDay, setOpenDay] = useState<number | null>(null)
 
@@ -180,7 +180,13 @@ export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) =>
                     {e.note ? ` · ${e.note}` : ''}
                   </p>
                 </div>
-                <span className="shrink-0 font-bold text-red-600">{fmtMoney(e.amount)}</span>
+                <div className="shrink-0 text-left">
+                  <p className="font-bold text-red-600">{fmtMoney(e.amount)}</p>
+                  <button className="min-h-11 px-2 font-bold text-teal-700" aria-label={`جزئیات ${e.categoryName}`} onClick={() => {
+                    setOpenDay(null)
+                    onOpenExpense(e.id!)
+                  }}>جزئیات</button>
+                </div>
               </div>
             ))}
           <div className="mt-3 flex gap-2">
@@ -203,7 +209,7 @@ export function ExpenseCalendar({ onAddForDay }: { onAddForDay: (day: number) =>
               {dayClosed ? 'روز را باز کنم' : 'روز تعطیل بود'}
             </button>
           </div>
-          <p className="mt-2 text-xs text-slate-400">اصلاح و حذف هر مصرف از «فهرست» همان‌جا که همیشه بود انجام می‌شود.</p>
+          <p className="mt-2 text-xs text-slate-400">برای بررسی، اصلاح یا حذف هر سند، «جزئیات» را باز کنید.</p>
         </Modal>
       )}
     </div>
