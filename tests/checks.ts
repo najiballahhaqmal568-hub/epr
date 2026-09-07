@@ -82,6 +82,7 @@ import {
   SHOP_BOX
 } from '../src/lib/ops'
 import { allocate, afn } from '../src/lib/ops'
+import { calculateShipping } from '../src/lib/shipping'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
 import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
@@ -249,6 +250,43 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'کرایهٔ بار — سهم مشتری، مصرف دکان و دریافت نقدی جدا و متوازن باشد',
+    run: async () => {
+      const customer = calculateShipping({ total: 500, customerShare: 500, received: 0 })
+      eq('تمام کرایه قرض مشتری', customer.customerDebt, 500)
+      eq('کرایه مشتری مصرف دکان نیست', customer.shopExpense, 0)
+      eq('صندوق تمام کرایه را داده', customer.cashDelta, -500)
+      const shop = calculateShipping({ total: 500, customerShare: 0, received: 0 })
+      eq('تمام کرایه مصرف دکان', shop.shopExpense, 500)
+      eq('سهم دکان قرض مشتری ندارد', shop.customerDebt, 0)
+      const split = calculateShipping({ total: 500, customerShare: 300, received: 100 })
+      eq('باقی قرض کرایه', split.customerDebt, 200)
+      eq('سهم مصرف دکان', split.shopExpense, 200)
+      eq('خروج خالص صندوق پس از دریافت', split.cashDelta, -400)
+      eq('توازن صندوق و قرض و مصرف', -split.cashDelta, split.customerDebt + split.shopExpense)
+      const paid = calculateShipping({ total: 500, customerShare: 500, received: 500 })
+      eq('تسویه کامل کرایه قرض نمی‌سازد', paid.customerDebt, 0)
+      eq('تسویه کامل اثر خالص صندوق ندارد', paid.cashDelta, 0)
+      const rounded = calculateShipping({ total: 500.6, customerShare: 300.4, received: 99.6 })
+      eq('کرایه به افغانی صحیح', rounded.total, 501)
+      eq('مصرف از تفاضل مبلغ‌های گرد شده', rounded.shopExpense, 201)
+      eq('دریافت به افغانی صحیح', rounded.received, 100)
+      for (const input of [
+        { total: 0, customerShare: 0, received: 0 },
+        { total: 0.1, customerShare: 0, received: 0 },
+        { total: -10, customerShare: 0, received: 0 },
+        { total: 500, customerShare: -1, received: 0 },
+        { total: 500, customerShare: 501, received: 0 },
+        { total: 500, customerShare: 300, received: 301 },
+        { total: 500, customerShare: 300, received: -1 },
+        { total: NaN, customerShare: 0, received: 0 },
+        { total: 500, customerShare: Infinity, received: 0 },
+        { total: 500, customerShare: 300, received: NaN },
+        { total: Number.MAX_SAFE_INTEGER + 1, customerShare: 0, received: 0 }
+      ]) await throws('کرایه یا سهم نامعتبر رد شود', async () => calculateShipping(input))
+    }
+  },
   {
     name: 'تقویم مصارف — ماه و روز واقعی هجری شمسی را بسازد',
     run: async () => {
