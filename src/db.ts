@@ -321,6 +321,8 @@ export interface Expense extends Synced {
     cashPaid?: number
     creditAmount?: number
     creditorName?: string
+    drawAmount?: number
+    partnerName?: string
     note?: string
     box?: string
   }

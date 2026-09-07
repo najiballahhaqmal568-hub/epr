@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Expense } from '../../db'
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../lib/ops'
 import { fmtMoney, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
+import { TYPE_LABELS } from './labels'
 
 /** اصلاح امن مصرف — مبلغ، تقسیم نقد/قرض، طلبکار، تاریخ و یادداشت با رد حساب و دلیل. */
 export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; onClose: () => void }) {
@@ -28,6 +29,7 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const busy = useRef(false)
 
   const total = parseNum(amount)
   const cash = parseNum(cashPart)
@@ -56,6 +58,7 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
       }
     }
     setLoading(true)
+    setPreview(null)
     setError('')
     void previewExpenseCorrection(expense.id, input())
       .then((next) => {
@@ -78,9 +81,11 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
 
   const hasNegativeCash = preview?.cash.some((row) => row.after < 0) ?? false
   return (
-    <Modal title={`اصلاح مصرف — ${expense.categoryName}`} onClose={onClose}>
+    <Modal title={`اصلاح مصرف — ${expense.categoryName}`} onClose={() => { if (!busy.current) onClose() }}>
       <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
         <p className="font-bold text-amber-900">سند فعلی</p>
+        <p className="mt-1 text-slate-700">نوع مصرف: {TYPE_LABELS[expense.type]} (ثابت)</p>
+        {(expense.type === 'home' || expense.type === 'personal') && <p className="mt-1 text-slate-700">صاحب سهم: {expense.partnerName || 'مالک (بی‌نام)'} (ثابت)</p>}
         <p className="mt-1 text-slate-700">مبلغ: {fmtMoney(expense.amount)}</p>
         <p className="text-xs text-slate-500">
           نقد {fmtMoney(oldCash)}
@@ -88,6 +93,7 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
         </p>
       </div>
 
+      <fieldset disabled={saving}>
       <Field label="مبلغ درست *">
         <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
       </Field>
@@ -118,6 +124,7 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
       <Field label="دلیل اصلاح *">
         <input className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثلاً مبلغ یا تقسیم نقد و قرض اشتباه بود" />
       </Field>
+      </fieldset>
 
       {loading && <p className="mb-3 text-center text-sm text-slate-400">در حال محاسبهٔ اثر اصلاح…</p>}
       {preview && (
@@ -135,6 +142,13 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
               <span className="font-bold">فعلی {fmtMoney(row.before)} · بعد {fmtMoney(row.after)}</span>
             </div>
           ))}
+          {preview.draw && (
+            <div className="mt-3 border-t border-slate-200 pt-2">
+              <p className="font-bold">برداشت همین سند از سهم {preview.draw.partnerName || 'مالک (بی‌نام)'}</p>
+              <p>فعلی {fmtMoney(preview.draw.before)} · بعد {fmtMoney(preview.draw.after)}</p>
+              <p className="mt-1 text-xs text-slate-500">کل مبلغ، شامل نقد و قرض، برداشت است؛ مصرف تجارت و مفاد فروش تغییر نمی‌کند.</p>
+            </div>
+          )}
           {preview.accounts.some((row) => row.after < 0) && (
             <p className="mt-2 text-xs font-bold text-slate-500">منفی یعنی از این شخص بیش از قرضش پرداخت شده — طلب ما می‌شود.</p>
           )}
@@ -144,12 +158,13 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
       <p className="mb-3 text-xs text-slate-500">
         سند قبلی پاک نمی‌شود؛ با علامت «اصلاح‌شده» نگه داشته می‌شود و سند درست جای آن ثبت می‌گردد. تسویه‌های قبلی طلبکار سالم می‌مانند.
       </p>
-      {error && <p className="mb-2 text-sm font-bold text-red-600">{error}</p>}
+      {error && <p role="alert" className="mb-2 text-sm font-bold text-red-600">{error}</p>}
       <div className="sticky -bottom-8 -mx-4 -mb-8 border-t border-slate-100 bg-white px-4 pb-8 pt-3">
         <PrimaryBtn
           disabled={!formValid || !preview || loading || saving || hasNegativeCash}
           onClick={async () => {
-            if (!expense.id) return
+            if (!expense.id || busy.current) return
+            busy.current = true
             try {
               setSaving(true)
               setError('')
@@ -158,6 +173,7 @@ export function CorrectExpenseModal({ expense, onClose }: { expense: Expense; on
             } catch (e) {
               setError(e instanceof Error ? e.message : String(e))
             } finally {
+              busy.current = false
               setSaving(false)
             }
           }}

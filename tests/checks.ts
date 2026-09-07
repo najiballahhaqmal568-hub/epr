@@ -783,6 +783,87 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'اصلاح خانه و شخصی — سهم ثابت، تسویه محفوظ و بدون مصرف تجارتی',
+    run: async () => {
+      for (const type of ['home', 'personal'] as const) {
+        await fresh()
+        await seedCash(5000)
+        const variantId = await makeVariant({ stockQty: 7 })
+        await db.suppliers.add({ name: 'مالک آزمایشی', kind: 'partner', balance: 0, capital: 5000, share: 100 })
+        const aId = await db.suppliers.add({ name: 'طلبکار اول', kind: 'expenseCreditor', balance: 0 })
+        const bId = await db.suppliers.add({ name: 'طلبکار دوم', kind: 'expenseCreditor', balance: 0 })
+        const originalId = await addExpense({ date: Date.now(), type, categoryName: 'مصرف آزمایشی', amount: 1200, cashPaid: 200, creditAmount: 1000, creditorId: aId }, 'مالک آزمایشی')
+        await payExpenseCreditorCash(aId, 400)
+        const paymentsBefore = JSON.stringify(await db.payments.toArray())
+        const input = { date: Date.now() - 1000, amount: 1500, cashPaid: 300, creditorId: bId, note: 'یادداشت درست', reason: 'اصلاح رقم' }
+        const preview = await previewExpenseCorrection(originalId, input)
+        eq('پیش‌نمایش صندوق', preview.cash[0].after, 4300)
+        is('پیش‌نمایش نوع را عوض نمی‌کند', preview.replacement.type, type)
+        is('پیش‌نمایش صاحب سهم را عوض نمی‌کند', preview.replacement.partnerName, 'مالک آزمایشی')
+        eq('پیش‌نمایش برداشت درست', preview.replacement.drawAmount ?? 0, 1500)
+        eq('پیش‌نمایش هیچ پولی تغییر نمی‌دهد', await cashBalance(), 4400)
+        const correctedId = await correctExpense(originalId, input)
+        const corrected = (await db.expenses.get(correctedId))!
+        const original = (await db.expenses.get(originalId))!
+        eq('صندوق مطابق پیش‌نمایش', await cashBalance(), 4300)
+        eq('طلبکار قبلی طلب ما شد', (await db.suppliers.get(aId))!.balance, -400)
+        eq('قرض جدید', (await db.suppliers.get(bId))!.balance, 1200)
+        is('تسویه قبلی دست‌نخورده', JSON.stringify(await db.payments.toArray()), paymentsBefore)
+        is('صاحب سهم محفوظ', corrected.partnerName, 'مالک آزمایشی')
+        is('نوع خانه/شخصی محفوظ', corrected.type, type)
+        eq('کل برداشت اصلاح شد', corrected.drawAmount ?? 0, 1500)
+        is('رد سند قبلی محفوظ', original.deleted, true)
+        is('پیوند به سند قبلی', corrected.correctionOfUuid, original.uuid)
+        is('دلیل محفوظ', corrected.correctionReason, input.reason)
+        eq('مبلغ قبلی محفوظ', corrected.correctionPrevious?.amount ?? 0, 1200)
+        is('تاریخ درست محفوظ', corrected.date, input.date)
+        is('یادداشت درست محفوظ', corrected.note, input.note)
+        eq('گدام بدون تغییر', (await db.variants.get(variantId))!.stockQty, 7)
+        eq('مصرف شخصی به مصرف تجارت تبدیل نشد', await profitAndLoss(), 0)
+        const host = document.createElement('div'); document.body.append(host)
+        const root = createRoot(host)
+        try {
+          root.render(createElement(PartnersCard, { netProfit: 0 }))
+          await waitUntil(() => host.textContent?.includes('برداشت/مصرف امسال') === true)
+          const drawLine = Array.from(host.querySelectorAll('p')).find(p => p.textContent?.includes('برداشت/مصرف امسال'))
+          is('راپور واقعی شریک برداشت را دوبار جمع نمی‌کند', drawLine?.textContent?.includes('۱٬۵۰۰'), true)
+        } finally { root.unmount(); host.remove() }
+        const snapshot = JSON.stringify([await db.expenses.toArray(), await db.cashMovements.toArray(), await db.suppliers.toArray()])
+        await throws('کمبود صندوق اصلاح را کاملاً رد می‌کند', () => correctExpense(correctedId, { ...input, amount: 6000, cashPaid: 5800 }))
+        is('شکست هیچ سند یا اثر نیمه‌کاره ندارد', JSON.stringify([await db.expenses.toArray(), await db.cashMovements.toArray(), await db.suppliers.toArray()]), snapshot)
+        const nextId = await correctExpense(correctedId, { ...input, amount: 100, cashPaid: 0 })
+        eq('اصلاح دوم نقد را برگرداند', await cashBalance(), 4600)
+        eq('اصلاح دوم قرض جدید را کم کرد', (await db.suppliers.get(bId))!.balance, 100)
+        is('زنجیره اصلاح دوم', (await db.expenses.get(nextId))!.correctionOfUuid, corrected.uuid)
+        await deleteExpense(nextId)
+        eq('حذف سند اصلاح‌شده قرض را برگرداند', (await db.suppliers.get(bId))!.balance, 0)
+        eq('حذف سند قرضی صندوق را تغییر نداد', await cashBalance(), 4600)
+        eq('دفتر صندوق با موجودی برابر', await cashLedgerEnd(), 4600)
+      }
+    }
+  },
+  {
+    name: 'محافظ اصلاح مصرف — سند قدیمی، برداشت و ارقام نامعتبر رد شود',
+    run: async () => {
+      await seedCash(1000)
+      const legacyId = await db.expenses.add({ date: Date.now(), type: 'home', categoryName: 'قدیمی', amount: 100 })
+      const withdrawalId = await db.expenses.add({ date: Date.now(), type: 'withdrawal', categoryName: 'برداشت', amount: 100 })
+      const homeId = await addExpense({ date: Date.now(), type: 'home', categoryName: 'خانه', amount: 100, cashPaid: 100, creditAmount: 0 })
+      const input = { date: Date.now(), amount: 200, cashPaid: 200, reason: 'اصلاح' }
+      await throws('حساب سند قدیمی حدس زده نشود', () => correctExpense(legacyId, input))
+      await throws('برداشت به مصرف بدل نشود', () => correctExpense(withdrawalId, input))
+      for (const invalid of [{ amount: NaN }, { cashPaid: Infinity }, { amount: 0 }, { cashPaid: -1 }, { cashPaid: 201 }, { reason: ' ' }, { date: NaN }]) {
+        await throws('ورودی نامعتبر هیچ اصلاحی نسازد', () => correctExpense(homeId, { ...input, ...invalid }))
+      }
+      eq('صندوق پس از خطاها ثابت', await cashBalance(), 900)
+      eq('هیچ سند جایگزین ساخته نشد', await db.expenses.count(), 3)
+      const newId = await correctExpense(homeId, input)
+      is('مالک بی‌نام به شخص دیگری انتقال نمی‌یابد', (await db.expenses.get(newId))!.partnerName, undefined)
+      eq('مصرف نقدی مالک برداشت درست دارد', (await db.expenses.get(newId))!.drawAmount ?? 0, 200)
+      await throws('اصلاح دوباره سند قبلی رد شود', () => correctExpense(homeId, input))
+    }
+  },
+  {
     name: 'قرض قبلی تأمین‌کننده — اصلاح و پاک کردن امن',
     run: async () => {
       const supId = await newSupplier()

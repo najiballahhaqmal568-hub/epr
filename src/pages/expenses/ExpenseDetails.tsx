@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, type Expense } from '../../db'
 import { Modal } from '../../components/ui'
 import { fmtDate, fmtMoney } from '../../lib/format'
-import { deleteExpense, expenseCashPaid, expenseCreditAmount } from '../../lib/ops'
+import { deleteExpense, expenseCashPaid, expenseCreditAmount, expenseCorrectionBlockedReason } from '../../lib/ops'
 import { TYPE_LABELS } from './labels'
 
 /** Shared list/calendar entry; accounting stays in ops, never in the view. */
@@ -22,7 +22,8 @@ export default function ExpenseDetails({ expenseId, onClose, onCorrect }: {
   useEffect(() => { setConfirmDelete(false); setError('') }, [expense])
   const close = () => { if (!busy.current) onClose() }
   const available = expense && !expense.deleted
-  const canCorrect = available && expense.type === 'business' && !expense.shopClosed && expense.amount > 0
+  const correctionBlocked = available ? expenseCorrectionBlockedReason(expense) : null
+  const canCorrect = available && !correctionBlocked
 
   return (
     <Modal title="جزئیات مصرف" onClose={close}>
@@ -66,6 +67,7 @@ export default function ExpenseDetails({ expenseId, onClose, onCorrect }: {
               }}>{saving ? 'در حال حذف…' : 'تأیید حذف همین سند'}</button>
             </div>
           </div> : <div className="flex flex-col gap-2">
+            {correctionBlocked && (expense.type === 'home' || expense.type === 'personal') && <p className="text-sm text-amber-800">{correctionBlocked}</p>}
             {canCorrect && <button className="rounded-xl bg-teal-700 py-3 font-bold text-white" onClick={() => onCorrect(expense)}>اصلاح سند</button>}
             <button className="rounded-xl border border-red-200 py-3 font-bold text-red-700" onClick={() => setConfirmDelete(true)}>حذف سند اشتباهی</button>
           </div>}

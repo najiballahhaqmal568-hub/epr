@@ -2218,13 +2218,25 @@ export interface ExpenseCorrectionInput {
 export interface ExpenseCorrectionPreview {
   accounts: Array<{ partyId: number; partyName: string; before: number; after: number }>
   cash: Array<{ box: string; before: number; after: number }>
+  draw?: { partnerName?: string; before: number; after: number }
   replacement: Expense
 }
 
-async function expenseReplacement(current: Expense, input: ExpenseCorrectionInput): Promise<Expense> {
-  if (current.type !== 'business' || current.shopClosed || current.amount <= 0) {
-    throw new Error('این نوع مصرف از اینجا قابل اصلاح نیست')
+/** Legacy private expenses derive ownership from cash movements; don't guess it. */
+export function expenseCorrectionBlockedReason(expense: Expense): string | null {
+  if (expense.deleted || expense.shopClosed || !Number.isFinite(expense.amount) || expense.amount <= 0 || !['business', 'home', 'personal'].includes(expense.type)) {
+    return 'این نوع مصرف از اینجا قابل اصلاح نیست'
   }
+  if (expense.type !== 'business' && expense.drawAmount !== expense.amount) {
+    return 'اطلاعات برداشت این سند قدیمی یا ناقص است؛ پیش از اصلاح باید حساب صاحب سهم بررسی شود.'
+  }
+  return null
+}
+
+async function expenseReplacement(current: Expense, input: ExpenseCorrectionInput): Promise<Expense> {
+  const blocked = expenseCorrectionBlockedReason(current)
+  if (blocked) throw new Error(blocked)
+  if (!Number.isFinite(input.amount) || !Number.isFinite(input.cashPaid)) throw new Error('مبلغ درست را وارد کنید')
   const amount = afn(input.amount)
   const cashPaid = afn(input.cashPaid)
   if (amount <= 0) throw new Error('مبلغ مصرف باید بیشتر از صفر باشد')
@@ -2242,7 +2254,10 @@ async function expenseReplacement(current: Expense, input: ExpenseCorrectionInpu
     creditAmount,
     box: current.box,
     note: input.note?.trim() || undefined,
-    type: 'business'
+    type: current.type,
+    ...(current.type === 'home' || current.type === 'personal'
+      ? { drawAmount: amount, partnerName: current.partnerName }
+      : {})
   }
 
   if (creditAmount > 0) {
@@ -2283,7 +2298,14 @@ export async function previewExpenseCorrection(
   const newCashPaid = expenseCashPaid(replacement)
   const box = boxOf(current)
   const before = await cashBalance(box)
-  return { accounts, cash: [{ box, before, after: before + oldCashPaid - newCashPaid }], replacement }
+  return {
+    accounts,
+    cash: [{ box, before, after: before + oldCashPaid - newCashPaid }],
+    ...(replacement.drawAmount !== undefined ? {
+      draw: { partnerName: current.partnerName, before: current.drawAmount!, after: replacement.drawAmount }
+    } : {}),
+    replacement
+  }
 }
 
 /**
@@ -2323,6 +2345,8 @@ export async function correctExpense(expenseId: number, input: ExpenseCorrection
         refId: expenseId,
         amount: oldCashPaid,
         box,
+        drawAccountedByExpense: current.drawAmount !== undefined,
+        partnerName: current.partnerName,
         note: `اصلاح — برگشت سند قبلی ${current.categoryName}`
       })
     }
@@ -2337,6 +2361,8 @@ export async function correctExpense(expenseId: number, input: ExpenseCorrection
       cashPaid: oldCashPaid,
       creditAmount: expenseCreditAmount(current),
       creditorName: current.creditorName,
+      drawAmount: current.drawAmount,
+      partnerName: current.partnerName,
       note: current.note,
       box: current.box
     }
@@ -2361,6 +2387,8 @@ export async function correctExpense(expenseId: number, input: ExpenseCorrection
         refId: replacementId,
         amount: -newCashPaid,
         box,
+        drawAccountedByExpense: replacement.drawAmount !== undefined,
+        partnerName: replacement.partnerName,
         note: `اصلاح مصرف — ${replacement.categoryName}`
       })
     }
