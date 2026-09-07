@@ -234,25 +234,40 @@ async function pushTable(
 
 async function pullTable(table: SyncTable, deviceId: string, generation: number): Promise<number> {
   const supa = (await getSupa())!
-  const cursor = ((await getState(`pull:${table}`)) as string | undefined) ?? '1970-01-01T00:00:00Z'
-  const { data, error } = await supa
-    .from(REMOTE[table])
-    .select('*')
-    .eq('generation', generation)
-    .gt('updated_at', cursor)
-    .order('updated_at', { ascending: true })
-    .limit(1000)
-  if (error) throw new Error(`${table}: ${error.message}`)
-  if (!data?.length) return 0
+  let cursor = ((await getState(`pull:${table}`)) as string | undefined) ?? '1970-01-01T00:00:00Z'
+  let cursorUuid = (await getState(`pullUuid:${table}`)) as string | undefined
   let applied = 0
-  for (const row of data) {
-    if (row.device_id !== deviceId) {
-      await applyRemoteRow(table, row)
-      applied++
+  // A restore can give thousands of rows the same timestamp. Timestamp-only
+  // cursors permanently skip the rest of a full page; use UUID as a tie-breaker.
+  // Keep the original timestamp key for compatibility with existing devices.
+  while (true) {
+    let query = supa.from(REMOTE[table]).select('*').eq('generation', generation)
+    query = cursorUuid
+      ? query.or(`updated_at.gt.${cursor},and(updated_at.eq.${cursor},uuid.gt.${cursorUuid})`)
+      // Replay the boundary once for old cursors, recovering previously skipped
+      // rows. applyRemoteRow is idempotent; do not clear the device's records.
+      : query.gte('updated_at', cursor)
+    const { data, error } = await query
+      .order('updated_at', { ascending: true })
+      .order('uuid', { ascending: true })
+      .limit(1000)
+    if (error) throw new Error(`${table}: ${error.message}`)
+    if (!data?.length) return applied
+    for (const row of data) {
+      if (row.device_id !== deviceId) {
+        await applyRemoteRow(table, row)
+        applied++
+      }
+      // Advance only after applying the row. Persist both cursor fields together
+      // so interrupted downloads resume safely, including inside timestamp ties.
+      await db.syncState.bulkPut([
+        { key: `pull:${table}`, value: row.updated_at },
+        { key: `pullUuid:${table}`, value: row.uuid }
+      ])
+      cursor = row.updated_at
+      cursorUuid = row.uuid
     }
-    await setState(`pull:${table}`, row.updated_at)
   }
-  return applied
 }
 
 export async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: boolean; data: Record<string, unknown> }) {
