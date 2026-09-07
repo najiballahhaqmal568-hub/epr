@@ -2,7 +2,7 @@
 
 - [x] Checkpoint 1: pure calculations and validation, red/green tests.
 - [x] Checkpoint 2: atomic accounting, correction/cancel, sync replay tests.
-- [ ] Checkpoint 3: forms, ledger display, browser verification and release.
+- [x] Checkpoint 3: forms, ledger display, browser verification and release.
 
 Checkpoint 1 verified 2026-09-07: `npm test` passed 1040 checks across 105
 scenarios; `npm run build` passed with existing bundle/import warnings.
@@ -46,3 +46,16 @@ Full `npm audit --audit-level=moderate`: zero vulnerabilities. With patched
 dependencies, 1130 checks / 111 scenarios, freight UI, local sync-safety and
 production build pass. Existing bundle/import warnings remain. No APK built.
 Publishing is pending confirmation of the GitHub Pages workflow and live assets.
+
+Published 2026-09-07: bcb219d, GitHub Pages run 34139856638 succeeded.
+Public index and index-BMpd1tua.js return HTTP 200; the live bundle includes
+freight checkout and existing-sale controls. Historical pending notes above
+describe earlier gates, now resolved. No production account/data used for QA.
+Users must refresh both devices before using freight; do not reset local data.
+
+Post-deploy browser smoke check: isolated Chrome loaded the public login page
+at 320/390/768/1440 widths with no horizontal overflow, console warnings/errors
+or failed HTTP responses. Mobile screenshot qa-release-login.png inspected.
+Requests outside the app host were blocked; no account login, password reset,
+business writes or live authenticated sync was tested. Public service worker
+also returns HTTP 200 and references the deployed index-BMpd1tua.js bundle.
