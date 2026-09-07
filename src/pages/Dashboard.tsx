@@ -4,19 +4,13 @@ import { netWorth } from '../lib/networth'
 import { fmtMoney, fmtNum, startOfDay } from '../lib/format'
 import { reorderProducts } from '../lib/reorder'
 import { syncNow, useSyncStatus } from '../lib/sync'
+import { syncStatusLabel } from '../lib/syncStatusLabel'
 
 function SyncChip() {
   const status = useSyncStatus()
   if (status.state === 'off') return null
 
-  const label =
-    status.state === 'syncing'
-      ? 'در حال همگام‌سازی'
-      : status.state === 'offline'
-        ? 'آفلاین'
-        : status.state === 'error'
-          ? 'خطای همگام‌سازی'
-          : 'همگام است'
+  const label = syncStatusLabel(status)
 
   return (
     <button
@@ -27,7 +21,7 @@ function SyncChip() {
       aria-label="وضعیت همگام‌سازی"
       title={status.message}
       className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-        status.state === 'ok'
+        status.state === 'ok' && status.pending === 0
           ? 'bg-teal-50 text-teal-700'
           : status.state === 'error'
             ? 'bg-red-50 text-red-600'

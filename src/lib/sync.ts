@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { applyRebuiltCosts } from './costing'
 import { effectsOf, type DocTable } from './effects'
 import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Purchase } from '../db'
@@ -24,7 +25,8 @@ const REMOTE: Record<SyncTable, string> = {
 export interface SyncStatus {
   state: 'off' | 'offline' | 'syncing' | 'ok' | 'error'
   lastSync: number | null
-  pending: number
+  pending: number | null
+  restorePending?: boolean
   message?: string
 }
 
@@ -39,12 +41,38 @@ function setStatus(patch: Partial<SyncStatus>) {
 
 export function useSyncStatus(): SyncStatus {
   const [, force] = useState(0)
+  const [online, setOnline] = useState(() => navigator.onLine)
+  const summary = useLiveQuery(async () => {
+    const states = await db.syncState.toArray()
+    const values = new Map(states.map(row => [row.key, row.value]))
+    let pending = 0
+    for (const table of SYNC_TABLES) {
+      const cursor = Number(values.get(`push:${table}`) ?? 0)
+      // Count records, not transactions. Include the scan's millisecond boundary
+      // conservatively: a local commit may finish after the upload scan.
+      pending += await db.table(table).where('localUpdatedAt').aboveOrEqual(Math.max(1, cursor)).count()
+    }
+    const saved = values.get('lastSuccessfulSync')
+    return { pending, lastSync: typeof saved === 'number' && Number.isFinite(saved) ? saved : null,
+      restorePending: Boolean(values.get('restorePending')) }
+  }, [])
   useEffect(() => {
     const l = () => force((x) => x + 1)
+    const connectionChanged = () => setOnline(navigator.onLine)
     listeners.add(l)
-    return () => void listeners.delete(l)
+    window.addEventListener('online', connectionChanged)
+    window.addEventListener('offline', connectionChanged)
+    return () => {
+      listeners.delete(l)
+      window.removeEventListener('online', connectionChanged)
+      window.removeEventListener('offline', connectionChanged)
+    }
   }, [])
-  return status
+  const result = { ...status, pending: summary?.pending ?? null, lastSync: summary?.lastSync ?? null,
+    restorePending: summary?.restorePending ?? false }
+  if (result.restorePending) return { ...result, state: 'error', message: 'جایگزینی بکاپ نیمه‌تمام است؛ اطلاعات را حذف نکنید. از بخش بکاپ و بازیابی، همان فایل را دوباره جایگزین کنید.' }
+  if (!online) return { ...result, state: 'offline' }
+  return result
 }
 
 async function getState(key: string): Promise<unknown> {
@@ -524,24 +552,30 @@ export async function replaceCloudWithLocalSnapshot(): Promise<{ shopId: string;
 }
 
 export async function syncNow(throwOnError = false): Promise<void> {
-  if (syncing) return
-  const supa = await getSupa()
-  if (!supa) {
-    setStatus({ state: 'off' })
+  if (syncing) {
+    if (throwOnError) throw new Error('همگام‌سازی هنوز روان است؛ پس از پایان دوباره کوشش کنید')
     return
   }
-  const { data: auth } = await supa.auth.getSession()
-  if (!auth.session) {
-    setStatus({ state: 'off' })
-    return
-  }
-  if (!navigator.onLine) {
-    setStatus({ state: 'offline' })
-    return
-  }
+  // Lock before the first await so two callers cannot start concurrent runs.
   syncing = true
-  setStatus({ state: 'syncing' })
+  let failureState: SyncStatus['state'] = 'error'
+  setStatus({ state: 'syncing', message: undefined })
   try {
+    if (!navigator.onLine) {
+      failureState = 'offline'
+      throw new Error('اینترنت وصل نیست؛ تغییرات در این دستگاه مانده است')
+    }
+    const supa = await getSupa()
+    if (!supa) {
+      failureState = 'off'
+      throw new Error('سرور تنظیم نشده؛ همگام‌سازی انجام نشد')
+    }
+    const { data: auth, error: authError } = await supa.auth.getSession()
+    if (authError) throw authError
+    if (!auth.session) {
+      failureState = 'off'
+      throw new Error('برای همگام‌سازی وارد حساب کاربری شوید')
+    }
     if (await hasPendingCloudRestore()) {
       throw new Error('جایگزینی بکاپ نیمه‌تمام است؛ همان فایل بکاپ را دوباره جایگزین کنید')
     }
@@ -553,24 +587,30 @@ export async function syncNow(throwOnError = false): Promise<void> {
     for (const t of SYNC_TABLES) await pushTable(t, profile.shop_id, deviceId, generation, mergeOnly)
     await db.syncState.delete('restorePushMode')
     for (const t of SYNC_TABLES) await pullTable(t, deviceId, generation)
-    setStatus({ state: 'ok', lastSync: Date.now(), message: undefined })
+    const lastSync = Date.now()
+    await setState('lastSuccessfulSync', lastSync)
+    setStatus({ state: 'ok', lastSync, message: undefined })
   } catch (e) {
-    setStatus({ state: 'error', message: e instanceof Error ? e.message : String(e) })
+    setStatus({ state: failureState, message: e instanceof Error ? e.message : String(e) })
     if (throwOnError) throw e
   } finally {
     syncing = false
   }
 }
 
+const resumeSync = () => { void syncNow() }
+
 export function startSync(): void {
   if (timer) return
   void syncNow()
   timer = setInterval(() => void syncNow(), 30_000)
-  window.addEventListener('online', () => void syncNow())
-  window.addEventListener('focus', () => void syncNow())
+  window.addEventListener('online', resumeSync)
+  window.addEventListener('focus', resumeSync)
 }
 
 export function stopSync(): void {
   if (timer) clearInterval(timer)
   timer = null
+  window.removeEventListener('online', resumeSync)
+  window.removeEventListener('focus', resumeSync)
 }

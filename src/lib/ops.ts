@@ -2782,7 +2782,7 @@ export async function exportBackup(): Promise<string> {
 
 export type BackupImportMode = 'merge' | 'replace'
 
-export async function importBackup(json: string, mode: BackupImportMode = 'merge'): Promise<void> {
+export async function importBackup(json: string, mode: BackupImportMode = 'merge'): Promise<{ cloudSynced: boolean }> {
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
   const restoreTimestamp = Date.now()
@@ -2849,7 +2849,15 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
     }
 
     // Safe merge uses insert-only upserts; replace uses the fresh generation.
-    await sync.syncNow(true)
+    try {
+      await sync.syncNow(true)
+      return { cloudSynced: true }
+    } catch (error) {
+      // Offline/local-only import remains usable, but the UI must not claim
+      // that the cloud accepted it. Pending rows remain available for retry.
+      if (mode === 'replace') throw error
+      return { cloudSynced: false }
+    }
   } finally {
     sync.startSync()
   }

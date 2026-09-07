@@ -48,6 +48,7 @@ npm test
 
 ```bash
 node tests/sync-safety.mjs
+node tests/sync-status.mjs
 ```
 
 دریافت بیش از ۱۰۰۰ رکورد، ادامه پس از قطع ارتباط و محافظت بازیابی نیمه‌تمام

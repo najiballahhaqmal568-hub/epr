@@ -71,6 +71,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .sync-status[data-state="ok"] .sync-status-dot { background: #326657; }
 .sync-status[data-state="error"] .sync-status-dot { background: #b91c1c; }
 .sync-status[data-state="offline"] .sync-status-dot { background: #a16207; }
+.sync-status[data-state="pending"] .sync-status-dot { background: #a16207; }
 .app-nav { position: fixed; inset-inline: 0; bottom: 0; display: flex; z-index: 40; background: #fdfcfa; border-top: 1px solid #e4e0d9; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
 .app-nav-brand { display: none; }
 .app-nav button { display: flex; flex: 1; flex-direction: column; gap: 5px; align-items: center; justify-content: center; padding: 8px 2px; font-size: 11px; color: #686660; border-radius: 8px; }

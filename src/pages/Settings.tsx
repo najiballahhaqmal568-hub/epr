@@ -10,6 +10,7 @@ import FontSizeCard from './settings/FontSizeCard'
 import ReminderCard from './settings/ReminderCard'
 import IntegrityCard from './settings/IntegrityCard'
 import YearStartCard from './settings/YearStartCard'
+import SyncDetails from '../components/SyncDetails'
 
 export type SettingsSection = 'all' | 'account' | 'backup' | 'reminders' | 'app' | 'year' | 'integrity' | 'danger'
 
@@ -83,10 +84,12 @@ export default function Settings({
           `atel-emergency-before-cloud-restore-${new Date().toISOString().slice(0, 10)}.json`
         )
       }
-      await importBackup(json, mode)
+      const restored = await importBackup(json, mode)
       setMsg(
         mode === 'merge'
-          ? '✅ بکاپ به شکل امن ادغام شد؛ معلومات فعلی سرور نگه داشته شد.'
+          ? restored.cloudSynced
+            ? '✅ بکاپ به شکل امن ادغام شد؛ معلومات فعلی سرور نگه داشته شد.'
+            : 'بکاپ در این دستگاه وارد شد؛ همگام‌سازی هنوز کامل نشده است. وضعیت همگام‌سازی را بررسی کنید.'
           : '✅ بکاپ جای معلومات سرور را گرفت. موبایل‌های دیگر در همگام‌سازی بعدی خودکار تازه می‌شوند.'
       )
     } catch (e) {
@@ -107,6 +110,7 @@ export default function Settings({
         <h1 className="text-xl font-bold text-slate-800">{titles[section]}</h1>
       </div>
 
+      {show('account') && <SyncDetails />}
       {show('account') && <AccountCard isStaff={isStaff} onLogout={onLogout} />}
       {show('account') && !isStaff && <ServerCard />}
       {show('reminders') && <ReminderCard />}

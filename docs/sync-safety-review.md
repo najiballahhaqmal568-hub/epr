@@ -35,6 +35,41 @@ are real. It verifies:
 Also run `npm test` for accounting/correction regressions and `npm run build`
 for TypeScript and production bundling. There is no configured lint command.
 
+## Added: truthful sync status
+
+The header, dashboard, and settings share status wording. Settings now show
+the last successful cycle for this device, local records awaiting upload or
+confirmation, an offline explanation, and a retry action. Server configuration
+alone is no longer described as a successful connection. A pending restore
+has a distinct warning and does not offer an ordinary sync retry.
+
+`lastSuccessfulSync` is local sync metadata, written only after all table
+uploads and downloads finish. It survives reload and is cleared with the
+existing sync state during restore/shop changes. It is not proof that a
+second device has received the data.
+
+Pending count uses the existing local timestamp/upload-cursor protocol and
+indexed counts, including deleted records and excluding remote-applied rows
+(timestamp zero). It counts records, not business transactions. The upload
+scan's millisecond is included conservatively; an already sent boundary row
+may remain counted until the next successful cycle. This is not a per-record
+server receipt ledger and does not fix clock rollback or other limitations
+of the existing timestamp protocol. Unknown/loading is never displayed as zero.
+
+`syncNow(true)` rejects offline, signed-out, unconfigured, and busy attempts.
+The run lock is acquired before async authentication; automatic callers still
+use the non-throwing mode. Named event handlers are removed by `stopSync`.
+`importBackup` returns `{ cloudSynced }`: local/merge imports remain usable
+offline but the UI distinguishes local import from completed cloud sync.
+Authoritative replacement failures still reject.
+
+Run `node tests/sync-status.mjs` for local-only status and UI verification:
+offline/signed-out rejection, pending creation and deletion, exclusion of
+remote changes, successful upload, preserved success time on error and reload,
+retry, keyboard disclosure, responsive widths, busy rejection, event cleanup,
+and navigation from the actual app header. `tests/checks.ts` also guards the
+local-import/cloud-success distinction. No production account is used.
+
 ## Limits and next work
 
 This is not verification against the owner's production account. The local
@@ -45,14 +80,10 @@ before choosing recovery; preserve backups from both devices first.
 
 Next increments, not implemented in this change:
 
-1. Make sync details honest: `pending` is currently a placeholder, `lastSync`
-   is memory-only, and configured server text is not proof of successful sync.
-2. Test strict sync callers while offline/unauthenticated/busy; they currently
-   can return without synchronizing. Test start/stop event-listener cleanup.
-3. Audit correction UI consistency using the existing preview/correction
+1. Audit correction UI consistency using the existing preview/correction
    operations in `src/lib/ops.ts`; preserve the shared accounting definitions
    in `src/lib/effects.ts` and the terminology in `CONTEXT.md`.
-4. Improve busy-store sales and shared payment forms in separate tested slices.
+2. Improve busy-store sales and shared payment forms in separate tested slices.
 
 ## Release and recovery
 

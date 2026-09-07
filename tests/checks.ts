@@ -409,7 +409,8 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
         }
       })
 
-      await importBackup(oldBackup)
+      const imported = await importBackup(oldBackup)
+      is('واردکردن محلی بدون ورود، موفقیت سرور نشان ندهد', imported.cloudSynced, false)
 
       is('آدرس سرور حساب نو ماند', (await db.settings.get('supaUrl'))?.value, 'https://new-project.supabase.co')
       is('کلید سرور حساب نو ماند', (await db.settings.get('supaKey'))?.value, 'new-current-anon-key-1234567890')
