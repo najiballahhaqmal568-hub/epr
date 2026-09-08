@@ -75,3 +75,21 @@ widths and rejection guards. `npm test`: 1130 checks / 111 scenarios pass.
 `npm run build` passes with existing bundle/import warnings. Mobile confirmation
 screenshot inspected. Publication pending. If the shortcut has an issue, revert
 its feature commit without restoring/resetting data; tombstones/audit remain.
+
+Ledger cancellation published as 1034481: Pages run 34189784658 succeeded and
+public index-BVbq9trm.js contains the confirmation control (HTTP 200).
+
+## Wholesale cart: one price for a product's selected sizes (2026-09-08)
+
+BulkSalePrice groups cart rows by variant.productId, never product name. One
+positive whole-AFN per-pair price applies to all currently selected sizes/colors
+of that product. Individual row edits remain. No database price writes: standard
+draft persistence and checkout consume the edited lines; discounts stay separate.
+Revert this UI-only feature commit if needed; no migrations/reset or APK.
+
+`node tests/bulk-sale-price.mjs` failed for the missing control before the fix,
+then passed scope isolation (same-name different product), invalid/Dari input,
+read-only permission change, per-size editing, draft preservation and final sale
+total. Catalog and historical prices remain unchanged. Responsive 320–1440px
+and mobile screenshot verified. Full suite: 1130 checks / 111 scenarios passed.
+Production build passes with existing bundle/import warnings. Release pending.

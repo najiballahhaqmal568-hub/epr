@@ -9,6 +9,7 @@ import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clea
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import StockSelectionSummary from './StockSelectionSummary'
+import BulkSalePrice from './BulkSalePrice'
 
 function EmbeddedSale({ children }: { children: ReactNode; title: string; onClose: () => void }) {
   return <div className="sale-embedded">{children}</div>
@@ -480,6 +481,7 @@ export function NewSaleModal({
       <section className="sale-checkout">
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
       {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
+      {saleType === 'wholesale' && variants && <BulkSalePrice lines={lines} variants={variants} setLines={setLines} disabled={pending} />}
       {lines.map((l, i) => (
         <div key={l.variantId} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-2">
           <div className="flex-1">
