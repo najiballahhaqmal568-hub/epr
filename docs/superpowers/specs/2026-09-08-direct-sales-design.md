@@ -1,7 +1,8 @@
 # فروش مستقیم — طرح برای تأیید نهایی
 
-Status: business behavior approved in chat; this technical design awaits review.
-No implementation, production changes, migration or publication in this step.
+Status: business behavior and this technical design approved by the owner in chat
+on 2026-09-08. Implementation planning is authorized.
+No implementation, production changes, migration or publication in this document.
 
 ## خلاصه برای مالک
 
