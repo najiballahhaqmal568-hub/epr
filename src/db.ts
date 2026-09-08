@@ -111,6 +111,8 @@ export type HistoricalGoodsLine = Omit<SaleLine, 'variantId'> & { variantId?: nu
 export type LenderAction = 'cashRepayment' | 'cashLoan' | 'goodsSettlement' | 'goodsCredit'
 
 export interface Sale extends Synced {
+  cancelledReason?: string
+  cancelledAt?: number
   id?: number
   date: number
   customerId?: number

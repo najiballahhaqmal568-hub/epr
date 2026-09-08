@@ -59,3 +59,19 @@ or failed HTTP responses. Mobile screenshot qa-release-login.png inspected.
 Requests outside the app host were blocked; no account login, password reset,
 business writes or live authenticated sync was tested. Public service worker
 also returns HTTP 200 and references the deployed index-BMpd1tua.js bundle.
+
+## Customer ledger: cancel only the selected sale (2026-09-08)
+
+Implemented a ledger-row button and reason-required preview. Reuses deleteSale
+inside a guarded transaction; preserves the tombstone with cancellation reason
+and time. Opening debt and independent later payments remain. Rejects a changed
+preview, wrong customer, read-only access, missing stock records, linked returns,
+freight and special settlement sales rather than cascading from this shortcut.
+No live sale was cancelled. No schema migration or APK update.
+
+`node tests/ledger-sale-cancel.mjs` reproduced the missing button before the fix,
+then passed real synthetic ledger UI/accounting, audit, double-click, responsive
+widths and rejection guards. `npm test`: 1130 checks / 111 scenarios pass.
+`npm run build` passes with existing bundle/import warnings. Mobile confirmation
+screenshot inspected. Publication pending. If the shortcut has an issue, revert
+its feature commit without restoring/resetting data; tombstones/audit remain.

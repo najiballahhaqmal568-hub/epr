@@ -7,9 +7,11 @@ import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
 import CorrectCustomerPaymentModal from './CorrectCustomerPaymentModal'
+import CancelLedgerSaleModal from './CancelLedgerSaleModal'
 
 export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [showPay, setShowPay] = useState(false)
+  const [cancelSaleId, setCancelSaleId] = useState<number | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [showDebt, setShowDebt] = useState(false)
   const [amount, setAmount] = useState('')
@@ -193,6 +195,10 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                 {fmtMoney(Math.abs(r.delta))}
               </p>
               <p className="text-xs text-slate-500">مانده: {fmtMoney(r.balance)}</p>
+              {r.source?.table === 'sales' && !accessFlags.readOnly && <button
+                className="mt-2 rounded-lg bg-red-50 px-2 py-2 text-xs font-bold text-red-700"
+                onClick={() => setCancelSaleId(r.source!.id)}
+              >ابطال همین فروش</button>}
               {/* فقط سندهای دستی (دریافت پول و قرض قبلی) — فروش و مرجوعی از راه خودشان پاک می‌شوند */}
               {r.source?.table === 'payments' && (
                 (() => {
@@ -281,6 +287,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
       )}
 
       {toCorrect && <CorrectCustomerPaymentModal payment={toCorrect} onClose={() => setToCorrect(null)} />}
+      {cancelSaleId !== null && <CancelLedgerSaleModal saleId={cancelSaleId} customerId={c.id!} onClose={() => setCancelSaleId(null)} />}
 
       {toCancel && (
         <Modal title="ابطال برگشت" onClose={() => setToCancel(null)}>
