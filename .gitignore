@@ -9,3 +9,6 @@ android/app/build/
 android/.gradle/
 shoe-erp.apk
 tsconfig.tsbuildinfo
+
+# Isolated feature workspaces
+.worktrees/
