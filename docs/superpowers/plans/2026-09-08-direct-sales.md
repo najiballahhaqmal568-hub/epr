@@ -240,7 +240,9 @@ rec.directPayment = { ...ref, supplierId: supplier.id }
 
 ## Task 4: Atomic creation and explicit settlement events
 
-**Files:** Create `src/lib/directTradeOps.ts`, `src/lib/financialPosting.ts`; modify `src/lib/ops.ts`, `tests/direct-trade-fixtures.ts`, `tests/direct-trade-checks.ts`.
+**Files:** Create `src/lib/directTradeOps.ts`, `src/lib/financialPosting.ts`; modify `src/lib/ops.ts`, `tests/direct-trade-fixtures.ts`, `tests/direct-trade-checks.ts`. Add only optional `CashMovement.directPaymentUuid?: string` in `src/db.ts` for stable direct-event linkage; this is additive JSON metadata, not a database schema migration.
+
+**Source-verified integration notes:** The cash writer depends on `afn`, `boxOf` and `SHOP_BOX`; move those helpers with it and preserve their public exports from `ops.ts` to avoid a runtime import cycle. Include `db.settings` and `db.syncState` in the parent write transaction because fresh state/eligibility reads use those stores. Keep these integration changes behavior-preserving for ordinary operations.
 
 **Interfaces:**
 
