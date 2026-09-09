@@ -145,6 +145,15 @@ export async function encodeRefs(table: SyncTable, rec: Record<string, unknown>)
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
     await enc('lenderId', 'suppliers', 'lenderUuid')
     const direct = out.directPayment as Record<string, unknown> | undefined
+    if (direct?.route === 'supplierPayment' && (Number(out.sarrafAmount ?? 0) > 0 || out.sarrafId !== undefined)) {
+      const sarrafId = out.sarrafId
+      const sarraf = typeof sarrafId === 'number' ? await db.suppliers.get(sarrafId) : undefined
+      if (!sarraf || sarraf.deleted || !sarraf.uuid || sarraf.kind !== 'sarraf' || sarrafId === out.partyId) {
+        throw new RecoverableSyncReferenceError('حساب صراف فعال و جدا از فروشنده یافت نشد؛ دوباره بررسی و همگام کنید.')
+      }
+      out.sarrafUuid = sarraf.uuid
+      delete out.sarrafId
+    }
     if (direct && typeof direct.supplierId === 'number') {
       const supplierUuid = (await idMap('suppliers')).get(direct.supplierId)
       if (!supplierUuid) throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')

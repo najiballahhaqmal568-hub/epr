@@ -96,6 +96,30 @@ try {
   assert.equal(result.enabledBefore,false); assert.equal(result.enabledAfter,true)
   assert.equal(result.readOnlyRejected,true); assert.equal(result.staleRejected,true); assert.equal(result.disabledRejected,true)
 
+  const addFreight=async(page,ids,offset)=>page.evaluate(async({ids,offset})=>{
+    const {db}=await import('/src/db.ts')
+    for(let i=0;i<offset;i++) await db.expenseCategories.add({uuid:`cat-pad-${offset}-${i}`,name:'pad'})
+    const categoryId=await db.expenseCategories.add({uuid:'freight-category-u',name:'Freight'})
+    await db.payments.add({uuid:'freight-u',date:1010,partyType:'customer',partyId:ids.customerId,partyName:'Customer',amount:200,cashDelta:200,via:'cash',shipping:{saleUuid:'sale-u',total:500,customerShare:200,received:200}})
+    await db.expenses.add({uuid:'freight-exp-u',date:1010,shippingPaymentUuid:'freight-u',categoryId,categoryName:'Freight',amount:300,cashPaid:300,type:'business'})
+    await db.cashMovements.add({uuid:'freight-cash-u',date:1010,shippingPaymentUuid:'freight-u',shippingRole:'paid',type:'expense',refId:categoryId,amount:-300,box:'shop'})
+    return (await (await import('/src/lib/directTradeState.ts')).loadDirectTrade('trade-u')).token
+  },{ids,offset})
+  const freightTokenA=await addFreight(a,idsA,0), freightTokenB=await addFreight(b,idsB,2)
+  assert.equal(freightTokenB,freightTokenA,'freight token projection must not retain local party/category/ref IDs or insertion order')
+  const changedFreightToken=await b.evaluate(async()=>{const {db}=await import('/src/db.ts'); const row=await db.cashMovements.where('uuid').equals('freight-cash-u').first(); await db.cashMovements.update(row.id,{amount:-301}); return (await (await import('/src/lib/directTradeState.ts')).loadDirectTrade('trade-u')).token})
+  assert.notEqual(changedFreightToken,freightTokenA,'freight financial changes must invalidate the token')
+
+  const sarrafEncoding=await b.evaluate(async ids=>{
+    const {db}=await import('/src/db.ts'); const {encodeRefs}=await import('/src/lib/sync.ts')
+    const ordinary=await db.suppliers.add({uuid:'ordinary-u',name:'Ordinary',balance:0,kind:'supplier'})
+    const deleted=await db.suppliers.add({uuid:'deleted-sarraf-u',name:'Deleted',balance:0,kind:'sarraf',deleted:true})
+    const encode=async sarrafId=>{try{await encodeRefs('payments',{date:1,partyType:'supplier',partyId:ids.supplierId,partyName:'Supplier',amount:100,cashDelta:0,via:'sarraf',sarrafId,sarrafAmount:100,directPayment:{tradeUuid:'trade-u',route:'supplierPayment'}});return false}catch{return true}}
+    const stateFor=async sarrafId=>{const id=await db.payments.add({uuid:`bad-sarraf-${sarrafId}`,date:1004,partyType:'supplier',partyId:ids.supplierId,partyName:'Supplier',amount:100,cashDelta:0,via:'sarraf',sarrafId,sarrafAmount:100,directPayment:{tradeUuid:'trade-u',route:'supplierPayment'}}); const status=(await (await import('/src/lib/directTradeState.ts')).loadDirectTrade('trade-u')).status; await db.payments.delete(id); return status}
+    return {missing:await encode(undefined),ordinary:await encode(ordinary),deleted:await encode(deleted),same:await encode(ids.supplierId),ordinaryState:await stateFor(ordinary),sameState:await stateFor(ids.supplierId)}
+  },idsB)
+  assert.deepEqual(sarrafEncoding,{missing:true,ordinary:true,deleted:true,same:true,ordinaryState:'conflict',sameState:'conflict'})
+
   // Strict required-party decoding: never accept the sender's numeric fallback.
   const missing=await b.evaluate(async()=>{
     const {db}=await import('/src/db.ts'); const {applyRemoteRow}=await import('/src/lib/sync.ts')
@@ -123,6 +147,7 @@ try {
     return {overallocated,cancellationVsPayment,firstOrder,secondOrder,afterPredecessor,conflict:(await loadDirectTrade('trade-u')).status}
   },idsB)
   assert.deepEqual(adversarial,{overallocated:'conflict',cancellationVsPayment:'conflict',firstOrder:'rev-right',secondOrder:'rev-right',afterPredecessor:'rev-right',conflict:'conflict'})
+  await b.evaluate(async()=>await (await import('/src/lib/sync.ts')).syncNow(true))
   const cursorBefore=await b.evaluate(async()=>(await (await import('/src/db.ts')).db.syncState.get('pullUuid:payments'))?.value)
   remote.get('payments').set('zz-missing-party',{uuid:'zz-missing-party',generation:0,updated_at:'2026-09-08T00:01:00Z',device_id:'other-device',deleted:false,data:{date:2,partyType:'customer',partyUuid:'missing-u',partyName:'Missing',amount:1,cashDelta:1,directPayment:{tradeUuid:'trade-u',route:'customerCash'}}})
   const failedPull=await b.evaluate(async()=>{try{await (await import('/src/lib/sync.ts')).syncNow(true);return false}catch{return true}})

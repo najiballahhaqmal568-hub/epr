@@ -35,6 +35,12 @@ function same(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right))
 }
 
+function stableRows<T extends { uuid?: string }>(rows: T[], localFields: string[]): Record<string, unknown>[] {
+  return rows.map(row => Object.fromEntries(Object.entries(row as Record<string, unknown>)
+    .filter(([key]) => !localFields.includes(key))))
+    .sort((left, right) => String(left.uuid ?? '').localeCompare(String(right.uuid ?? '')))
+}
+
 function validatePayment(payment: Payment, sale: Sale, purchase: Purchase): string | undefined {
   const route = payment.directPayment?.route
   if (!validDate(payment.date)) return 'تاریخ پرداخت مستقیم معتبر نیست.'
@@ -104,6 +110,8 @@ export async function loadDirectTrade(tradeUuid: string): Promise<DirectTradeSta
     for (const payment of payments) if (payment.sarrafId !== undefined) {
       const sarraf = await db.suppliers.get(payment.sarrafId)
       if (!sarraf || sarraf.deleted) issues.push('حساب صراف پرداخت فعال نیست.')
+      if (payment.directPayment?.route === 'supplierPayment' && ((payment.sarrafAmount ?? 0) > 0 || payment.sarrafId !== undefined) &&
+          (sarraf?.kind !== 'sarraf' || payment.sarrafId === purchase.supplierId)) issues.push('حساب تأمین مالی باید صراف فعال و جدا از فروشنده باشد.')
     }
   }
   const freightPayments = sale?.uuid ? await db.payments.filter(row => row.shipping?.saleUuid === sale.uuid).toArray() : []
@@ -129,7 +137,13 @@ export async function loadDirectTrade(tradeUuid: string): Promise<DirectTradeSta
     sarrafId: undefined, sarrafUuid: payment.sarrafId === undefined ? undefined : supplierRefs.get(payment.sarrafId)?.uuid,
     directPayment: payment.directPayment ? { ...payment.directPayment, supplierId: undefined,
       supplierUuid: payment.directPayment.supplierId === undefined ? payment.directPayment.supplierUuid : supplierRefs.get(payment.directPayment.supplierId)?.uuid } : undefined }))
-  const token = JSON.stringify(canonical({ tradeUuid, sale: portableSale, purchase: portablePurchase, payments: portablePayments, freightPayments, freightExpenses, freightCash, parties, conflictRows: conflictRows.map(row => row.value) }))
+  const portableFreightPayments = stableRows(freightPayments, ['id', 'localUpdatedAt', 'partyId', 'partyUuid', 'sarrafId', 'sarrafUuid', 'lenderId', 'lenderUuid'])
+    .map(payment => ({ ...payment, partyUuid: payment.partyType === 'customer' ? customer?.uuid : undefined }))
+  const portableFreightExpenses = stableRows(freightExpenses, ['id', 'localUpdatedAt', 'categoryId', 'categoryUuid', 'creditorId', 'creditorUuid'])
+  const portableFreightCash = stableRows(freightCash, ['id', 'localUpdatedAt', 'refId'])
+  const token = JSON.stringify(canonical({ tradeUuid, sale: portableSale, purchase: portablePurchase, payments: portablePayments,
+    freightPayments: portableFreightPayments, freightExpenses: portableFreightExpenses, freightCash: portableFreightCash,
+    parties, conflictRows: conflictRows.map(row => row.value) }))
   const featureEnabled = await directFeatureEnabled()
   return { sale, purchase, payments, totals, balances, status, token, issues, featureEnabled }
 }

@@ -52,3 +52,20 @@ Future direct correction/cancellation operations must await `syncNow(true)` befo
 preview, then re-load state and `directTrades.enabled` inside their Dexie write
 transaction (including `db.settings`) and compare the fresh token. They must not run
 network work inside that transaction.
+
+## Independent review fix — round 1
+
+Added red regressions for two review findings. Equivalent freight bundles initially
+produced different tokens when their local party/category/reference IDs differed.
+The token now uses sorted stable freight projections that retain financial and
+correction/link content while excluding device-local IDs; changing a freight cash
+amount still changes the token. A second regression proved funded direct supplier
+payments could reach upload with no live sarraf UUID. Encoding now requires a live
+`kind: 'sarraf'` account distinct from the paid supplier, and the read state marks
+ordinary-supplier or self-supplier funding as conflict. Ordinary payment encoding
+is unchanged.
+
+The cancellation-versus-payment coverage uses the stored business date and does
+not prove safety for a concurrently-created backdated event. That requires the
+cancellation payment-set/causal snapshot and lineage planned for Task 5; this task
+does not claim that unsupported guarantee.
