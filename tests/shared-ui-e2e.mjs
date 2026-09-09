@@ -91,6 +91,20 @@ try {
           return range.getClientRects().length === 1 && el.scrollWidth <= el.clientWidth
         })), true)
       })
+      for (const kind of ['card', 'button']) {
+        await check(`${kind} amount stays intact outside summaries at ${width}/${scale}`, async () => {
+          assert.equal(await page.getByTestId(`${kind}-money`).evaluate(el => {
+            const range = document.createRange(); range.selectNodeContents(el)
+            return range.getClientRects().length === 1 && el.scrollWidth <= el.clientWidth
+          }), true)
+        })
+        if (width === 320 && scale === 'xl') await check(`${kind} long Dari label wraps without clipping`, async () => {
+          assert.equal(await page.getByTestId(`${kind}-prose`).evaluate(el => {
+            const range = document.createRange(); range.selectNodeContents(el)
+            return range.getClientRects().length > 1 && el.scrollWidth <= el.clientWidth
+          }), true)
+        })
+      }
       await page.screenshot({ path: `${artifacts}/${width}-${scale}.png`, fullPage: true })
     }
   }

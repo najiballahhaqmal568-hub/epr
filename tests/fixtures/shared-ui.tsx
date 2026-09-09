@@ -31,6 +31,10 @@ function Fixture() {
       <button className="mt-2 rounded-xl bg-slate-100 px-3" onClick={() => setChild(n => n + 1)}><span>پرداخت مستقل</span></button>
     </Card></section>
     <section data-testid="static-card"><Card>این کارت فقط معلومات را نشان می‌دهد و دکمه نیست.</Card></section>
+    <section data-testid="money-card"><Card><div className="flex items-center justify-between gap-3">
+      <p data-testid="card-prose">مشتری آزمایشی با نام خانوادگی طولانی</p><p data-testid="card-money" className="font-bold text-teal-700">۱۲۳٬۴۵۶</p>
+    </div></Card></section>
+    <button className="account-row surface mb-3"><span data-testid="button-prose">مشتری آزمایشی با نام خانوادگی طولانی</span><span data-testid="button-money" className="font-bold text-red-600">۱۲۳٬۴۵۶</span></button>
     <output data-testid="counts">{parent},{child},{commits}</output>
     <label className="mt-3 flex items-center gap-3"><input type="checkbox" checked={readOnly} onChange={e => { accessFlags.readOnly = e.target.checked; setReadOnly(e.target.checked) }} />فقط مشاهده</label>
     <Empty text="هنوز معامله‌ای ثبت نشده است." />

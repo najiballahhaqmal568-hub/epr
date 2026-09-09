@@ -75,7 +75,7 @@ input::placeholder, textarea::placeholder { color: var(--text-secondary); }
 button, a, input, select, textarea, summary { touch-action: manipulation; }
 button:not(:disabled), summary { cursor: pointer; }
 button, input:not([type='checkbox']):not([type='radio']), select, textarea { min-height: 44px; }
-button { min-width: 44px; overflow-wrap: anywhere; }
+button { min-width: 44px; }
 button:disabled { cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
 button { transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
@@ -90,7 +90,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .primary-button { width: 100%; border-radius: var(--radius-control); background: var(--action); padding: 0.75rem 1rem; color: white; font-weight: 700; }
 .primary-button:not(:disabled):active { background: var(--action-pressed); }
 .primary-button:disabled { background: var(--surface-grouped); color: var(--text-secondary); }
-.ui-card { margin-bottom: 0.75rem; min-width: 0; padding: 1rem; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); overflow-wrap: anywhere; }
+.ui-card { margin-bottom: 0.75rem; min-width: 0; padding: 1rem; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); }
 .ui-card[role='button'] { min-height: 44px; cursor: pointer; }
 .ui-card[role='button']:active { background: var(--canvas); }
 .empty-state { margin-block: 3rem; padding-inline: 1rem; text-align: center; color: var(--text-secondary); line-height: 1.8; }
