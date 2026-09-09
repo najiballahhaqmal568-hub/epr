@@ -79,6 +79,26 @@ its feature commit without restoring/resetting data; tombstones/audit remain.
 Ledger cancellation published as 1034481: Pages run 34189784658 succeeded and
 public index-BVbq9trm.js contains the confirmation control (HTTP 200).
 
+## Approved iOS-inspired redesign: no feature loss (2026-09-08)
+
+Coverage contract: `docs/ios-redesign-feature-coverage.md`. Source inventory complete at module/action-group level; detailed conditional-control and live UI parity verification remains open. Visual approval does not authorize feature removal or resetting/recalculating real data. Work order in `tasks/plan.md`.
+
+- [x] Record visual approval, no-removal requirement, current source anchors and proposed navigation map.
+- [ ] 1. Shared visual primitives, accessibility, reduced motion.
+- [ ] 2. Navigation/dashboard and route/back/sync-state coverage; checkpoint.
+- [ ] 3. Sales selection/stock/carton/per-size and bulk-price controls.
+- [ ] 4. Checkout/payment/freight and held/working drafts.
+- [ ] 5. Sale history/receipts/returns/exchanges/correction entry points; checkpoint.
+- [ ] 6. Inventory list and separately product/photo/carton/stocktake/merge/adjustment tools.
+- [ ] 7. Purchases, receiving, landing and guarded corrections/returns in small slices.
+- [ ] 8. Accounts directory, then all party-specific ledgers and corrections.
+- [ ] 9. Expenses/daily checklist/creditors/cash/transfer/reconciliation; checkpoint.
+- [ ] 10. Full reports, partner/year tools and role-based privacy.
+- [ ] 11. Account/sync/backup/settings/integrity/protected danger tools.
+- [ ] 12. Every coverage ID tested; numeric/audit invariants and web build verified before release.
+
+Direct resale is approved but not implemented; retain its separate 10-task plan. No completed feature may be inferred from a mockup. No APK.
+
 ## Wholesale cart: one price for a product's selected sizes (2026-09-08)
 
 BulkSalePrice groups cart rows by variant.productId, never product name. One

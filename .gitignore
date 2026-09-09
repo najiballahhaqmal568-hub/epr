@@ -12,3 +12,4 @@ tsconfig.tsbuildinfo
 
 # Isolated feature workspaces
 .worktrees/
+node_modules.setup-partial/
