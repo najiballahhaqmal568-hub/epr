@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
+import type { DirectLine, DirectPaymentRef, DirectTradeMeta } from './lib/directTradeTypes'
 
 interface Synced {
   /** شناسهٔ جهانی برای همگام‌سازی بین دستگاه‌ها */
@@ -119,6 +120,8 @@ export interface Sale extends Synced {
   customerName?: string
   saleType: 'retail' | 'wholesale'
   lines: SaleLine[]
+  directTrade?: DirectTradeMeta
+  directLines?: DirectLine[]
   total: number
   paid: number
   discount?: number
@@ -170,6 +173,8 @@ export interface Purchase extends Synced {
   supplierId: number
   supplierName: string
   lines: PurchaseLine[]
+  directTrade?: DirectTradeMeta
+  directLines?: DirectLine[]
   total: number
   paid: number
   /** false = جنس هنوز نرسیده (در راه)؛ undefined/true = تحویل گدام شده */
@@ -224,6 +229,7 @@ export interface Payment extends Synced {
   cancelledAt?: number
   id?: number
   date: number
+  directPayment?: DirectPaymentRef
   partyType: 'customer' | 'supplier'
   partyId: number
   partyName: string
