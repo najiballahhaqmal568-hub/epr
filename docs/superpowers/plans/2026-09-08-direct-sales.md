@@ -244,6 +244,8 @@ rec.directPayment = { ...ref, supplierId: supplier.id }
 
 **Source-verified integration notes:** The cash writer depends on `afn`, `boxOf` and `SHOP_BOX`; move those helpers with it and preserve their public exports from `ops.ts` to avoid a runtime import cycle. Include `db.settings` and `db.syncState` in the parent write transaction because fresh state/eligibility reads use those stores. Keep these integration changes behavior-preserving for ordinary operations.
 
+**Durable creation retry metadata:** Also allow optional `DirectTradeMeta.creationFingerprint?: string` in `directTradeTypes.ts`, stored identically on both newly created bases. Canonicalize the immutable creation request, including initial payments/freight and UUID party references (not numeric local IDs). Preserve it through later corrections. Comparing current live payments cannot distinguish an original retry after later settlements; local-only syncState storage is insufficient for backup/replay. Missing or mismatching fingerprints on an existing trade fail closed, never create another bundle. Tests cover retry after later events and equivalent requests with reordered object keys.
+
 **Interfaces:**
 
 ```ts
