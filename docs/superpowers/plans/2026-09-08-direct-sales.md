@@ -302,6 +302,8 @@ if (R + D > S || P + D > C) throw new Error('پرداخت از باقی‌مان
 
 ## Task 5: Guard generic actions and implement audited corrections
 
+**Cancellation ordering boundary (Task3 review):** Business `payment.date` is user-editable and cannot prove whether an event was created before cancellation. Record a stable cancellation payment-set snapshot (with correction lineage) in the optional direct audit metadata and include it in pairing/tokens. Detect a concurrent new event absent from that snapshot even when backdated; retain its actual cash/effects and show conflict. Explicitly allow audited correction/cancellation of payments already present at cancellation, without treating legitimate replacement lineage as a new allocation. Test exact customer/supplier credits after both principal reversals, not just a `cancelled` label. This needs no server schema change, but does not remove the publication compatibility gate.
+
 **Files:** Create `src/lib/directTradeCorrections.ts`; modify `directTradeTypes.ts`, `directTradeState.ts`, `src/lib/ops.ts`, `src/lib/ledgerSaleCancellation.ts`, direct tests.
 
 **Interfaces:**
