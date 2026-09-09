@@ -59,6 +59,9 @@ cases.push({ name: 'balances flag over-allocation and reject invalid stored amou
   await rejects(async () => directBalances(totals, [payment('supplierPayment', 2, -1, { sarrafAmount: 3 })]))
   await rejects(async () => directBalances(totals, [payment('supplierPayment', 3, -3, { sarrafId: 9, sarrafAmount: 1 })]))
   await rejects(async () => directBalances(totals, [payment('customerToSupplier', 2, 1)]))
+  await rejects(async () => directBalances(totals, [
+    payment('customerCash', 2, 1, { directPayment: { tradeUuid: 'trade-1', route: 'unknown' as never } })
+  ]))
 }})
 
 cases.push({ name: 'next payment allocation enforces route, sarraf and balance caps', run: async () => {
@@ -77,6 +80,9 @@ cases.push({ name: 'next payment allocation enforces route, sarraf and balance c
     [{ eventUuid: 'e', route: 'customerCash' as const, date: 1, amount: 12001 }]
   ]
   for (const next of invalid) await rejects(async () => validateDirectPayments(totals, [], next))
+  await rejects(async () => validateDirectPayments(totals, [], [
+    { eventUuid: 'unknown-route', route: 'unknown' as never, date: 1, amount: 1 }
+  ]))
   await rejects(async () => validateDirectPayments(totals, [], [
     { eventUuid: 'same', route: 'customerCash', date: 1, amount: 1 },
     { eventUuid: 'same', route: 'customerCash', date: 1, amount: 1 }
