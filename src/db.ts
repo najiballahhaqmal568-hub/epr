@@ -363,6 +363,8 @@ export type CashMovementType =
   | 'transfer'
 
 export interface CashMovement extends Synced {
+  /** Stable direct-payment link; refId alone is device-local. */
+  directPaymentUuid?: string
   /** Stable freight link; refId alone is device-local and not sufficient. */
   shippingPaymentUuid?: string
   shippingRole?: 'paid' | 'received' | 'reversal'

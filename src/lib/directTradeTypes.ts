@@ -11,6 +11,8 @@ export interface DirectLine {
 export interface DirectTradeMeta {
   uuid: string
   revision: string
+  /** Canonical immutable creation request, used for portable retry idempotency. */
+  creationFingerprint?: string
   previousRevision?: string
   counterpartUuid: string
   status: 'active' | 'cancelled'

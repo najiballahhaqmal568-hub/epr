@@ -1,6 +1,7 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
 import { calculateShipping, type ShippingAmounts } from './shipping'
+import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
@@ -10,7 +11,7 @@ export { landingUnpaidOf }
  * پول همیشه به افغانی صحیح — تا در تقسیم و جمع، کسر و «پول گم‌شده» پیدا نشود.
  * قیمت تمام‌شدهٔ فی‌جوړه از این قاعده مستثنی است، چون میانگین است نه پول واقعی.
  */
-export const afn = (n: number): number => Math.round(n)
+export { afn, boxOf, SHOP_BOX }
 
 /**
  * شناسهٔ ثابت برای سند جایگزین: اگر دو دستگاه همان سند را همزمان اصلاح کنند،
@@ -50,26 +51,6 @@ export function allocate(total: number, weights: number[]): number[] {
   return out
 }
 
-/** جای پول پیش‌فرض — صندوق دکان */
-export const SHOP_BOX = 'دکان'
-
-/** نام جای پول یک حرکت (سندهای کهنه بدون نام = دکان) */
-export const boxOf = (m: { box?: string }): string => m.box?.trim() || SHOP_BOX
-
-async function movement(m: Omit<CashMovement, 'id'>, opts?: { allowNegative?: boolean }) {
-  m = { ...m, amount: afn(m.amount), box: boxOf(m) }
-  if (m.amount === 0) return 0
-  // پول نباید از جایی که نیست خرج شود — کنترل برای همان جای پول
-  if (m.amount < 0 && !opts?.allowNegative) {
-    const all = await db.cashMovements.filter((x) => !x.deleted && boxOf(x) === m.box).toArray()
-    const bal = all.reduce((s, x) => s + x.amount, 0)
-    if (bal + m.amount < 0) {
-      const nf = new Intl.NumberFormat('fa-AF')
-      throw new Error(`پیسه در «${m.box}» کافی نیست! موجودی: ${nf.format(bal)} ؋`)
-    }
-  }
-  return db.cashMovements.add(m)
-}
 
 /**
  * انتقال پول بین جاها (دکان ← خانه ← صراف).
