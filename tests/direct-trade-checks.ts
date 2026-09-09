@@ -1,6 +1,9 @@
-import type { Purchase, Sale } from '../src/db'
+import type { Payment, Purchase, Sale } from '../src/db'
 import { commercialPurchaseLines, commercialSaleLines } from '../src/lib/commercialLines'
+import { computeCosts, historicalCostRevision } from '../src/lib/costing'
 import { directBalances, directTotals, validateDirectPayments } from '../src/lib/directTradeMath'
+import { effectsOf } from '../src/lib/effects'
+import { computeStock, computeSupplierBalances } from '../src/lib/integrity'
 import { equal, line, payment, rejects, totals } from './direct-trade-fixtures'
 
 export const cases: Array<{ name: string; run: () => Promise<void> }> = []
@@ -99,4 +102,56 @@ cases.push({ name: 'ordinary commercial accessors remain unchanged', run: async 
   const directPurchase = { lines: [], directLines: [line] } as unknown as Purchase
   equal(commercialSaleLines(directSale), [{ lineUuid: line.lineUuid, productName: line.productName, size: line.size, color: line.color, qty: line.qty, unitPrice: line.unitPrice, unitCost: line.unitCost }])
   equal(commercialPurchaseLines(directPurchase), [{ lineUuid: line.lineUuid, productName: line.productName, size: line.size, color: line.color, qty: line.qty, unitCost: line.unitCost }])
+}})
+
+cases.push({ name: 'customer-to-supplier payment has exactly two debt effects', run: async () => {
+  const directPayment: Payment = {
+    date: 1, partyType: 'customer', partyId: 11, partyName: 'آزمایشی',
+    amount: 7000, cashDelta: 0, via: 'lender', lenderId: 33, sarrafId: 44, sarrafAmount: 7000,
+    directPayment: { tradeUuid: 'trade-test', route: 'customerToSupplier', supplierId: 22 }
+  }
+  equal(effectsOf('payments', directPayment), [
+    { table: 'customers', id: 11, field: 'balance', delta: -7000 },
+    { table: 'suppliers', id: 22, field: 'balance', delta: -7000 }
+  ])
+  equal(Array.from(computeSupplierBalances([], [directPayment], []).entries()), [[22, -7000]])
+}})
+
+cases.push({ name: 'direct documents never move warehouse stock or historical costs', run: async () => {
+  const ordinaryPurchase = {
+    id: 1, date: 1, supplierId: 22, supplierName: 'فروشنده',
+    lines: [{ variantId: 7, productName: 'بوت', size: '40', color: 'سیاه', qty: 10, unitCost: 500 }],
+    total: 5000, paid: 5000
+  } as Purchase
+  const ordinarySale = {
+    id: 2, date: 2, saleType: 'retail',
+    lines: [{ variantId: 7, productName: 'بوت', size: '40', color: 'سیاه', qty: 2, unitPrice: 800, unitCost: 500 }],
+    total: 1600, paid: 1600
+  } as Sale
+  const directTrade = { uuid: 'trade-test', revision: 'rev-1', counterpartUuid: 'counterpart', status: 'active' as const }
+  const maliciousDirectPurchase = {
+    ...ordinaryPurchase, id: 3, date: 3, directTrade,
+    lines: [{ ...ordinaryPurchase.lines[0], qty: 100, unitCost: 9000 }]
+  } as Purchase
+  const maliciousDirectSale = {
+    ...ordinarySale, id: 4, date: 4, directTrade,
+    lines: [{ ...ordinarySale.lines[0], qty: 100, unitCost: 9000 }]
+  } as Sale
+
+  const stockBefore = computeStock([ordinarySale], [ordinaryPurchase], [], [])
+  const costBefore = computeCosts([ordinarySale], [ordinaryPurchase], [], [])
+  const revisionBefore = historicalCostRevision(1, [600], [ordinarySale], [ordinaryPurchase], [], [])
+  const stockAfter = computeStock([ordinarySale, maliciousDirectSale], [ordinaryPurchase, maliciousDirectPurchase], [], [])
+  const costAfter = computeCosts([ordinarySale, maliciousDirectSale], [ordinaryPurchase, maliciousDirectPurchase], [], [])
+  const revisionAfter = historicalCostRevision(1, [600], [ordinarySale, maliciousDirectSale], [ordinaryPurchase, maliciousDirectPurchase], [], [])
+  const directTargetRevision = historicalCostRevision(3, [9500], [ordinarySale], [ordinaryPurchase, maliciousDirectPurchase], [], [])
+
+  equal(stockBefore.get(7), 8)
+  equal(stockAfter.get(7), 8)
+  equal(costBefore.get(7), 500)
+  equal(costAfter.get(7), 500)
+  equal(revisionBefore.sales.get(2)?.[0].unitCost, 600)
+  equal(revisionAfter.sales.get(2)?.[0].unitCost, 600)
+  equal(revisionAfter.sales.has(4), false)
+  equal(directTargetRevision, { sales: new Map(), returns: new Map(), affectedSales: 0, affectedPairs: 0, profitChange: 0 })
 }})
