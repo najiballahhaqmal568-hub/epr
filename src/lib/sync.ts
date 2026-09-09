@@ -144,6 +144,24 @@ export async function encodeRefs(table: SyncTable, rec: Record<string, unknown>)
   if (table === 'payments') {
     await enc('sarrafId', 'suppliers', 'sarrafUuid')
     await enc('lenderId', 'suppliers', 'lenderUuid')
+    const direct = out.directPayment as Record<string, unknown> | undefined
+    if (direct && typeof direct.supplierId === 'number') {
+      const supplierUuid = (await idMap('suppliers')).get(direct.supplierId)
+      if (!supplierUuid) throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')
+      out.directPayment = { ...direct, supplierUuid, supplierId: undefined }
+    }
+    if (direct) {
+      if (typeof out.partyUuid !== 'string') throw new RecoverableSyncReferenceError('حساب طرف معامله هنوز همگام نشده است؛ دوباره همگام کنید.')
+      delete out.partyId
+    }
+  }
+  if (table === 'sales' && out.directTrade) {
+    if (typeof out.customerUuid !== 'string') throw new RecoverableSyncReferenceError('حساب مشتری هنوز همگام نشده است؛ دوباره همگام کنید.')
+    delete out.customerId
+  }
+  if (table === 'purchases' && out.directTrade) {
+    if (typeof out.supplierUuid !== 'string') throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')
+    delete out.supplierId
   }
   for (const field of ['lines', 'goodsLines'] as const) if (field in out && Array.isArray(out[field])) {
     const vmap = await idMap('variants')
@@ -195,6 +213,33 @@ export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>)
   if (table === 'payments') {
     await dec('sarrafUuid', 'suppliers', 'sarrafId')
     await dec('lenderUuid', 'suppliers', 'lenderId')
+    const direct = out.directPayment as Record<string, unknown> | undefined
+    if (direct) {
+      const required = async (uuid: unknown, refTable: 'customers' | 'suppliers', message: string): Promise<number> => {
+        if (typeof uuid !== 'string') throw new RecoverableSyncReferenceError(message)
+        const row = await db.table(refTable).where('uuid').equals(uuid).first()
+        if (!row || row.deleted) throw new RecoverableSyncReferenceError(message)
+        return row.id
+      }
+      const kind = out.partyType === 'customer' ? 'customers' : 'suppliers'
+      out.partyId = await required(out.partyUuid, kind, 'حساب طرف معامله هنوز همگام نشده است؛ دوباره همگام کنید.')
+      if (direct.route === 'customerToSupplier') out.directPayment = { ...direct, supplierId: await required(direct.supplierUuid, 'suppliers', 'حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.') }
+      if (direct.route === 'supplierPayment' && (Number(out.sarrafAmount ?? 0) > 0 || out.sarrafId !== undefined || out.sarrafUuid !== undefined)) {
+        out.sarrafId = await required(out.sarrafUuid, 'suppliers', 'حساب صراف هنوز همگام نشده است؛ دوباره همگام کنید.')
+      }
+    }
+  }
+  if (table === 'sales' && out.directTrade) {
+    if (typeof out.customerUuid !== 'string') throw new RecoverableSyncReferenceError('حساب مشتری هنوز همگام نشده است؛ دوباره همگام کنید.')
+    const customer = await db.customers.where('uuid').equals(out.customerUuid).first()
+    if (!customer || customer.deleted) throw new RecoverableSyncReferenceError('حساب مشتری هنوز همگام نشده است؛ دوباره همگام کنید.')
+    out.customerId = customer.id
+  }
+  if (table === 'purchases' && out.directTrade) {
+    if (typeof out.supplierUuid !== 'string') throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')
+    const supplier = await db.suppliers.where('uuid').equals(out.supplierUuid).first()
+    if (!supplier || supplier.deleted) throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')
+    out.supplierId = supplier.id
   }
   for (const field of ['lines', 'goodsLines'] as const) if (field in out && Array.isArray(out[field])) {
     const vmap = await uuidMap('variants')
@@ -204,6 +249,10 @@ export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>)
     })
   }
   return out
+}
+
+export class RecoverableSyncReferenceError extends Error {
+  readonly recoverable = true
 }
 
 const MASTERS: SyncTable[] = ['products', 'variants', 'customers', 'suppliers', 'expenseCategories']
@@ -302,10 +351,22 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
   const rec = await decodeRefs(table, row.data)
   rec.uuid = row.uuid
   rec.deleted = row.deleted
-  await db.transaction('rw', [...SYNC_TABLES.map((t) => db.table(t))], async () => {
+  await db.transaction('rw', [...SYNC_TABLES.map((t) => db.table(t)), db.syncState], async () => {
     syncFlags.applyingRemote = true
     try {
       const existing = await db.table(table).where('uuid').equals(row.uuid).first()
+      const oldMeta = existing?.directTrade as { uuid?: string; revision?: string; previousRevision?: string } | undefined
+      const newMeta = rec.directTrade as { uuid?: string; revision?: string; previousRevision?: string } | undefined
+      // A delayed predecessor must never roll a document back after its direct successor.
+      if (oldMeta?.revision && newMeta?.revision && oldMeta.previousRevision === newMeta.revision) return
+      if (oldMeta?.uuid && newMeta?.uuid && oldMeta.revision !== newMeta.revision &&
+          newMeta.previousRevision !== oldMeta.revision) {
+        const evidence = [oldMeta.revision, newMeta.revision].filter((value): value is string => Boolean(value)).sort()
+        await db.syncState.put({ key: `directConflict:${oldMeta.uuid}:${table}:${row.uuid}`, value: evidence })
+        // A deterministic local winner makes repeated/reversed replay converge,
+        // while the retained marker keeps the trade blocked for human review.
+        if ((oldMeta.revision ?? '') > (newMeta.revision ?? '')) return
+      }
       if (MASTERS.includes(table)) {
         if (existing) {
           // فیلدهای مشتقی (موجودی/قرض) محلی را نگه می‌داریم — اسناد آن‌ها را اصلاح می‌کنند

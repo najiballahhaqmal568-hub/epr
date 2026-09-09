@@ -32,7 +32,7 @@ export function payment(route: DirectPaymentRoute, amount: number, cashDelta: nu
   return {
     uuid: `20000000-0000-4000-8000-${route}-${amount}`,
     date: 1,
-    partyType: route === 'customerCash' ? 'customer' : 'supplier',
+    partyType: route === 'supplierPayment' ? 'supplier' : 'customer',
     partyId: 1,
     partyName: 'Test',
     amount,
