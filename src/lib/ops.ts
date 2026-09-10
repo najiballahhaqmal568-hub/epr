@@ -1,5 +1,6 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
+import { validateDirectBackup } from './directTradeBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
@@ -2978,6 +2979,8 @@ const TABLES = [
 // Cloud identity belongs to the account currently signed in on this device.
 // A backup may come from another owner/shop, so these rows must never replace it.
 const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
+// Compatibility acknowledgement belongs to this device, never to a backup.
+const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled'])
 
 export async function exportBackup(): Promise<string> {
   const data: Record<string, unknown[]> = {}
@@ -2985,7 +2988,7 @@ export async function exportBackup(): Promise<string> {
     const rows = await db.table(t).toArray()
     data[t] =
       t === 'settings'
-        ? rows.filter((row) => !CLOUD_IDENTITY_SETTINGS.has(String((row as { key?: unknown }).key)))
+        ? rows.filter((row) => !BACKUP_EXCLUDED_SETTINGS.has(String((row as { key?: unknown }).key)))
         : rows
   }
   return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data })
@@ -2996,6 +2999,7 @@ export type BackupImportMode = 'merge' | 'replace'
 export async function importBackup(json: string, mode: BackupImportMode = 'merge'): Promise<{ cloudSynced: boolean }> {
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
+  validateDirectBackup(parsed.data)
   const restoreTimestamp = Date.now()
 
   const sync = await import('./sync')
@@ -3014,7 +3018,7 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
         const rows = Array.isArray(parsed.data[t]) ? parsed.data[t] : []
         const restorableRows =
           t === 'settings'
-            ? rows.filter((row: { key?: unknown }) => !CLOUD_IDENTITY_SETTINGS.has(String(row.key)))
+            ? rows.filter((row: { key?: unknown }) => !BACKUP_EXCLUDED_SETTINGS.has(String(row.key)))
             : rows
         if (restorableRows.length) await db.table(t).bulkAdd(restorableRows)
       }
