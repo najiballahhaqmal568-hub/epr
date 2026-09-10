@@ -12,9 +12,12 @@ import {
   PeriodCompareCard
 } from '../../components/AnalyticsCards'
 import SoldListCard from '../../components/SoldListCard'
+import DirectTradeWarning, { useDirectTradeReview } from '../../components/DirectTradeWarning'
+import { commercialSaleLines } from '../../lib/commercialLines'
 
 /** آمار فروش: مجموع دوره + پرفروش‌ترین اجناس + بهترین مشتریان */
 export function SalesStats({ isStaff }: { isStaff?: boolean }) {
+  const directReview = useDirectTradeReview()
   const [period, setPeriod] = useState<StatsPeriod>('today')
 
   const { from, to } = periodBounds(period)
@@ -33,15 +36,17 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
     [from, to]
   )
 
-  const total = sales?.reduce((s, x) => s + x.total, 0) ?? 0
-  const cash = sales?.reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
-  const pairs = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
+  const confirmedSales = sales?.filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))
+  const total = confirmedSales?.reduce((s, x) => s + x.total, 0) ?? 0
+  const cash = confirmedSales?.filter(s => !s.directTrade).reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
+  const directTotal = confirmedSales?.filter(s => Boolean(s.directTrade)).reduce((s, x) => s + x.total, 0) ?? 0
+  const pairs = confirmedSales?.reduce((s, x) => s + commercialSaleLines(x).reduce((a, l) => a + l.qty, 0), 0) ?? 0
   // تسویه با کفش فروش است و مفاد دارد، اما قرض مشتری نیست.
-  const credit = sales?.reduce((sum, sale) => sum + saleCreditAmount(sale), 0) ?? 0
+  const credit = confirmedSales?.filter(s => !s.directTrade).reduce((sum, sale) => sum + saleCreditAmount(sale), 0) ?? 0
 
   const soldBy = new Map<string, { qty: number; revenue: number }>()
-  sales?.forEach((s) =>
-    s.lines.forEach((l) => {
+  confirmedSales?.forEach((s) =>
+    commercialSaleLines(s).forEach((l) => {
       const key = `${l.productName} ${l.size} ${l.color}`.trim()
       const cur = soldBy.get(key) ?? { qty: 0, revenue: 0 }
       soldBy.set(key, { qty: cur.qty + l.qty, revenue: cur.revenue + l.qty * l.unitPrice })
@@ -50,13 +55,14 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
   const topProducts = [...soldBy.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 8)
 
   const custBy = new Map<string, number>()
-  sales?.forEach((s) => {
+  confirmedSales?.forEach((s) => {
     if (s.customerName) custBy.set(s.customerName, (custBy.get(s.customerName) ?? 0) + s.total)
   })
   const topCustomers = [...custBy.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
 
   return (
     <>
+      <DirectTradeWarning review={directReview} />
       <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
         {STATS_PERIODS.map((p) => (
           <button
@@ -73,9 +79,10 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
         <p className="text-sm opacity-80">مجموع فروش {periodLabel(period)}</p>
         <p className="text-3xl font-bold">{fmtMoney(total)}</p>
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          <span>نقد: {fmtMoney(cash)}</span>
-          {credit > 0 && <span>قرضی: {fmtMoney(credit)}</span>}
-          <span>{fmtNum(sales?.length ?? 0)} فروش</span>
+          <span>نقد فروش عادی: {fmtMoney(cash)}</span>
+          {credit > 0 && <span>قرض فروش عادی: {fmtMoney(credit)}</span>}
+          {directTotal > 0 && <span>فروش مستقیم: {fmtMoney(directTotal)}</span>}
+          <span>{fmtNum(confirmedSales?.length ?? 0)} فروش</span>
           <span>{fmtNum(pairs)} جوړه</span>
         </div>
       </div>
@@ -94,7 +101,7 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
         ))}
       </Card>
 
-      <SoldListCard sales={sales ?? []} returns={returns ?? []} showProfit={!isStaff} />
+      <SoldListCard sales={confirmedSales ?? []} returns={returns ?? []} showProfit={!isStaff} />
 
       {isStaff && (
       <Card>
@@ -112,11 +119,11 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
       {/* نمودارها — ارقام مفاد فقط برای مالک */}
       {!isStaff && (
         <>
-          <PeriodCompareCard label="دورهٔ گذشته" now={sales ?? []} before={prev ?? []} returnsNow={returns ?? []} />
-          <RetailWholesaleCard sales={sales ?? []} returns={returns ?? []} />
-          <ModelsCard sales={sales ?? []} />
-          <CustomersCard sales={sales ?? []} />
-          <MonthsCard sales={sales ?? []} />
+          <PeriodCompareCard label="دورهٔ گذشته" now={confirmedSales ?? []} before={prev ?? []} returnsNow={returns ?? []} />
+          <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
+          <ModelsCard sales={confirmedSales ?? []} />
+          <CustomersCard sales={confirmedSales ?? []} />
+          <MonthsCard sales={confirmedSales ?? []} />
         </>
       )}
     </>

@@ -4,6 +4,9 @@ import { db, saleCashPaid, type Variant } from '../db'
 import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { inputCls, Card } from '../components/ui'
 import { ColumnChart } from '../components/charts'
+import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
+import { commercialPurchaseLines, commercialSaleLines } from '../lib/commercialLines'
+import { ordinaryCustomerCollections } from '../lib/directTradeReports'
 import Row from './reports/Row'
 import PartnersCard from './reports/PartnersCard'
 import {
@@ -52,6 +55,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
       break
   }
   const now = Date.now()
+  const directReview = useDirectTradeReview()
 
   const sales = useLiveQuery(() => db.sales.where('date').between(from, to, true, true).filter((s) => !s.deleted).toArray(), [from, to])
   const purchases = useLiveQuery(() => db.purchases.where('date').between(from, to, true, true).filter((p) => !p.deleted).toArray(), [from, to])
@@ -70,30 +74,34 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))
 
-  const salesTotal = sales?.reduce((s, x) => s + x.total, 0) ?? 0
-  const salesCash = sales?.reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
-  const pairsSold = sales?.reduce((s, x) => s + x.lines.reduce((a, l) => a + l.qty, 0), 0) ?? 0
+  const confirmedSales = sales?.filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))
+  const confirmedPurchases = purchases?.filter(p => !p.directTrade || directReview.readyTradeUuids.has(p.directTrade.uuid))
+  const salesTotal = confirmedSales?.reduce((s, x) => s + x.total, 0) ?? 0
+  const salesCash = confirmedSales?.filter(s => !s.directTrade).reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
+  const directReceipts = payments?.filter(p => p.directPayment?.route === 'customerCash').reduce((s, p) => s + p.amount, 0) ?? 0
+  const directToSupplier = payments?.filter(p => p.directPayment?.route === 'customerToSupplier').reduce((s, p) => s + p.amount, 0) ?? 0
+  const pairsSold = confirmedSales?.reduce((s, x) => s + commercialSaleLines(x).reduce((a, l) => a + l.qty, 0), 0) ?? 0
   // قیمت خرید ثبت‌شده در خود فاکتور — مفاد گذشته با تغییر قیمت عوض نمی‌شود
-  const costOf = (l: { variantId: number; unitCost?: number }) => l.unitCost ?? variantMap.get(l.variantId)?.purchasePrice ?? 0
+  const costOf = (l: { variantId?: number; unitCost?: number }) => l.unitCost ?? (l.variantId === undefined ? 0 : variantMap.get(l.variantId)?.purchasePrice) ?? 0
   const salesProfit =
-    sales?.reduce((sum, sale) => sum + sale.lines.reduce((s, l) => s + (l.unitPrice - costOf(l)) * l.qty, 0) - (sale.discount ?? 0), 0) ?? 0
+    confirmedSales?.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, l) => s + (l.unitPrice - costOf(l)) * l.qty, 0) - (sale.discount ?? 0), 0) ?? 0
   // مرجوعی مشتری مفاد همان فروش را پس می‌گیرد
   const returnedProfit =
     returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0) ?? 0
   const grossProfit = salesProfit - returnedProfit
   // زیان فروش زیر قیمت: خطوطی که قیمت فروش‌شان از قیمت خرید کمتر بوده
   const belowCostLoss =
-    sales?.reduce(
+    confirmedSales?.reduce(
       (sum, sale) =>
         sum +
-        sale.lines.reduce((s, l) => s + Math.max(0, (costOf(l) - l.unitPrice) * l.qty), 0),
+        commercialSaleLines(sale).reduce((s, l) => s + Math.max(0, (costOf(l) - l.unitPrice) * l.qty), 0),
       0
     ) ?? 0
-  const purchasesTotal = purchases?.reduce((s, x) => s + x.total, 0) ?? 0
+  const purchasesTotal = confirmedPurchases?.reduce((s, x) => s + x.total, 0) ?? 0
   const businessExpenses = expenses?.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
   const otherSpending = expenses?.filter((e) => e.type !== 'business').reduce((s, e) => s + e.amount, 0) ?? 0
   const netProfit = grossProfit - businessExpenses
-  const collected = payments?.filter((p) => p.partyType === 'customer').reduce((s, p) => s + p.amount, 0) ?? 0
+  const collected = ordinaryCustomerCollections(payments ?? [])
   const returnsTotal = returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.amount, 0) ?? 0
 
   // مصارف به تفکیک کتگوری
@@ -103,8 +111,8 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
   // پرفروش‌ترین‌ها در دوره
   const soldBy = new Map<string, { qty: number; revenue: number; profit: number }>()
-  sales?.forEach((s) =>
-    s.lines.forEach((l) => {
+  confirmedSales?.forEach((s) =>
+    commercialSaleLines(s).forEach((l) => {
       const key = `${l.productName} ${l.size} ${l.color}`.trim()
       const cur = soldBy.get(key) ?? { qty: 0, revenue: 0, profit: 0 }
       soldBy.set(key, {
@@ -119,11 +127,11 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
   // خرید از هر تأمین‌کننده در دوره
   const bySupplier = new Map<string, { total: number; pairs: number; count: number }>()
-  purchases?.forEach((p) => {
+  confirmedPurchases?.forEach((p) => {
     const cur = bySupplier.get(p.supplierName) ?? { total: 0, pairs: 0, count: 0 }
     bySupplier.set(p.supplierName, {
       total: cur.total + p.total,
-      pairs: cur.pairs + p.lines.reduce((a, l) => a + l.qty, 0),
+      pairs: cur.pairs + commercialPurchaseLines(p).reduce((a, l) => a + l.qty, 0),
       count: cur.count + 1
     })
   })
@@ -131,7 +139,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
   // پرفروش‌ترین سایزها
   const bySize = new Map<string, number>()
-  sales?.forEach((s) => s.lines.forEach((l) => bySize.set(l.size, (bySize.get(l.size) ?? 0) + l.qty)))
+  confirmedSales?.forEach((s) => commercialSaleLines(s).forEach((l) => bySize.set(l.size, (bySize.get(l.size) ?? 0) + l.qty)))
   const sizeRows = [...bySize.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
 
   // جنس مرده: موجودی دارد ولی در ۶۰ روز اخیر فروش نداشته
@@ -165,10 +173,10 @@ export default function Reports({ onBack }: { onBack: () => void }) {
     second: 0
   }))
   const trendIndex = (date: number) => Math.min(trendCount - 1, Math.max(0, Math.floor(((date - from) / trendSpan) * trendCount)))
-  sales?.forEach((sale) => {
+  confirmedSales?.forEach((sale) => {
     const row = trendRows[trendIndex(sale.date)]
     row.value += sale.total
-    row.second += sale.lines.reduce((sum, line) => sum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0)
+    row.second += commercialSaleLines(sale).reduce((sum, line) => sum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0)
   })
   returns?.filter((row) => row.kind === 'customer').forEach((returned) => {
     const row = trendRows[trendIndex(returned.date)]
@@ -186,6 +194,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
           <p className="text-xs text-slate-500">نتیجه‌های مهم تجارت در یک نگاه</p>
         </div>
       </div>
+      <DirectTradeWarning review={directReview} />
 
       <div className="mb-3 grid grid-cols-4 gap-1 rounded-2xl bg-white p-1 shadow-sm">
         {PERIODS.filter((item) => item.id !== 'custom').map((item) => (
@@ -259,9 +268,11 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         <>
           <Card>
             <p className="mb-2 font-bold text-slate-700">خلاصهٔ مالی کامل</p>
-            <Row label="فروش" value={fmtMoney(salesTotal)} sub={`${fmtNum(sales?.length ?? 0)} فروش · ${fmtNum(pairsSold)} جوړه`} />
+            <Row label="فروش" value={fmtMoney(salesTotal)} sub={`${fmtNum(confirmedSales?.length ?? 0)} فروش · ${fmtNum(pairsSold)} جوړه`} />
             <Row label="نقد دریافتی از فروش" value={fmtMoney(salesCash)} />
             <Row label="وصول قرض مشتریان" value={fmtMoney(collected)} />
+            <Row label="رسید نقدی معاملهٔ مستقیم" value={fmtMoney(directReceipts)} />
+            <Row label="پرداخت مستقیم مشتری به فروشنده — بدون صندوق" value={fmtMoney(directToSupplier)} />
             <Row label="خرید جنس" value={fmtMoney(purchasesTotal)} red />
             <Row label="مصارف تجارت" value={fmtMoney(businessExpenses)} red />
             <Row label="مرجوعی مشتریان" value={fmtMoney(returnsTotal)} red />
@@ -273,11 +284,11 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
           <PartnersCard netProfit={netProfit} />
           {catRows.length > 0 && <Card><p className="mb-2 font-bold text-slate-700">مصارف به تفکیک کتگوری</p>{catRows.map(([name, amount]) => <Row key={name} label={name} value={fmtMoney(amount)} />)}</Card>}
-          <PeriodCompareCard label="دورهٔ قبلی" now={sales ?? []} before={prevSales ?? []} returnsNow={returns ?? []} />
-          <RetailWholesaleCard sales={sales ?? []} returns={returns ?? []} />
-          <ModelsCard sales={sales ?? []} />
-          <CustomersCard sales={sales ?? []} />
-          <MonthsCard sales={sales ?? []} />
+          <PeriodCompareCard label="دورهٔ قبلی" now={confirmedSales ?? []} before={prevSales ?? []} returnsNow={returns ?? []} />
+          <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
+          <ModelsCard sales={confirmedSales ?? []} />
+          <CustomersCard sales={confirmedSales ?? []} />
+          <MonthsCard sales={confirmedSales ?? []} />
 
           <Card>
             <p className="mb-2 font-bold text-slate-700">خرید از تأمین‌کنندگان در دوره</p>

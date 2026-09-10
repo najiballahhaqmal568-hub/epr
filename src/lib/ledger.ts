@@ -6,6 +6,7 @@
  */
 import type { CashMovement, Payment, ReturnDoc, Sale } from '../db'
 import { fmtNum, pageOrder } from './format'
+import { commercialSaleLines } from './commercialLines'
 
 export interface LedgerRow {
   key: string
@@ -51,7 +52,7 @@ export function buildCashLedger(movements: CashMovement[], labelOf: (t: CashMove
  * نامِ اجناس یک سند — «کوهستان ۴۲ سیاه ×۲، بامیان ۴۰ خاکی ×۱».
  * یک تعریف، تا دفتر شخص و دفتر خانواده هرگز فرق نکنند.
  */
-export function itemsLabel(lines: { productName: string; size: string; color: string; qty: number }[]): string {
+export function itemsLabel(lines: ReadonlyArray<{ productName: string; size: string; color: string; qty: number }>): string {
   return lines
     .map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ').trim())
     .join('، ')
@@ -66,6 +67,12 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
   const events: Ev[] = []
 
   for (const s of sales) {
+    if (s.directTrade?.status === 'cancelled') continue
+    if (s.directTrade) {
+      events.push({ key: `s${s.id}`, date: s.date, label: 'فروش مستقیم', items: itemsLabel(commercialSaleLines(s)), page: s.bookPage?.trim() || undefined,
+        source: { table: 'sales', id: s.id! }, delta: s.total })
+      continue
+    }
     const credit = s.total - s.paid
     if (credit === 0) continue // فروش نقدی بر قرض اثر ندارد
     events.push({
@@ -86,7 +93,7 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
     events.push({
       key: `p${p.id}`,
       date: p.date,
-      label: p.shipping ? 'کرایهٔ بار' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
+      label: p.directPayment?.route === 'customerToSupplier' ? 'مشتری مستقیم به فروشنده داده — بدون صندوق' : p.directPayment?.route === 'customerCash' ? 'رسید' : p.shipping ? 'کرایهٔ بار' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
       note: p.shipping
         ? [`کل ${fmtNum(p.shipping.total)} — سهم مشتری ${fmtNum(p.shipping.customerShare)} — دریافت نقدی ${fmtNum(p.shipping.received)}`, p.note, correctionNote].filter(Boolean).join(' · ')
         : p.amount < 0 ? undefined : [p.note, correctionNote].filter(Boolean).join(' · ') || undefined,
@@ -112,7 +119,8 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
     })
   }
 
-  events.sort((a, b) => a.date - b.date || a.key.localeCompare(b.key))
+  events.sort((a, b) => a.date - b.date ||
+    (a.source?.table === 'sales' && b.source?.table !== 'sales' ? -1 : b.source?.table === 'sales' && a.source?.table !== 'sales' ? 1 : a.key.localeCompare(b.key)))
   let bal = 0
   return events.map((e) => {
     bal += e.delta

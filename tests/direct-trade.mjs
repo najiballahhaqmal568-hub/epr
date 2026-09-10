@@ -35,7 +35,9 @@ try {
   })
   await page.goto(url)
   const names = await page.evaluate(async () => {
-    const { cases } = await import('/tests/direct-trade-checks.ts')
+    const base = await import('/tests/direct-trade-checks.ts')
+    const reports = await import('/tests/direct-trade-report-checks.ts')
+    const cases = [...base.cases, ...reports.cases]
     for (const test of cases) await test.run()
     return cases.map(test => test.name)
   })

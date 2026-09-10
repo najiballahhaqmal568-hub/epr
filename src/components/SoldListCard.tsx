@@ -21,7 +21,7 @@ export default function SoldListCard({
   const [open, setOpen] = useState(false)
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
   const rows = soldInPeriod(sales, returns)
-  const stockOf = (id: number) => variants?.find((v) => v.id === id)?.stockQty
+  const stockOf = (id?: number) => id === undefined ? undefined : variants?.find((v) => v.id === id)?.stockQty
 
   const totalQty = rows.reduce((s, r) => s + r.qty, 0)
   const totalRev = rows.reduce((s, r) => s + r.revenue, 0)
@@ -50,7 +50,7 @@ export default function SoldListCard({
           {rows.map((r) => {
             const stock = stockOf(r.variantId)
             return (
-              <div key={r.variantId} className="flex items-start justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
+              <div key={r.key} className="flex items-start justify-between border-b border-slate-100 py-1.5 text-sm last:border-0">
                 <span className="text-slate-600">
                   {r.name} {r.size} {r.color}
                   <span className="block text-xs text-slate-400">آخرین فروش: {fmtDateShort(r.lastDate)}</span>

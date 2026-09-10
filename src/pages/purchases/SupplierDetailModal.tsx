@@ -32,6 +32,10 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     () => db.payments.filter((p) => !p.deleted && p.partyType === 'supplier' && p.partyId === supplier.id).toArray(),
     [supplier.id]
   )
+  const directCustomerPays = useLiveQuery(
+    () => db.payments.filter((p) => !p.deleted && p.partyType === 'customer' && p.directPayment?.route === 'customerToSupplier' && p.directPayment.supplierId === supplier.id).toArray(),
+    [supplier.id]
+  )
   const sarrafPays = useLiveQuery(
     () => db.payments.filter((p) => !p.deleted && p.via === 'sarraf' && p.sarrafId === supplier.id).toArray(),
     [supplier.id]
@@ -97,9 +101,18 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
         sub: [details, p.correctionReason ? `اصلاح‌شده — ${p.correctionReason}` : ''].filter(Boolean).join(' · ') || undefined,
         amount: p.amount,
         plus: false,
-        payment: p.lenderAction || p.groupUuid ? undefined : p
+        payment: p.directPayment || p.lenderAction || p.groupUuid ? undefined : p
       })
     }
+  })
+  directCustomerPays?.forEach((p) => {
+    events.push({
+      date: p.date,
+      label: 'مشتری مستقیم به فروشنده داده — بدون صندوق',
+      sub: p.partyName,
+      amount: p.amount,
+      plus: false
+    })
   })
   sarrafPays?.forEach((p) => {
     events.push({ date: p.date, label: `حواله برای ${p.partyName}`, amount: p.sarrafAmount ?? p.amount, plus: true })

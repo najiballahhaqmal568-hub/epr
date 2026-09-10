@@ -5,6 +5,8 @@ import { fmtMoney, fmtNum, startOfDay } from '../lib/format'
 import { reorderProducts } from '../lib/reorder'
 import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
+import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
+import { commercialSaleLines } from '../lib/commercialLines'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -49,6 +51,7 @@ export default function Dashboard({
   debtTotal: number
 }) {
   const dayStart = startOfDay()
+  const directReview = useDirectTradeReview()
   const sales = useLiveQuery(
     () => db.sales.where('date').aboveOrEqual(dayStart).filter((row) => !row.deleted).toArray(),
     [dayStart]
@@ -60,16 +63,17 @@ export default function Dashboard({
   const variants = useLiveQuery(() => db.variants.filter((row) => !row.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((row) => !row.deleted).toArray(), [])
   const customers = useLiveQuery(() => db.customers.filter((row) => !row.deleted).toArray(), [])
+  const payments = useLiveQuery(() => db.payments.where('date').aboveOrEqual(dayStart).filter(row => !row.deleted).toArray(), [dayStart])
   const worth = useLiveQuery(() => netWorth(), [])
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((variant) => variantMap.set(variant.id!, variant))
-  const costOf = (line: { variantId: number; unitCost?: number }) =>
-    line.unitCost ?? variantMap.get(line.variantId)?.purchasePrice ?? 0
+  const costOf = (line: { variantId?: number; unitCost?: number }) =>
+    line.unitCost ?? (line.variantId === undefined ? 0 : variantMap.get(line.variantId)?.purchasePrice) ?? 0
   const grossProfit = (list: Sale[]) =>
     list.reduce(
       (sum, sale) =>
-        sum + sale.lines.reduce((lineSum, line) => lineSum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0),
+        sum + commercialSaleLines(sale).reduce((lineSum, line) => lineSum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0),
       0
     )
   const returnedProfit = (returns ?? []).reduce(
@@ -77,9 +81,10 @@ export default function Dashboard({
     0
   )
 
-  const todaySales = sales ?? []
+  const todaySales = (sales ?? []).filter(sale => !sale.directTrade || directReview.readyTradeUuids.has(sale.directTrade.uuid))
   const todayTotal = todaySales.reduce((sum, row) => sum + row.total, 0)
-  const todayCash = todaySales.reduce((sum, row) => sum + saleCashPaid(row), 0)
+  const todayCash = todaySales.filter(row => !row.directTrade).reduce((sum, row) => sum + saleCashPaid(row), 0)
+  const todayDirectReceipts = payments?.filter(row => row.directPayment?.route === 'customerCash').reduce((sum, row) => sum + row.amount, 0) ?? 0
   const todayProfit = grossProfit(todaySales) - returnedProfit
   const lowStock = reorderProducts(products ?? [], variants ?? [])
   const overdueCount = (customers ?? []).filter(
@@ -93,6 +98,7 @@ export default function Dashboard({
         <h1 className="text-2xl font-bold text-slate-900">خانه</h1>
         <SyncChip />
       </div>
+      <DirectTradeWarning review={directReview} />
 
       {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
         <div className="mb-3 rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 p-4 text-sm text-slate-700">
@@ -123,7 +129,8 @@ export default function Dashboard({
         <p className="mt-1 text-3xl font-bold">{fmtMoney(todayTotal)}</p>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-teal-50">
           <span>{fmtNum(todaySales.length)} فروش</span>
-          <span>نقد: {fmtMoney(todayCash)}</span>
+          <span>نقد فروش عادی: {fmtMoney(todayCash)}</span>
+          <span>رسید مستقیم: {fmtMoney(todayDirectReceipts)}</span>
           {!isStaff && <span>مفاد: {fmtMoney(todayProfit)}</span>}
         </div>
       </div>
