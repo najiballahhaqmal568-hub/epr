@@ -6,11 +6,31 @@ import { effectsOf } from '../src/lib/effects'
 import { createDirectTrade, addDirectPayment } from '../src/lib/directTradeOps'
 import { loadDirectTrade } from '../src/lib/directTradeState'
 import { accessFlags, db, newUuid } from '../src/db'
-import { cashBalance, transferCash } from '../src/lib/ops'
+import {
+  addCustomerReturn, addExchange, addLandingCost, addPayment, addPurchase, addSale,
+  addSupplierReturn, cancelPurchase, cancelPurchaseImpact, correctCustomerPayment,
+  correctLandingTotal, correctOpeningDebt, correctPurchase, correctPurchasePrices,
+  correctSupplierPayment, correctLenderPayment, deletePayment, deletePaymentImpact, deleteSale, deleteSaleImpact,
+  payLanding, previewCustomerPaymentCorrection, previewOpeningDebtCorrection,
+  previewSupplierPaymentCorrection, previewLenderPaymentCorrection, receivePurchase, cashBalance, transferCash
+} from '../src/lib/ops'
+import { cancelLedgerSale, ledgerSaleCancellationPreview } from '../src/lib/ledgerSaleCancellation'
 import { computeStock, computeSupplierBalances } from '../src/lib/integrity'
 import { equal, line, payment, rejects, seed, snapshot, totals, warehouseSnapshot } from './direct-trade-fixtures'
 
 export const cases: Array<{ name: string; run: () => Promise<void> }> = []
+
+const DIRECT_SALE_ERROR = 'این سند فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+
+async function rejectsDirectWithoutMutation(action: () => Promise<unknown>, message: string): Promise<void> {
+  const before = await snapshot()
+  let actual = ''
+  try { await action() } catch (error) { actual = error instanceof Error ? error.message : String(error) }
+  equal(actual, message)
+  equal(await snapshot(), before)
+}
 
 async function unrelatedCustomerSnapshot(customerId: number): Promise<unknown> {
   return {
@@ -212,6 +232,68 @@ cases.push({ name: 'line validation rejects malformed and unsafe totals', run: a
 
 cases.push({ name: 'below-cost direct sale preserves explicit loss', run: async () => {
   equal(directTotals([{ ...line, unitPrice: 800 }]), { cost: 10000, sale: 8000, profit: -2000, pairs: 10 })
+}})
+
+cases.push({ name: 'generic operations reject direct documents and preserve the exact database snapshot', run: async () => {
+  const f = await seed(), tradeUuid = newUuid()
+  await createDirectTrade({
+    tradeUuid, date: 50, customerId: f.customerId, supplierId: f.supplierId, lines: [line], payments: [
+      { eventUuid: newUuid(), route: 'customerCash', date: 50, amount: 1000 },
+      { eventUuid: newUuid(), route: 'supplierPayment', date: 50, amount: 1000 }
+    ]
+  })
+  const state = await loadDirectTrade(tradeUuid)
+  const sale = state.sale, purchase = state.purchase
+  const customerPayment = state.payments.find(row => row.directPayment?.route === 'customerCash')!
+  const supplierPayment = state.payments.find(row => row.directPayment?.route === 'supplierPayment')!
+  const stockLine = { variantId: f.variantId, productName: 'جنس قبلی', size: '42', color: 'قهوه‌ای', qty: 1, unitPrice: 700, unitCost: 500, restock: true }
+  const customerReturn = { date: 51, kind: 'customer' as const, refId: sale.id, partyId: f.customerId, partyName: sale.customerName!, lines: [stockLine], amount: 700, settlement: 'reduceDebt' as const, reason: 'آزمایش' }
+  const supplierReturn = { date: 51, kind: 'supplier' as const, refId: purchase.id, partyId: f.supplierId, partyName: purchase.supplierName, lines: [stockLine], amount: 500, settlement: 'reduceDebt' as const, reason: 'آزمایش' }
+  const replacementSale = { uuid: newUuid(), date: 51, customerId: f.cashCustomerId, customerName: 'مشتری صندوق آزمایشی', saleType: 'wholesale' as const,
+    lines: [{ ...stockLine, qty: 1 }], total: 700, paid: 700 }
+
+  await rejectsDirectWithoutMutation(() => addSale({ ...sale, id: undefined, uuid: newUuid() } as Sale), DIRECT_SALE_ERROR)
+  await rejectsDirectWithoutMutation(() => addPurchase({ ...purchase, id: undefined, uuid: newUuid() } as Purchase), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => addPayment({ ...customerPayment, id: undefined, uuid: newUuid() }), DIRECT_PAYMENT_ERROR)
+
+  await rejectsDirectWithoutMutation(() => deleteSaleImpact(sale.id!), DIRECT_SALE_ERROR)
+  await rejectsDirectWithoutMutation(() => deleteSale(sale.id!), DIRECT_SALE_ERROR)
+  await rejectsDirectWithoutMutation(() => addLandingCost([purchase.id!], 100, 'later'), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => payLanding(purchase.id!), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => correctLandingTotal(purchase.id!, { newTotal: 100, bucket: 'later', reason: 'اصلاح' }), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => receivePurchase(purchase.id!), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => correctPurchase(purchase.id!, [{ variantId: f.variantId, qty: 1, unitCost: 500 }]), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => correctPurchasePrices(purchase.id!, []), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => cancelPurchaseImpact(purchase.id!), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => cancelPurchase(purchase.id!), DIRECT_PURCHASE_ERROR)
+
+  const customerCorrection = { date: 52, amount: 900, reason: 'اصلاح' }
+  const supplierCorrection = { date: 52, amount: 900, via: 'cash' as const, reason: 'اصلاح' }
+  await rejectsDirectWithoutMutation(() => previewCustomerPaymentCorrection(customerPayment.id!, customerCorrection), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => correctCustomerPayment(customerPayment.id!, customerCorrection), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => previewSupplierPaymentCorrection(supplierPayment.id!, supplierCorrection), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => correctSupplierPayment(supplierPayment.id!, supplierCorrection), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => previewOpeningDebtCorrection(customerPayment.id!, { amount: 900, reason: 'اصلاح' }), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => correctOpeningDebt(customerPayment.id!, { amount: 900, reason: 'اصلاح' }), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => previewLenderPaymentCorrection(supplierPayment.id!, { date: 52, amount: 900, reason: 'اصلاح' }), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => correctLenderPayment(supplierPayment.id!, { date: 52, amount: 900, reason: 'اصلاح' }), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => deletePaymentImpact(customerPayment.id!), DIRECT_PAYMENT_ERROR)
+  await rejectsDirectWithoutMutation(() => deletePayment(customerPayment.id!), DIRECT_PAYMENT_ERROR)
+
+  await rejectsDirectWithoutMutation(() => ledgerSaleCancellationPreview(sale.id!, f.customerId), DIRECT_SALE_ERROR)
+  await rejectsDirectWithoutMutation(() => cancelLedgerSale(sale.id!, f.customerId, 'ابطال', {} as never), DIRECT_SALE_ERROR)
+  await rejectsDirectWithoutMutation(() => addCustomerReturn(customerReturn), DIRECT_SALE_ERROR)
+  await rejectsDirectWithoutMutation(() => addSupplierReturn(supplierReturn), DIRECT_PURCHASE_ERROR)
+  await rejectsDirectWithoutMutation(() => addExchange(customerReturn, replacementSale), DIRECT_SALE_ERROR)
+}})
+
+cases.push({ name: 'ordinary unlinked historical returns remain supported', run: async () => {
+  const f = await seed()
+  const stockLine = { variantId: f.variantId, productName: 'جنس قبلی', size: '42', color: 'قهوه‌ای', qty: 1, unitPrice: 500, unitCost: 500, restock: true }
+  await addCustomerReturn({ date: 53, kind: 'customer', partyId: f.customerId, partyName: 'مشتری مستقیم', lines: [stockLine], amount: 0, settlement: 'reduceDebt', reason: 'سند تاریخی' })
+  await addSupplierReturn({ date: 54, kind: 'supplier', partyId: f.supplierId, partyName: 'فروشنده مستقیم', lines: [stockLine], amount: 0, settlement: 'reduceDebt', reason: 'سند تاریخی' })
+  equal((await db.returns.toArray()).map(row => [row.kind, row.refId]), [['customer', undefined], ['supplier', undefined]])
+  equal((await db.variants.get(f.variantId))?.stockQty, 30)
 }})
 
 cases.push({ name: 'balances use live explicit route and cash deltas', run: async () => {
