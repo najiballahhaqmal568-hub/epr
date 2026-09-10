@@ -43,7 +43,7 @@ export function payment(route: DirectPaymentRoute, amount: number, cashDelta: nu
   }
 }
 
-export async function seed(): Promise<{ customerId: number; supplierId: number; variantId: number; sarrafId: number }> {
+export async function seed(): Promise<{ customerId: number; cashCustomerId: number; supplierId: number; variantId: number; sarrafId: number }> {
   accessFlags.readOnly = false
   await db.transaction('rw', [...SYNC_TABLES.map(table => db.table(table)), db.settings, db.syncState], async () => {
     for (const table of SYNC_TABLES) await db.table(table).clear()
@@ -67,7 +67,7 @@ export async function seed(): Promise<{ customerId: number; supplierId: number; 
   equal([(await db.customers.get(customerId))?.balance, (await db.suppliers.get(supplierId))?.balance,
     (await db.suppliers.get(sarrafId))?.balance, (await db.variants.get(variantId))?.stockQty,
     (await db.variants.get(variantId))?.purchasePrice], [1000, 2000, -4000, 30, 500])
-  return { customerId, supplierId, variantId, sarrafId }
+  return { customerId, cashCustomerId, supplierId, variantId, sarrafId }
 }
 
 export async function snapshot(): Promise<unknown> {

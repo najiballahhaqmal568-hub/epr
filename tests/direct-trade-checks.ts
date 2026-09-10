@@ -6,35 +6,66 @@ import { effectsOf } from '../src/lib/effects'
 import { createDirectTrade, addDirectPayment } from '../src/lib/directTradeOps'
 import { loadDirectTrade } from '../src/lib/directTradeState'
 import { accessFlags, db, newUuid } from '../src/db'
+import { cashBalance, transferCash } from '../src/lib/ops'
 import { computeStock, computeSupplierBalances } from '../src/lib/integrity'
 import { equal, line, payment, rejects, seed, snapshot, totals, warehouseSnapshot } from './direct-trade-fixtures'
 
 export const cases: Array<{ name: string; run: () => Promise<void> }> = []
 
+async function unrelatedCustomerSnapshot(customerId: number): Promise<unknown> {
+  return {
+    customer: await db.customers.get(customerId),
+    payments: await db.payments.filter(row => row.partyType === 'customer' && row.partyId === customerId).toArray(),
+    sales: await db.sales.filter(row => row.customerId === customerId).toArray()
+  }
+}
+
 cases.push({ name: 'atomic direct trade posts golden balances without touching warehouse', run: async () => {
   const f = await seed()
   const before = await warehouseSnapshot()
+  const unrelatedBefore = await unrelatedCustomerSnapshot(f.cashCustomerId)
   const tradeUuid = newUuid()
+  const initialCashUuid = newUuid(), initialDirectUuid = newUuid()
   const trade = await createDirectTrade({
     tradeUuid, date: Date.UTC(2026, 8, 8, 8), customerId: f.customerId, supplierId: f.supplierId,
     lines: [line], payments: [
-      { eventUuid: newUuid(), route: 'customerCash', date: Date.UTC(2026, 8, 8, 8), amount: 3000 },
-      { eventUuid: newUuid(), route: 'customerToSupplier', date: Date.UTC(2026, 8, 8, 8), amount: 7000 }
+      { eventUuid: initialCashUuid, route: 'customerCash', date: Date.UTC(2026, 8, 8, 8), amount: 3000 },
+      { eventUuid: initialDirectUuid, route: 'customerToSupplier', date: Date.UTC(2026, 8, 8, 8), amount: 7000 }
     ]
   })
   const state = await loadDirectTrade(trade.tradeUuid)
   equal([state.balances.customerRemaining, state.balances.supplierRemaining], [2000, 3000])
   equal(state.totals.profit, 2000)
+  equal([(await db.customers.get(f.customerId))?.balance, (await db.suppliers.get(f.supplierId))?.balance, await cashBalance('دکان')], [3000, 5000, 19000])
+  const initialCashPayment = state.payments.find(row => row.uuid === initialCashUuid)!
+  const initialCashMovement = (await db.cashMovements.filter(row => row.directPaymentUuid === initialCashUuid).first())!
+  if (!initialCashMovement.uuid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(initialCashMovement.uuid)) {
+    throw new Error('Direct cash movement requires a portable UUID')
+  }
+  equal((await db.cashMovements.filter(row => row.directPaymentUuid === initialCashUuid).toArray()).map(row => ({
+    uuid: row.uuid, type: row.type, refId: row.refId, amount: row.amount, box: row.box, directPaymentUuid: row.directPaymentUuid
+  })), [{ uuid: initialCashMovement.uuid,
+    type: 'customerPayment', refId: initialCashPayment.id, amount: 3000, box: 'دکان', directPaymentUuid: initialCashUuid }])
   equal(await warehouseSnapshot(), before)
   const direct = state.payments.find(row => row.directPayment?.route === 'customerToSupplier')!
   equal(await db.cashMovements.filter(row => row.directPaymentUuid === direct.uuid).count(), 0)
-  await addDirectPayment(tradeUuid, { eventUuid: newUuid(), route: 'customerToSupplier', date: Date.UTC(2026, 8, 9), amount: 1000 }, state.token)
+  const laterDirectUuid = newUuid()
+  await addDirectPayment(tradeUuid, { eventUuid: laterDirectUuid, route: 'customerToSupplier', date: Date.UTC(2026, 8, 9), amount: 1000 }, state.token)
+  equal([(await db.customers.get(f.customerId))?.balance, (await db.suppliers.get(f.supplierId))?.balance, await cashBalance('دکان')], [2000, 4000, 19000])
+  equal(await db.cashMovements.filter(row => row.directPaymentUuid === laterDirectUuid).count(), 0)
   const later = await loadDirectTrade(tradeUuid)
-  await addDirectPayment(tradeUuid, { eventUuid: newUuid(), route: 'customerCash', date: Date.UTC(2026, 8, 9), amount: 1000 }, later.token)
+  const laterCashUuid = newUuid()
+  await addDirectPayment(tradeUuid, { eventUuid: laterCashUuid, route: 'customerCash', date: Date.UTC(2026, 8, 9), amount: 1000 }, later.token)
+  equal([(await db.customers.get(f.customerId))?.balance, (await db.suppliers.get(f.supplierId))?.balance, await cashBalance('دکان')], [1000, 4000, 20000])
   const finalBefore = await loadDirectTrade(tradeUuid)
-  await addDirectPayment(tradeUuid, { eventUuid: newUuid(), route: 'supplierPayment', date: Date.UTC(2026, 8, 9), amount: 2000 }, finalBefore.token)
+  const laterSupplierUuid = newUuid()
+  await addDirectPayment(tradeUuid, { eventUuid: laterSupplierUuid, route: 'supplierPayment', date: Date.UTC(2026, 8, 9), amount: 2000 }, finalBefore.token)
   const final = await loadDirectTrade(tradeUuid)
   equal([final.balances.customerRemaining, final.balances.supplierRemaining, final.totals.profit], [0, 0, 2000])
+  equal([(await db.customers.get(f.customerId))?.balance, (await db.suppliers.get(f.supplierId))?.balance, await cashBalance('دکان')], [1000, 2000, 18000])
+  equal((await db.cashMovements.filter(row => [laterCashUuid, laterSupplierUuid].includes(row.directPaymentUuid ?? '')).toArray())
+    .map(row => [row.directPaymentUuid, row.type, row.amount]), [[laterCashUuid, 'customerPayment', 1000], [laterSupplierUuid, 'supplierPayment', -2000]])
+  equal(await unrelatedCustomerSnapshot(f.cashCustomerId), unrelatedBefore)
   equal(await warehouseSnapshot(), before)
 }})
 
@@ -83,9 +114,16 @@ cases.push({ name: 'sarraf split consumes credit first and direct events never c
   await addDirectPayment(tradeUuid, { eventUuid: directUuid, route: 'customerToSupplier', date: 21, amount: 3000 }, state.token)
   state = await loadDirectTrade(tradeUuid)
   const splitUuid = newUuid()
-  await addDirectPayment(tradeUuid, { eventUuid: splitUuid, route: 'supplierPayment', date: 22, amount: 3000, sarrafId: f.sarrafId, sarrafAmount: 3000 }, state.token)
-  equal((await db.suppliers.get(f.sarrafId))?.balance, -1000)
-  equal(await db.cashMovements.filter(row => row.directPaymentUuid === directUuid || row.directPaymentUuid === splitUuid).count(), 0)
+  await addDirectPayment(tradeUuid, { eventUuid: splitUuid, route: 'supplierPayment', date: 22, amount: 3000, sarrafId: f.sarrafId, sarrafAmount: 1000 }, state.token)
+  equal([(await db.suppliers.get(f.supplierId))?.balance, (await db.suppliers.get(f.sarrafId))?.balance], [6000, -3000])
+  equal((await db.cashMovements.filter(row => row.directPaymentUuid === splitUuid).toArray()).map(row => [row.type, row.amount]), [['supplierPayment', -2000]])
+  equal(await db.cashMovements.filter(row => row.directPaymentUuid === directUuid).count(), 0)
+  await transferCash('دکان', 'خانه', await cashBalance('دکان'))
+  state = await loadDirectTrade(tradeUuid)
+  const beforeFailedSplit = await snapshot()
+  await rejects(() => addDirectPayment(tradeUuid, { eventUuid: newUuid(), route: 'supplierPayment', date: 23,
+    amount: 1000, sarrafId: f.sarrafId, sarrafAmount: 500 }, state.token))
+  equal(await snapshot(), beforeFailedSplit)
 }})
 
 cases.push({ name: 'all-credit, all-cash and maximum-direct routes keep per-trade caps separate', run: async () => {
