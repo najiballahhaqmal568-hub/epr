@@ -5,9 +5,11 @@
  * حرکت کرده‌اند تغییر کرده‌اند. این فایل همان لیست را می‌سازد.
  */
 import type { Sale, ReturnDoc } from '../db'
+import { commercialSaleLines } from './commercialLines'
 
 export interface SoldRow {
-  variantId: number
+  key: string
+  variantId?: number
   name: string
   size: string
   color: string
@@ -22,20 +24,21 @@ export interface SoldRow {
  * فروشِ واقعیِ باقی‌مانده باشد.
  */
 export function soldInPeriod(sales: Sale[], returns: ReturnDoc[] = []): SoldRow[] {
-  const map = new Map<number, SoldRow>()
-  const row = (id: number, name: string, size: string, color: string) => {
-    let r = map.get(id)
+  const map = new Map<string, SoldRow>()
+  const row = (key: string, id: number | undefined, name: string, size: string, color: string) => {
+    let r = map.get(key)
     if (!r) {
-      r = { variantId: id, name, size, color, qty: 0, revenue: 0, cost: 0, lastDate: 0 }
-      map.set(id, r)
+      r = { key, variantId: id, name, size, color, qty: 0, revenue: 0, cost: 0, lastDate: 0 }
+      map.set(key, r)
     }
     return r
   }
 
   for (const s of sales) {
-    if (s.deleted) continue
-    for (const l of s.lines) {
-      const r = row(l.variantId, l.productName, l.size, l.color)
+    if (s.deleted || s.directTrade?.status === 'cancelled') continue
+    for (const l of commercialSaleLines(s)) {
+      const key = l.variantId === undefined ? `direct:${l.productName}|${l.size}|${l.color}` : `variant:${l.variantId}`
+      const r = row(key, l.variantId, l.productName, l.size, l.color)
       r.qty += l.qty
       r.revenue += l.qty * l.unitPrice
       r.cost += l.qty * (l.unitCost ?? 0)
@@ -46,7 +49,7 @@ export function soldInPeriod(sales: Sale[], returns: ReturnDoc[] = []): SoldRow[
   for (const d of returns) {
     if (d.deleted || d.kind !== 'customer') continue
     for (const l of d.lines) {
-      const r = map.get(l.variantId)
+      const r = map.get(`variant:${l.variantId}`)
       if (!r) continue
       r.qty -= l.qty
       r.revenue -= l.qty * l.unitPrice

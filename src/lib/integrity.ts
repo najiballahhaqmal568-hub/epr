@@ -56,7 +56,7 @@ export function computeCustomerBalances(sales: Sale[], payments: Payment[], retu
 export function computeSupplierBalances(purchases: Purchase[], payments: Payment[], returns: ReturnDoc[], expenses: Expense[] = []): Map<number, number> {
   return foldEffects([
     { table: 'purchases', rows: purchases },
-    { table: 'payments', rows: payments.filter((p) => p.partyType === 'supplier') },
+    { table: 'payments', rows: payments.filter((p) => p.partyType === 'supplier' || p.directPayment?.route === 'customerToSupplier') },
     { table: 'expenses', rows: expenses },
     { table: 'returns', rows: returns }
   ]).supplierBalance
@@ -86,7 +86,7 @@ export async function runIntegrityCheck(): Promise<IntegrityReport> {
   const stock = computeStock(sales, purchases, adjustments, returns)
   // قیمت تمام‌شده هم از اسناد بازسازی می‌شود — پیش از این هیچ کنترلی نداشت
   const bought = new Set<number>()
-  for (const p of purchases) if (p.received !== false) for (const l of p.lines) bought.add(l.variantId)
+  for (const p of purchases) if (!p.directTrade && p.received !== false) for (const l of p.lines) bought.add(l.variantId)
   const costs = computeCosts(
     sales,
     purchases,

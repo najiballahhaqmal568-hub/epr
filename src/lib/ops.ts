@@ -1,6 +1,8 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
+import { validateDirectBackup } from './directTradeBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
+import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
@@ -10,7 +12,23 @@ export { landingUnpaidOf }
  * پول همیشه به افغانی صحیح — تا در تقسیم و جمع، کسر و «پول گم‌شده» پیدا نشود.
  * قیمت تمام‌شدهٔ فی‌جوړه از این قاعده مستثنی است، چون میانگین است نه پول واقعی.
  */
-export const afn = (n: number): number => Math.round(n)
+export { afn, boxOf, SHOP_BOX }
+
+const DIRECT_SALE_ERROR = 'این سند فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+
+function assertOrdinarySale(sale: Sale): void {
+  if (sale.directTrade) throw new Error(DIRECT_SALE_ERROR)
+}
+
+function assertOrdinaryPurchase(purchase: Purchase): void {
+  if (purchase.directTrade) throw new Error(DIRECT_PURCHASE_ERROR)
+}
+
+function assertOrdinaryPayment(payment: Payment): void {
+  if (payment.directPayment) throw new Error(DIRECT_PAYMENT_ERROR)
+}
 
 /**
  * شناسهٔ ثابت برای سند جایگزین: اگر دو دستگاه همان سند را همزمان اصلاح کنند،
@@ -50,26 +68,6 @@ export function allocate(total: number, weights: number[]): number[] {
   return out
 }
 
-/** جای پول پیش‌فرض — صندوق دکان */
-export const SHOP_BOX = 'دکان'
-
-/** نام جای پول یک حرکت (سندهای کهنه بدون نام = دکان) */
-export const boxOf = (m: { box?: string }): string => m.box?.trim() || SHOP_BOX
-
-async function movement(m: Omit<CashMovement, 'id'>, opts?: { allowNegative?: boolean }) {
-  m = { ...m, amount: afn(m.amount), box: boxOf(m) }
-  if (m.amount === 0) return 0
-  // پول نباید از جایی که نیست خرج شود — کنترل برای همان جای پول
-  if (m.amount < 0 && !opts?.allowNegative) {
-    const all = await db.cashMovements.filter((x) => !x.deleted && boxOf(x) === m.box).toArray()
-    const bal = all.reduce((s, x) => s + x.amount, 0)
-    if (bal + m.amount < 0) {
-      const nf = new Intl.NumberFormat('fa-AF')
-      throw new Error(`پیسه در «${m.box}» کافی نیست! موجودی: ${nf.format(bal)} ؋`)
-    }
-  }
-  return db.cashMovements.add(m)
-}
 
 /**
  * انتقال پول بین جاها (دکان ← خانه ← صراف).
@@ -163,6 +161,7 @@ export async function boxBalances(): Promise<{ boxes: { name: string; balance: n
 
 /** ثبت فروش: کاهش گدام + قرض مشتری + ورود نقد به صندوق در یک تراکنش */
 export async function addSale(sale: Sale): Promise<number> {
+  assertOrdinarySale(sale)
   sale.total = afn(sale.total)
   sale.paid = afn(sale.paid)
   if (sale.discount !== undefined) sale.discount = afn(sale.discount)
@@ -198,6 +197,7 @@ export async function deleteSale(saleId: number): Promise<void> {
   return db.transaction('rw', [db.sales, db.payments, db.variants, db.customers, db.suppliers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const sale = await db.sales.get(saleId)
     if (!sale || sale.deleted) return
+    assertOrdinarySale(sale)
     if (sale.uuid && await db.payments.filter((p) => !p.deleted && p.shipping?.saleUuid === sale.uuid).first()) {
       throw new Error('این فروش کرایهٔ بار دارد؛ ابتدا سند کرایه را بررسی کنید. مرجوعی جنس کرایه را خودکار پس نمی‌دهد.')
     }
@@ -284,6 +284,7 @@ export async function deleteSaleImpact(
 ): Promise<{ paid: number; box: string; before: number; after: number; linkedReturns: number } | null> {
   const sale = await db.sales.get(saleId)
   if (!sale || sale.deleted) return null
+  assertOrdinarySale(sale)
   const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
   const box = orig ? boxOf(orig) : SHOP_BOX
   const before = await cashBalance(box)
@@ -297,6 +298,7 @@ export { landedUnitCost }
 
 /** ثبت خرید: افزایش گدام (به قیمت تمام‌شده) + قرض ما + خروج نقد + مصارف رسیدن */
 export async function addPurchase(purchase: Purchase): Promise<number> {
+  assertOrdinaryPurchase(purchase)
   purchase.total = afn(purchase.total)
   purchase.paid = afn(purchase.paid)
   if (purchase.sarrafAmount !== undefined) purchase.sarrafAmount = afn(purchase.sarrafAmount)
@@ -352,6 +354,7 @@ export async function addLandingCost(
   return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     const list = (await db.purchases.bulkGet(purchaseIds)).filter((p): p is Purchase => Boolean(p) && !p!.deleted)
     if (!list.length) throw new Error('خریدی یافت نشد')
+    for (const purchase of list) assertOrdinaryPurchase(purchase)
     const pairsOf = (p: Purchase) => p.lines.reduce((a, l) => a + l.qty, 0)
     const totalPairs = list.reduce((s, p) => s + pairsOf(p), 0)
     if (totalPairs <= 0) throw new Error('تعداد جوړه صفر است')
@@ -401,6 +404,7 @@ export async function payLanding(purchaseId: number): Promise<void> {
   return db.transaction('rw', db.purchases, db.cashMovements, async () => {
     const p = await db.purchases.get(purchaseId)
     if (!p || p.deleted) return
+    assertOrdinaryPurchase(p)
     const due = landingUnpaidOf(p)
     if (due <= 0) return
     await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -due, note: `مصارف رسیدن — ${p.supplierName}` })
@@ -429,6 +433,7 @@ export async function correctLandingTotal(purchaseId: number, input: LandingCorr
   return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     const p = await db.purchases.get(purchaseId)
     if (!p || p.deleted) throw new Error('خرید یافت نشد')
+    assertOrdinaryPurchase(p)
     const delta = newTotal - afn(p.landingCost ?? 0)
     if (delta === 0) throw new Error('مجموع نو با مجموع فعلی برابر است — تغییری نیست')
 
@@ -479,6 +484,7 @@ export async function receivePurchase(purchaseId: number): Promise<void> {
   return db.transaction('rw', [db.purchases, db.variants, db.adjustments, db.sales, db.returns], async () => {
     const p = await db.purchases.get(purchaseId)
     if (!p || p.deleted || p.received !== false) return
+    assertOrdinaryPurchase(p)
     for (const line of p.lines) {
       const v = await db.variants.get(line.variantId)
       if (v) {
@@ -640,6 +646,7 @@ export async function correctPurchase(purchaseId: number, inputLines: PurchaseEd
     async () => {
       const purchase = await db.purchases.get(purchaseId)
       if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
+      assertOrdinaryPurchase(purchase)
       const lines = await canonicalPurchaseLines(inputLines)
       const total = afn(lines.reduce((sum, line) => sum + line.qty * line.unitCost, 0))
       const committed = purchase.paid + (purchase.sarrafAmount ?? 0)
@@ -697,6 +704,7 @@ function purchaseLandingCashPaid(purchase: Purchase): number {
 export async function cancelPurchaseImpact(purchaseId: number): Promise<PurchaseCancelImpact | null> {
   const purchase = await db.purchases.get(purchaseId)
   if (!purchase || purchase.deleted) return null
+  assertOrdinaryPurchase(purchase)
   const original = await db.cashMovements.filter((movement) => !movement.deleted && movement.type === 'purchase' && movement.refId === purchaseId).first()
   let blockedReason: string | undefined
   try {
@@ -735,6 +743,7 @@ export async function cancelPurchase(purchaseId: number): Promise<void> {
     async () => {
       const purchase = await db.purchases.get(purchaseId)
       if (!purchase || purchase.deleted) return
+      assertOrdinaryPurchase(purchase)
       const receipts = await assertPurchaseCanChange(purchase, [])
       const affected = new Set(purchase.lines.map((line) => line.variantId))
 
@@ -795,6 +804,7 @@ export async function correctPurchasePrices(purchaseId: number, unitCosts: numbe
     async () => {
       const purchase = await db.purchases.get(purchaseId)
       if (!purchase || purchase.deleted) throw new Error('خرید یافت نشد')
+      assertOrdinaryPurchase(purchase)
       if (unitCosts.length !== purchase.lines.length) throw new Error('قیمت تمام اجناس این خرید را بنویسید')
       const costs = unitCosts.map(afn)
       if (costs.some((cost) => cost <= 0)) throw new Error('قیمت خرید هر جنس باید بیشتر از صفر باشد')
@@ -868,6 +878,7 @@ async function supplierPaymentReplacement(
   current: Payment,
   input: SupplierPaymentCorrectionInput
 ): Promise<Payment> {
+  assertOrdinaryPayment(current)
   if (current.partyType !== 'supplier' || current.amount <= 0 || current.lenderAction || current.groupUuid) {
     throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
   }
@@ -1066,6 +1077,7 @@ async function customerPaymentReplacement(
   current: Payment,
   input: CustomerPaymentCorrectionInput
 ): Promise<Payment> {
+  assertOrdinaryPayment(current)
   if (current.partyType !== 'customer' || current.amount <= 0 || current.groupUuid || current.lenderAction) {
     throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
   }
@@ -1225,6 +1237,7 @@ export async function previewOpeningDebtCorrection(
 }
 
 async function openingDebtParty(current: Payment): Promise<Customer | Supplier> {
+  assertOrdinaryPayment(current)
   if (current.via !== 'opening' || current.amount >= 0 || current.groupUuid || current.lenderAction) {
     throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
   }
@@ -1451,6 +1464,7 @@ export async function cancelSaleShipping(paymentId: number, reason: string): Pro
 
 /** ثبت پرداخت/دریافت: کاهش قرض طرف حساب + حرکت صندوق */
 export async function addPayment(payment: Payment): Promise<number> {
+  assertOrdinaryPayment(payment)
   payment.amount = afn(payment.amount)
   if (payment.amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
   return db.transaction('rw', db.payments, db.customers, db.suppliers, db.cashMovements, async () => {
@@ -1520,6 +1534,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
   return db.transaction('rw', [db.payments, db.sales, db.variants, db.customers, db.suppliers, db.cashMovements, db.purchases, db.adjustments, db.returns], async () => {
     const p = await db.payments.get(paymentId)
     if (!p || p.deleted) return
+    assertOrdinaryPayment(p)
     if (p.shipping) throw new Error('کرایه را از بخش کرایهٔ بار اصلاح یا لغو کنید تا صندوق و مصرف هم یکجا برگردد')
     for (const e of effectsOf('payments', p)) {
       const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
@@ -1583,6 +1598,7 @@ export async function deletePaymentImpact(
 } | null> {
   const p = await db.payments.get(paymentId)
   if (!p || p.deleted) return null
+  assertOrdinaryPayment(p)
   const table = p.partyType === 'customer' ? db.customers : db.suppliers
   const row = await table.get(p.partyId)
   const before = row?.balance ?? 0
@@ -2010,6 +2026,7 @@ export interface LenderPaymentCorrectionPreview {
 }
 
 async function lenderPaymentParty(current: Payment): Promise<Supplier> {
+  assertOrdinaryPayment(current)
   if (current.partyType !== 'supplier' || current.groupUuid || current.goodsLines?.length || current.via === 'goods') {
     throw new Error('این نوع سند از اینجا قابل اصلاح نیست')
   }
@@ -2579,7 +2596,11 @@ export async function addAdjustment(adj: Adjustment): Promise<number> {
 export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
   ret.amount = afn(ret.amount)
   ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
-  return db.transaction('rw', db.returns, db.variants, db.customers, db.adjustments, db.cashMovements, async () => {
+  return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
+    if (ret.refId !== undefined) {
+      const sale = await db.sales.get(ret.refId)
+      if (sale) assertOrdinarySale(sale)
+    }
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
@@ -2746,7 +2767,11 @@ export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
 export async function addSupplierReturn(ret: ReturnDoc): Promise<number> {
   ret.amount = afn(ret.amount)
   ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
-  return db.transaction('rw', db.returns, db.variants, db.suppliers, db.cashMovements, async () => {
+  return db.transaction('rw', [db.returns, db.purchases, db.variants, db.suppliers, db.cashMovements], async () => {
+    if (ret.refId !== undefined) {
+      const purchase = await db.purchases.get(ret.refId)
+      if (purchase) assertOrdinaryPurchase(purchase)
+    }
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
@@ -2954,6 +2979,8 @@ const TABLES = [
 // Cloud identity belongs to the account currently signed in on this device.
 // A backup may come from another owner/shop, so these rows must never replace it.
 const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
+// Compatibility acknowledgement belongs to this device, never to a backup.
+const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled'])
 
 export async function exportBackup(): Promise<string> {
   const data: Record<string, unknown[]> = {}
@@ -2961,7 +2988,7 @@ export async function exportBackup(): Promise<string> {
     const rows = await db.table(t).toArray()
     data[t] =
       t === 'settings'
-        ? rows.filter((row) => !CLOUD_IDENTITY_SETTINGS.has(String((row as { key?: unknown }).key)))
+        ? rows.filter((row) => !BACKUP_EXCLUDED_SETTINGS.has(String((row as { key?: unknown }).key)))
         : rows
   }
   return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data })
@@ -2972,6 +2999,7 @@ export type BackupImportMode = 'merge' | 'replace'
 export async function importBackup(json: string, mode: BackupImportMode = 'merge'): Promise<{ cloudSynced: boolean }> {
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
+  validateDirectBackup(parsed.data)
   const restoreTimestamp = Date.now()
 
   const sync = await import('./sync')
@@ -2990,7 +3018,7 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
         const rows = Array.isArray(parsed.data[t]) ? parsed.data[t] : []
         const restorableRows =
           t === 'settings'
-            ? rows.filter((row: { key?: unknown }) => !CLOUD_IDENTITY_SETTINGS.has(String(row.key)))
+            ? rows.filter((row: { key?: unknown }) => !BACKUP_EXCLUDED_SETTINGS.has(String(row.key)))
             : rows
         if (restorableRows.length) await db.table(t).bulkAdd(restorableRows)
       }

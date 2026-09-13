@@ -41,14 +41,15 @@ export function effectsOf(table: DocTable, doc: unknown): Effect[] {
   if (table === 'sales') {
     const s = doc as Sale
     // فروش: جنس از گدام کم می‌شود، باقی‌ماندهٔ پول قرضِ مشتری می‌شود
-    for (const l of s.lines) out.push(stock(l.variantId, -l.qty))
+    // فروش مستقیم هرگز از گدام نمی‌گذرد؛ حتی lines ناسالمِ واردشده نباید موجودی بسازد.
+    if (!s.directTrade) for (const l of s.lines) out.push(stock(l.variantId, -l.qty))
     const remainder = saleCreditAmount(s)
     if (remainder > 0) out.push(debt(s.customerId, remainder))
   } else if (table === 'purchases') {
     const p = doc as Purchase
     // خرید عادی (received تعریف‌نشده) موجودی می‌دهد. خرید «در راه» — چه رسیده و
     // چه نرسیده — موجودی‌اش از سند تعدیلِ رسید می‌آید، وگرنه دو بار شمرده می‌شود.
-    if (p.received === undefined) for (const l of p.lines) out.push(stock(l.variantId, l.qty))
+    if (!p.directTrade && p.received === undefined) for (const l of p.lines) out.push(stock(l.variantId, l.qty))
     const hawala = p.sarrafAmount ?? 0
     const remainder = p.total - p.paid - hawala
     if (remainder > 0) out.push(owed(p.supplierId, remainder))
@@ -60,6 +61,12 @@ export function effectsOf(table: DocTable, doc: unknown): Effect[] {
     const p = doc as Payment
     // مبلغ منفی = «قرض قبلی»، پس همین یک قاعده هر دو حالت را می‌گیرد
     out.push(p.partyType === 'customer' ? debt(p.partyId, -p.amount) : owed(p.partyId, -p.amount))
+    // مشتری مستقیم به فروشنده پرداخته: هم قرض مشتری و هم قرض فروشنده کم می‌شود.
+    // این مسیر صندوق، صراف یا قرض‌دهندهٔ ضمنی ندارد.
+    if (p.directPayment?.route === 'customerToSupplier') {
+      out.push(owed(p.directPayment.supplierId, -p.amount))
+      return out.filter((e) => typeof e.id === 'number' && e.delta !== 0)
+    }
     // پرداخت از راه صراف: قرض ما به تأمین‌کننده کم و به صراف زیاد می‌شود
     if (p.via === 'sarraf') out.push(owed(p.sarrafId, p.sarrafAmount ?? p.amount))
     // قرض‌دهنده مستقیماً فروشنده را پرداخته: قرض فروشنده کم و قرض قرض‌دهنده زیاد می‌شود

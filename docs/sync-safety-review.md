@@ -95,3 +95,56 @@ data just to install the update. If regressions appear, revert only this
 release's commit and redeploy. Existing business records remain in place;
 the extra cursor key is ignored by the previous code. Rolling back also
 reintroduces the pagination defect, so stop recovery attempts and investigate.
+
+## Direct-sale reader and compatibility gate — 2026-09-09
+
+Direct-sale base documents and payments now resolve every required customer,
+supplier and funded sarraf through UUID before applying effects. Sender-local
+numeric IDs are not accepted as a fallback. An unresolved or deleted party raises
+a recoverable sync error, and the pull cursor remains on the last applied row.
+A base sale or purchase may still arrive before its counterpart; it is retained,
+shown by the read model as incomplete, and cannot authorize financial changes.
+
+`loadDirectTrade` validates reciprocal document UUIDs, revision/status, identical
+commercial snapshots, dates, totals, empty physical-stock lines, zero legacy
+payment/discount/landing fields, live parties, exact cash-route equations and
+over-allocation. Its canonical token covers both bases, active direct payments,
+linked freight records and current affected balances using UUIDs rather than local
+IDs. Replays therefore keep the same token on devices whose local row IDs differ.
+Sibling revision evidence is retained in local sync state and blocks writes;
+predecessor replay cannot roll a successor back. Reader/effect support remains
+active, including for cancelled records.
+
+Creation remains disabled unless the local `directTrades.enabled` setting is
+explicitly true, and state-loaded eligibility plus the current read-only flag are
+checked by the synchronous write guard. Future correction/cancellation operations
+must first await `syncNow(true)`, then load their preview, and inside their Dexie
+write transaction re-load state and the `settings` row before comparing the token.
+No network call belongs inside that transaction.
+
+The local setting is not compatibility proof. The existing cloud tables store generic JSON with per-row last-writer-wins;
+they provide neither an active-client-version fence nor an atomic cross-document
+revision fence. An older client can omit or overwrite direct fields, and a device
+that sees only the server's final same-row winner cannot reconstruct every sibling
+revision. For the owner-approved first web release (September 10 scope), code may
+be published with writes disabled. Before enabling writes, the owner must refresh
+every active device and explicitly acknowledge this in the local enable dialog.
+The owner confirmed this requirement; the acknowledgement is excluded from backup
+export/import. It is a manual operational requirement, not server enforcement or
+proof that another device has upgraded. Do not use old clients after activation.
+No schema, RLS, authentication,
+production account or live backup was changed for this work.
+
+After direct records exist, do not roll back to a pre-direct-sale build: it cannot
+interpret those records safely. If a release problem appears, stop direct entry
+and ship a compatible fix retaining readers/effects/guards; preserve all records.
+Advanced direct correction/cancellation remains unavailable in this first release.
+
+Local verification uses `node tests/direct-trade-sync.mjs` on port 5200 with two
+isolated browser contexts, different local party IDs, real `encodeRefs`,
+`applyRemoteRow`, `syncNow`, IndexedDB and a fake transport. External requests are
+blocked. It covers repeated replay, UUID resolution, missing counterparts and
+parties, cursor preservation, mismatched revisions, stable tokens,
+feature/read-only/stale guards and exact customer/supplier/cash balances. Existing
+sync regressions remain `node tests/sync-safety.mjs` and
+`node tests/sync-status.mjs`.

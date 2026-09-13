@@ -6,11 +6,13 @@ import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { CorrectSupplierPaymentModal, PaySupplierModal } from './SupplierModals'
 import CorrectOpeningDebtModal from './CorrectOpeningDebtModal'
+import DirectTradeDetail from '../sales/direct/DirectTradeDetail'
 
 /** تاریخچهٔ کامل حساب یک تأمین‌کننده یا صراف */
 export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
   const [showDebt, setShowDebt] = useState(false)
   const [showPay, setShowPay] = useState(false)
+  const [directUuid, setDirectUuid] = useState<string | null>(null)
   const [debtStr, setDebtStr] = useState('')
   const [debtNote, setDebtNote] = useState('')
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null)
@@ -32,6 +34,10 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     () => db.payments.filter((p) => !p.deleted && p.partyType === 'supplier' && p.partyId === supplier.id).toArray(),
     [supplier.id]
   )
+  const directCustomerPays = useLiveQuery(
+    () => db.payments.filter((p) => !p.deleted && p.partyType === 'customer' && p.directPayment?.route === 'customerToSupplier' && p.directPayment.supplierId === supplier.id).toArray(),
+    [supplier.id]
+  )
   const sarrafPays = useLiveQuery(
     () => db.payments.filter((p) => !p.deleted && p.via === 'sarraf' && p.sarrafId === supplier.id).toArray(),
     [supplier.id]
@@ -49,14 +55,15 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     return <CorrectOpeningDebtModal payment={editingOpening} onClose={() => setEditingOpening(null)} />
   }
 
-  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment; ret?: ReturnDoc }
+  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment; ret?: ReturnDoc; directUuid?: string }
   const events: Ev[] = []
   purchases?.forEach((p) => {
     const hawala = p.sarrafAmount ?? 0
     const rem = p.total - p.paid - hawala
     events.push({
       date: p.date,
-      label: `خرید ${p.received === false ? '(در راه)' : ''}`,
+      label: p.directTrade ? 'خرید مستقیم — بدون گدام' : `خرید ${p.received === false ? '(در راه)' : ''}`,
+      directUuid: p.directTrade?.uuid,
       sub: `مجموع ${fmtMoney(p.total)} · نقد ${fmtMoney(p.paid)}${hawala > 0 ? ` · حواله ${fmtMoney(hawala)}` : ''}`,
       amount: rem,
       plus: rem > 0
@@ -97,9 +104,20 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
         sub: [details, p.correctionReason ? `اصلاح‌شده — ${p.correctionReason}` : ''].filter(Boolean).join(' · ') || undefined,
         amount: p.amount,
         plus: false,
-        payment: p.lenderAction || p.groupUuid ? undefined : p
+        payment: p.directPayment || p.lenderAction || p.groupUuid ? undefined : p,
+        directUuid: p.directPayment?.tradeUuid
       })
     }
+  })
+  directCustomerPays?.forEach((p) => {
+    events.push({
+      date: p.date,
+      label: 'مشتری مستقیم به فروشنده داده — بدون صندوق',
+      directUuid: p.directPayment?.tradeUuid,
+      sub: p.partyName,
+      amount: p.amount,
+      plus: false
+    })
   })
   sarrafPays?.forEach((p) => {
     events.push({ date: p.date, label: `حواله برای ${p.partyName}`, amount: p.sarrafAmount ?? p.amount, plus: true })
@@ -179,6 +197,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
                 ابطال برگشت
               </button>
             )}
+            {e.directUuid && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(e.directUuid!)}>جزئیات فروش مستقیم</button>}
             {!accessFlags.readOnly && e.payment?.id && (
               <div className="mt-2 flex gap-2">
                 <button
@@ -205,6 +224,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
           </div>
         ))}
       </div>
+      {directUuid && <DirectTradeDetail tradeUuid={directUuid} onClose={() => setDirectUuid(null)} />}
       {toDelete && (
         <Modal title="پاک کردن سند اشتباهی" onClose={() => setToDelete(null)}>
           <p className="mb-3 text-sm text-slate-700">

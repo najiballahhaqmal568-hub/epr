@@ -69,7 +69,7 @@ export function historicalCostRevision(
   const target = purchases.find((purchase) => purchase.id === purchaseId)
   const changedSales = new Map<number, SaleLine[]>()
   const changedReturns = new Map<number, ReturnDoc['lines']>()
-  if (!target || target.received === false || target.lines.length !== nextUnitCosts.length) {
+  if (!target || target.directTrade || target.received === false || target.lines.length !== nextUnitCosts.length) {
     return { sales: changedSales, returns: changedReturns, affectedSales: 0, affectedPairs: 0, profitChange: 0 }
   }
 
@@ -84,7 +84,7 @@ export function historicalCostRevision(
   const events: RevisionEvent[] = []
   let seq = 0
   for (const purchase of purchases) {
-    if (purchase.received === false) continue
+    if (purchase.directTrade || purchase.received === false) continue
     const date = purchase.received === true ? (purchase.receivedAt ?? purchase.date) : purchase.date
     purchase.lines.forEach((line, lineIndex) => {
       if (!changedVariants.has(line.variantId)) return
@@ -93,6 +93,7 @@ export function historicalCostRevision(
     })
   }
   for (const sale of sales) {
+    if (sale.directTrade) continue
     sale.lines.forEach((line, lineIndex) => {
       if (!changedVariants.has(line.variantId)) return
       events.push({ date: sale.date, seq: seq++, kind: 'sale', variantId: line.variantId, qty: line.qty, sale, lineIndex })
@@ -191,13 +192,17 @@ export function computeCosts(
   let seq = 0
 
   for (const p of purchases) {
+    if (p.directTrade) continue
     // خرید «در راه»ی که هنوز نرسیده، نه موجودی می‌دهد نه قیمت
     if (p.received === false) continue
     // خرید عادی در تاریخ خودش؛ خرید در راه در تاریخ رسیدنش
     const date = p.received === true ? (p.receivedAt ?? p.date) : p.date
     for (const l of p.lines) ev.push({ date, seq: seq++, variantId: l.variantId, qty: l.qty, unitCost: landedUnitCost(p, l.unitCost) })
   }
-  for (const s of sales) for (const l of s.lines) ev.push({ date: s.date, seq: seq++, variantId: l.variantId, qty: -l.qty })
+  for (const s of sales) {
+    if (s.directTrade) continue
+    for (const l of s.lines) ev.push({ date: s.date, seq: seq++, variantId: l.variantId, qty: -l.qty })
+  }
   for (const a of adjustments) {
     // موجودیِ رسیدِ خرید از خودِ سند خرید آمد — اینجا دوباره شمرده نمی‌شود
     if (a.reason === 'purchaseReceived') continue
@@ -249,7 +254,7 @@ export async function rebuildCosts(): Promise<Map<number, number>> {
   ])
   // سایز بدون خرید، قیمتش دست‌نخورده می‌ماند
   const bought = new Set<number>()
-  for (const p of purchases) if (p.received !== false) for (const l of p.lines) bought.add(l.variantId)
+  for (const p of purchases) if (!p.directTrade && p.received !== false) for (const l of p.lines) bought.add(l.variantId)
   const fallback = new Map(variants.filter((v) => !bought.has(v.id!)).map((v) => [v.id!, v.purchasePrice]))
   return computeCosts(sales, purchases, adjustments, returns, fallback)
 }

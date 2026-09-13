@@ -14,6 +14,9 @@ import NewPurchaseModal from './purchases/NewPurchaseModal'
 import LendersView from './purchases/LendersView'
 import PurchasePriceCorrectionModal from './purchases/PurchasePriceCorrectionModal'
 import PurchaseCancelModal from './purchases/PurchaseCancelModal'
+import DirectTradeDetail from './sales/direct/DirectTradeDetail'
+import { commercialPurchaseLines } from '../lib/commercialLines'
+import { useDirectTradeReview } from '../components/DirectTradeWarning'
 
 export type PurchaseView = 'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'
 type PurchaseFilter = 'all' | 'debt' | 'transit'
@@ -33,6 +36,8 @@ export default function Purchases({
 }) {
   const [view, setView] = useState<PurchaseView>(initialView)
   const [showNew, setShowNew] = useState(openNew)
+  const [directUuid, setDirectUuid] = useState<string | null>(null)
+  const directReview = useDirectTradeReview()
   const [showNewSupplier, setShowNewSupplier] = useState<'supplier' | 'sarraf' | null>(null)
   const [payingSupplier, setPayingSupplier] = useState<number | null>(null)
   const [returningTo, setReturningTo] = useState<Supplier | null>(null)
@@ -60,13 +65,13 @@ export default function Purchases({
     const term = search.trim().toLowerCase()
     const matchesSearch =
       !term ||
-      `${purchase.supplierName} ${purchase.lines.map((line) => `${line.productName} ${line.size} ${line.color}`).join(' ')}`
+      `${purchase.supplierName} ${commercialPurchaseLines(purchase).map((line) => `${line.productName} ${line.size} ${line.color}`).join(' ')}`
         .toLowerCase()
         .includes(term)
     if (!matchesSearch) return false
-    const remainder = purchase.total - purchase.paid - (purchase.sarrafAmount ?? 0)
+    const remainder = purchase.directTrade ? directReview.states.find(s => s.purchase?.directTrade?.uuid === purchase.directTrade?.uuid)?.balances.supplierRemaining ?? 0 : purchase.total - purchase.paid - (purchase.sarrafAmount ?? 0)
     if (filter === 'debt') return remainder > 0
-    if (filter === 'transit') return purchase.received === false
+    if (filter === 'transit') return !purchase.directTrade && purchase.received === false
     return true
   })
 
@@ -194,6 +199,7 @@ export default function Purchases({
           </div>
           {shownPurchases.length === 0 && <Empty text={purchases?.length ? 'خریدی با این جستجو یا فلتر پیدا نشد.' : 'هنوز خریدی ثبت نشده.'} />}
           {shownPurchases.map((p) => {
+            if (p.directTrade) return <Card key={p.id}><button className="w-full text-right" onClick={() => setDirectUuid(p.directTrade!.uuid)}><p className="font-bold">{p.supplierName} — خرید مستقیم</p><p className="text-xs text-slate-500">{fmtDate(p.date)} · ارسال مستقیم — بدون گدام</p><p className="my-2 text-sm">{commercialPurchaseLines(p).map(l => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`).join('، ')}</p><p className="font-bold text-teal-700">{fmtMoney(p.total)}</p><span className="mt-2 block text-sm text-teal-700">جزئیات معامله و باقی‌مانده</span></button></Card>
             const hawala = p.sarrafAmount ?? 0
             const remainder = p.total - p.paid - hawala
             const pending = p.received === false
@@ -365,6 +371,7 @@ export default function Purchases({
       {payingSupplier != null && <PaySupplierModal supplierId={payingSupplier} onClose={() => setPayingSupplier(null)} />}
       {returningTo && <SupplierReturnModal supplier={returningTo} onClose={() => setReturningTo(null)} />}
       {returningPurchase && <PurchaseReturnModal purchase={returningPurchase} onClose={() => setReturningPurchase(null)} />}
+      {directUuid && <DirectTradeDetail tradeUuid={directUuid} onClose={() => setDirectUuid(null)} />}
       {correctingPurchase && <PurchasePriceCorrectionModal purchase={correctingPurchase} onClose={() => setCorrectingPurchase(null)} />}
       {cancellingPurchase && <PurchaseCancelModal purchase={cancellingPurchase} onClose={() => setCancellingPurchase(null)} />}
       {detail && <SupplierDetailModal supplier={detail} onClose={() => setDetail(null)} />}

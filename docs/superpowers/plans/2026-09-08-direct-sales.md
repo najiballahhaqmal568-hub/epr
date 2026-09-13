@@ -240,7 +240,11 @@ rec.directPayment = { ...ref, supplierId: supplier.id }
 
 ## Task 4: Atomic creation and explicit settlement events
 
-**Files:** Create `src/lib/directTradeOps.ts`, `src/lib/financialPosting.ts`; modify `src/lib/ops.ts`, `tests/direct-trade-fixtures.ts`, `tests/direct-trade-checks.ts`.
+**Files:** Create `src/lib/directTradeOps.ts`, `src/lib/financialPosting.ts`; modify `src/lib/ops.ts`, `tests/direct-trade-fixtures.ts`, `tests/direct-trade-checks.ts`. Add only optional `CashMovement.directPaymentUuid?: string` in `src/db.ts` for stable direct-event linkage; this is additive JSON metadata, not a database schema migration.
+
+**Source-verified integration notes:** The cash writer depends on `afn`, `boxOf` and `SHOP_BOX`; move those helpers with it and preserve their public exports from `ops.ts` to avoid a runtime import cycle. Include `db.settings` and `db.syncState` in the parent write transaction because fresh state/eligibility reads use those stores. Keep these integration changes behavior-preserving for ordinary operations.
+
+**Durable creation retry metadata:** Also allow optional `DirectTradeMeta.creationFingerprint?: string` in `directTradeTypes.ts`, stored identically on both newly created bases. Canonicalize the immutable creation request, including initial payments/freight and UUID party references (not numeric local IDs). Preserve it through later corrections. Comparing current live payments cannot distinguish an original retry after later settlements; local-only syncState storage is insufficient for backup/replay. Missing or mismatching fingerprints on an existing trade fail closed, never create another bundle. Tests cover retry after later events and equivalent requests with reordered object keys.
 
 **Interfaces:**
 
@@ -300,7 +304,9 @@ if (R + D > S || P + D > C) throw new Error('پرداخت از باقی‌مان
 
 ## Task 5: Guard generic actions and implement audited corrections
 
-**Files:** Create `src/lib/directTradeCorrections.ts`; modify `directTradeTypes.ts`, `directTradeState.ts`, `src/lib/ops.ts`, `src/lib/ledgerSaleCancellation.ts`, direct tests.
+**Cancellation ordering boundary (Task3 review):** Business `payment.date` is user-editable and cannot prove whether an event was created before cancellation. Record a stable cancellation payment-set snapshot (with correction lineage) in the optional direct audit metadata and include it in pairing/tokens. Detect a concurrent new event absent from that snapshot even when backdated; retain its actual cash/effects and show conflict. Explicitly allow audited correction/cancellation of payments already present at cancellation, without treating legitimate replacement lineage as a new allocation. Test exact customer/supplier credits after both principal reversals, not just a `cancelled` label. This needs no server schema change, but does not remove the publication compatibility gate.
+
+**Files:** Create `src/lib/directTradeCorrections.ts`; modify `directTradeTypes.ts`, `directTradeState.ts`, `src/lib/ops.ts`, `src/lib/ledgerSaleCancellation.ts`, direct tests. Permit only additive optional audit fields in `src/db.ts` for base `directHistory` and payment `correctionPrevious` direct-route/party UUID snapshots, using reusable types from `directTradeTypes.ts`; no database schema migration.
 
 **Interfaces:**
 

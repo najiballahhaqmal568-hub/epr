@@ -8,9 +8,11 @@ import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
 import CorrectCustomerPaymentModal from './CorrectCustomerPaymentModal'
 import CancelLedgerSaleModal from './CancelLedgerSaleModal'
+import DirectTradeDetail from '../sales/direct/DirectTradeDetail'
 
 export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [showPay, setShowPay] = useState(false)
+  const [directUuid, setDirectUuid] = useState<string | null>(null)
   const [cancelSaleId, setCancelSaleId] = useState<number | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [showDebt, setShowDebt] = useState(false)
@@ -195,7 +197,8 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                 {fmtMoney(Math.abs(r.delta))}
               </p>
               <p className="text-xs text-slate-500">مانده: {fmtMoney(r.balance)}</p>
-              {r.source?.table === 'sales' && !accessFlags.readOnly && <button
+              {r.source?.table === 'sales' && sales?.find(s => s.id === r.source?.id)?.directTrade && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(sales.find(s => s.id === r.source?.id)!.directTrade!.uuid)}>جزئیات فروش مستقیم</button>}
+              {r.source?.table === 'sales' && !sales?.find(s => s.id === r.source?.id)?.directTrade && !accessFlags.readOnly && <button
                 className="mt-2 rounded-lg bg-red-50 px-2 py-2 text-xs font-bold text-red-700"
                 onClick={() => setCancelSaleId(r.source!.id)}
               >ابطال همین فروش</button>}
@@ -203,6 +206,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
               {r.source?.table === 'payments' && (
                 (() => {
                   const p = (payments ?? []).find((x) => x.id === r.source!.id)
+                  if (p?.directPayment) return <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(p.directPayment!.tradeUuid)}>جزئیات فروش مستقیم</button>
                   if (p?.shipping) return <p className="mt-1 text-xs text-slate-500">مدیریت کرایه از جزئیات فروش</p>
                   const correctable = !!p && p.amount > 0 && !p.groupUuid && !p.lenderAction && !accessFlags.readOnly
                   return (
@@ -287,6 +291,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
       )}
 
       {toCorrect && <CorrectCustomerPaymentModal payment={toCorrect} onClose={() => setToCorrect(null)} />}
+      {directUuid && <DirectTradeDetail tradeUuid={directUuid} onClose={() => setDirectUuid(null)} />}
       {cancelSaleId !== null && <CancelLedgerSaleModal saleId={cancelSaleId} customerId={c.id!} onClose={() => setCancelSaleId(null)} />}
 
       {toCancel && (
