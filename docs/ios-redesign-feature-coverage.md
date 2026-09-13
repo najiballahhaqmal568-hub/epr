@@ -95,9 +95,21 @@ Every unchecked box means verification in the redesigned app is still required. 
 - [ ] R01–R03 reporting and partners
 - [ ] U01–U06 account/security/sync/support
 
-## Planned, not already present
+## Published direct sales — preservation addendum (2026-09-13)
 
-Direct supplier-to-customer resale remains a separate approved 10-task feature in `docs/superpowers/plans/2026-09-08-direct-sales.md`. Preserve its planned Sales → Direct sale entry, both party accounts, three settlement routes, freight, profit and audited corrections, but do not show an enabled unimplemented control. Do not mix its accounting changes into cosmetic redesign commits or claim it is delivered by these images.
+Direct supplier-to-customer resale is now published at 023681b and merged into this redesign branch. Preserve the implemented first release, not the original larger plan's deferred features.
+
+| ID | Required preservation | Evidence |
+|---|---|---|
+| D01 | Sales entry, owner per-device upgrade acknowledgement, manual non-stock goods, review confirmation | DirectTradeEnable/Form, direct-trade-ui.mjs |
+| D02 | Initial/later customer cash, supplier cash/sarraf split, customer-to-supplier payment; separate trade and overall balances | DirectPaymentForm/Fields, direct-trade.mjs |
+| D03 | Sales/Purchases/customer/supplier detail links, customer-safe receipt, staff cost privacy, existing freight | DirectTradeDetail/Receipt, direct-trade-ui.mjs |
+| D04 | Profit/report commercial readers, no warehouse effects, incomplete/conflict warnings, one-sided correction/delete guards | direct-trade-report-checks.ts, direct-trade-checks.ts |
+| D05 | UUID sync/replay, portable backup, local acknowledgement excluded from backup | direct-trade-sync.mjs, direct-trade-backup.mjs |
+
+- [ ] D01–D05 redesigned verification
+
+Advanced direct correction/cancellation/return remains unavailable. Do not enable it cosmetically or replace new direct-sale code with older components. No reset, migration, accounting-rule change or production testing is part of redesign.
 
 ## Mockup discrepancies that must not ship
 
