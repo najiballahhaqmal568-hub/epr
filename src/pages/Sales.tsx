@@ -1,4 +1,10 @@
 import { useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { commercialSaleLines } from '../lib/commercialLines'
+import { directFeatureEnabled } from '../lib/directTradeState'
+import DirectTradeForm from './sales/direct/DirectTradeForm'
+import DirectTradeDetail from './sales/direct/DirectTradeDetail'
+import DirectTradeEnable from './sales/direct/DirectTradeEnable'
 import { accessFlags, type Sale } from '../db'
 import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
@@ -18,6 +24,10 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
   const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
   const [workspaceKey, setWorkspaceKey] = useState(openNew ? 1 : 0)
   const [detail, setDetail] = useState<Sale | null>(null)
+  const [newDirect, setNewDirect] = useState(false)
+  const [directDetail, setDirectDetail] = useState<string | null>(null)
+  const [enableDirect, setEnableDirect] = useState(false)
+  const directEnabled = useLiveQuery(directFeatureEnabled, [])
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [returning, setReturning] = useState<Sale | null>(null)
@@ -87,6 +97,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
           آمار
         </button>
       </fieldset>
+      {!accessFlags.readOnly && !isStaff && <button disabled={pending || directEnabled === undefined} className="mb-4 w-full rounded-xl border border-teal-200 bg-teal-50 p-3 font-bold text-teal-800" onClick={() => directEnabled ? setNewDirect(true) : setEnableDirect(true)}>فروش مستقیم</button>}
       {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {view === 'stats' && <SalesStats isStaff={isStaff} />}
       {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." />}
@@ -195,13 +206,13 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         const remainder = s.total - s.paid
         return (
           <Card key={s.id}>
-            <button onClick={() => setDetail(s)} className="sale-history-row w-full text-right" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
+            <button onClick={() => s.directTrade ? setDirectDetail(s.directTrade.uuid) : setDetail(s)} className="sale-history-row w-full text-right" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-bold text-slate-800">
                   {s.customerName || 'مشتری نقدی'}{' '}
                   <span className="text-xs font-normal text-slate-400">
-                    ({s.saleType === 'retail' ? 'پرچون' : 'عمده'})
+                    ({s.directTrade ? 'مستقیم' : s.saleType === 'retail' ? 'پرچون' : 'عمده'})
                   </span>
                 </p>
                 <p className="text-xs text-slate-500">{fmtDate(s.date)}</p>
@@ -209,11 +220,11 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
               <div className="text-left">
                 <p className="font-bold text-teal-700">{fmtMoney(s.total)}</p>
                 {(s.discount ?? 0) > 0 && <p className="text-xs text-amber-600">تخفیف: {fmtMoney(s.discount!)}</p>}
-                {remainder > 0 && <p className="text-xs text-red-600">باقی: {fmtMoney(remainder)}</p>}
+                {!s.directTrade && remainder > 0 && <p className="text-xs text-red-600">باقی: {fmtMoney(remainder)}</p>}
               </div>
             </div>
             <p className="mt-1 text-sm text-slate-600">
-              {s.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
+              {commercialSaleLines(s).map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
             </p>
             <span className="mt-2 block text-xs font-bold text-teal-700">نمایش جزئیات و رسید</span>
             </button>
@@ -249,6 +260,9 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
       {returning && <ReturnModal sale={returning} onClose={() => setReturning(null)} />}
       {exchanging && <ExchangeModal sale={exchanging} onClose={() => setExchanging(null)} />}
       {invoiceFor && <InvoiceModal sale={invoiceFor} onClose={() => setInvoiceFor(null)} />}
+      {enableDirect && <DirectTradeEnable onClose={() => setEnableDirect(false)} onEnabled={() => { setEnableDirect(false); setNewDirect(true) }} />}
+      {newDirect && <DirectTradeForm onClose={() => setNewDirect(false)} onPendingChange={onPendingChange} onSaved={uuid => { setNewDirect(false); setDirectDetail(uuid) }} />}
+      {directDetail && <DirectTradeDetail tradeUuid={directDetail} isStaff={isStaff} onClose={() => setDirectDetail(null)} />}
     </div>
   )
 }

@@ -119,7 +119,7 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
       {/* نمودارها — ارقام مفاد فقط برای مالک */}
       {!isStaff && (
         <>
-          <PeriodCompareCard label="دورهٔ گذشته" now={confirmedSales ?? []} before={prev ?? []} returnsNow={returns ?? []} />
+          <PeriodCompareCard label="دورهٔ گذشته" now={confirmedSales ?? []} before={(prev ?? []).filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))} returnsNow={returns ?? []} />
           <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
           <ModelsCard sales={confirmedSales ?? []} />
           <CustomersCard sales={confirmedSales ?? []} />

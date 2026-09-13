@@ -122,15 +122,23 @@ must first await `syncNow(true)`, then load their preview, and inside their Dexi
 write transaction re-load state and the `settings` row before comparing the token.
 No network call belongs inside that transaction.
 
-The local setting is not compatibility proof and must not be exposed as a release
-toggle. The existing cloud tables store generic JSON with per-row last-writer-wins;
+The local setting is not compatibility proof. The existing cloud tables store generic JSON with per-row last-writer-wins;
 they provide neither an active-client-version fence nor an atomic cross-document
 revision fence. An older client can omit or overwrite direct fields, and a device
 that sees only the server's final same-row winner cannot reconstruct every sibling
-revision. Consequently publication is blocked until all active business devices
-are verified on the compatible release, or narrowly scoped server/version
-enforcement is separately authorized and tested. No schema, RLS, authentication,
+revision. For the owner-approved first web release (September 10 scope), code may
+be published with writes disabled. Before enabling writes, the owner must refresh
+every active device and explicitly acknowledge this in the local enable dialog.
+The owner confirmed this requirement; the acknowledgement is excluded from backup
+export/import. It is a manual operational requirement, not server enforcement or
+proof that another device has upgraded. Do not use old clients after activation.
+No schema, RLS, authentication,
 production account or live backup was changed for this work.
+
+After direct records exist, do not roll back to a pre-direct-sale build: it cannot
+interpret those records safely. If a release problem appears, stop direct entry
+and ship a compatible fix retaining readers/effects/guards; preserve all records.
+Advanced direct correction/cancellation remains unavailable in this first release.
 
 Local verification uses `node tests/direct-trade-sync.mjs` on port 5200 with two
 isolated browser contexts, different local party IDs, real `encodeRefs`,

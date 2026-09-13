@@ -284,7 +284,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
           <PartnersCard netProfit={netProfit} />
           {catRows.length > 0 && <Card><p className="mb-2 font-bold text-slate-700">مصارف به تفکیک کتگوری</p>{catRows.map(([name, amount]) => <Row key={name} label={name} value={fmtMoney(amount)} />)}</Card>}
-          <PeriodCompareCard label="دورهٔ قبلی" now={confirmedSales ?? []} before={prevSales ?? []} returnsNow={returns ?? []} />
+          <PeriodCompareCard label="دورهٔ قبلی" now={confirmedSales ?? []} before={(prevSales ?? []).filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))} returnsNow={returns ?? []} />
           <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
           <ModelsCard sales={confirmedSales ?? []} />
           <CustomersCard sales={confirmedSales ?? []} />
