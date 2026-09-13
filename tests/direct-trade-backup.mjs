@@ -46,7 +46,10 @@ try {
       data => { data.payments.find(row => row.directPayment).directPayment.route = 'unknown' },
       data => { data.payments.find(row => row.directPayment?.route === 'customerToSupplier').cashDelta = 100 },
       data => { data.purchases.find(row => row.directTrade).received = true },
-      data => { data.sales.find(row => row.directTrade).lines = [{ variantId: f.variantId, qty: 3 }] }
+      data => { data.sales.find(row => row.directTrade).lines = [{ variantId: f.variantId, qty: 3 }] },
+      data => { data.cashMovements.find(row => row.directPaymentUuid).amount += 100 },
+      data => { data.sales.find(row => row.directTrade).directLines[0].lineUuid = 'x' },
+      data => { data.sales.find(row => row.directTrade).directTrade.creationFingerprint = 12 }
     ]) {
       const bad = structuredClone(saved)
       mutate(bad.data)
@@ -71,10 +74,10 @@ try {
     await importBackup(JSON.stringify(partial), 'merge')
     stopSync()
     equal((await loadDirectTrade(uuid)).status, 'incomplete')
-    return { passed: 8 }
+    return { passed: 11 }
   })
-  assert.equal(result.passed, 8)
-  console.log('PASS: direct backup gate exclusion, five malformed snapshots rejected atomically, accounting/UUID roundtrip and orphan preservation')
+  assert.equal(result.passed, 11)
+  console.log('PASS: direct backup gate exclusion, eight malformed snapshots rejected atomically, accounting/UUID roundtrip and orphan preservation')
 } finally {
   await browser?.close()
   server.kill()

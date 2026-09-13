@@ -28,7 +28,9 @@ export function validateDirectBackup(value: unknown): void {
       check(uuid(doc.uuid) && date(doc.date) && uuid(meta.uuid) && uuid(meta.revision) && uuid(meta.counterpartUuid))
       check(meta.status === 'active' || meta.status === 'cancelled')
       check(meta.previousRevision === undefined || uuid(meta.previousRevision))
+      check(meta.creationFingerprint === undefined || (typeof meta.creationFingerprint === 'string' && meta.creationFingerprint.length > 0))
       check(Array.isArray(doc.lines) && doc.lines.length === 0 && Array.isArray(doc.directLines))
+      check((doc.directLines as unknown[]).every(line => uuid(row(line).lineUuid)))
       const totals = directTotals(doc.directLines as DirectLine[])
       check(doc.total === (table === 'sales' ? totals.sale : totals.cost) && doc.paid === 0)
       const zeroFields = table === 'sales' ? ['discount'] : ['sarrafAmount', 'landingCost', 'landingUnpaid', 'landingSarrafAmount']
@@ -66,6 +68,13 @@ export function validateDirectBackup(value: unknown): void {
       const movement = row(candidate)
       if (movement.directPaymentUuid === undefined) continue
       check(uuid(movement.uuid) && uuid(movement.directPaymentUuid) && date(movement.date) && Number.isSafeInteger(movement.amount))
+      const linked = rows(data, 'payments').find(candidate => !!candidate && typeof candidate === 'object' && row(candidate).uuid === movement.directPaymentUuid)
+      if (linked) {
+        const payment = row(linked)
+        check(payment.directPayment !== undefined && movement.amount === payment.cashDelta && movement.date === payment.date)
+        const box = (doc: Row) => typeof doc.box === 'string' && doc.box.trim() ? doc.box.trim() : 'دکان'
+        check(box(movement) === box(payment))
+      }
     }
   } catch {
     throw failure()
