@@ -7,7 +7,7 @@ const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--port
 let browser
 try {
   for (let i = 0; i < 60; i++) { try { if ((await fetch(url)).ok) break } catch {} await new Promise(r => setTimeout(r, 500)) }
-  browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
   const errors = []
   page.on('pageerror', e => errors.push(e.message))

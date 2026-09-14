@@ -4,7 +4,8 @@ import ts from 'typescript'
 const encode = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 const compile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
 const format = encode(compile('../src/lib/format.ts'))
-const { groupSaleHistory } = await import(encode(compile('../src/lib/saleHistory.ts').replace("'./format'", JSON.stringify(format))))
+const commercialLines = encode(compile('../src/lib/commercialLines.ts'))
+const { groupSaleHistory } = await import(encode(compile('../src/lib/saleHistory.ts').replace("'./format'", JSON.stringify(format)).replace("'./commercialLines'", JSON.stringify(commercialLines))))
 const sale = (id, date, total, overrides = {}) => ({ id, date: new Date(date).getTime(), total, paid: 0, lines: [{ productName: 'کفش', size: '42', color: 'سیاه' }], ...overrides })
 const rows = [sale(1, '2026-09-05T23:59:59', 100), sale(2, '2026-09-06T00:00:00', 200), sale(3, '2026-09-06T12:00:00', 300, { customerName: 'احمد' }), sale(4, '2026-09-06T13:00:00', 500, { deleted: true }), sale(5, '2026-09-06T13:00:00', 500, { lenderAction: 'settlement' })]
 const snapshot = JSON.stringify(rows)

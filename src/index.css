@@ -149,6 +149,59 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .sale-workspace[data-stage="payment"] .sale-checkout { position: static; padding-bottom: 16px; }
 .sale-workspace[data-stage="payment"] .sale-commit-bar { position: static; padding: 16px 0 0; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; }
 .sale-tabs[hidden] { display: none; }
+.sale-history { min-width: 0; }
+.sale-history-filters { padding: 1.25rem; margin-bottom: 1.5rem; }
+@media (min-width: 380px) { .sale-history-search > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sale-history-day { margin-bottom: 1rem; }
+.sale-history-day > summary { padding: 1rem 0.25rem; color: var(--text-primary); line-height: 1.8; }
+.sale-history-day > summary::marker { color: var(--action); }
+.sale-history-day-total { display: block; margin-top: 0.25rem; color: var(--text-secondary); font-size: 0.875rem; }
+.sale-history-day-total strong { color: var(--text-primary); }
+.sale-history-rows { border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); background: var(--surface); }
+.sale-history-row { display: block; width: 100%; padding: 1rem 1.25rem; text-align: start; color: var(--text-primary); overflow-wrap: anywhere; }
+.sale-history-row + .sale-history-row { border-top: 1px solid var(--border-subtle); }
+.sale-history-row:first-child { border-radius: var(--radius-surface) var(--radius-surface) 0 0; }
+.sale-history-row:last-child { border-radius: 0 0 var(--radius-surface) var(--radius-surface); }
+.sale-history-row-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 0.75rem 1.5rem; }
+.sale-history-customer { flex: 1 1 12rem; min-width: 0; }
+.sale-history-meta { display: block; margin-top: 0.25rem; color: var(--text-secondary); font-size: 0.75rem; line-height: 1.8; }
+.sale-history-amount { flex: 0 1 auto; min-width: 0; }
+.sale-history-amount > strong { display: block; font-size: 1.125rem; }
+.sale-history-amount > span { display: block; font-size: 0.75rem; margin-top: 0.25rem; }
+.sale-status-debt { color: var(--danger); }
+.sale-status-paid { color: var(--success); }
+.sale-history-goods { margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.875rem; line-height: 1.9; }
+.sale-history-row-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-secondary); }
+.sale-history-row-footer > span:last-child { color: var(--action); font-weight: 700; margin-inline-start: auto; }
+.sale-document-heading { padding-bottom: 1rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border-subtle); overflow-wrap: anywhere; }
+.sale-document-heading > strong { font-size: 1.125rem; }
+.sale-document-heading > p { margin-top: 0.375rem; font-size: 0.875rem; color: var(--text-secondary); }
+.sale-detail-goods > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1rem; padding-block: 1rem; border-bottom: 1px solid var(--border-subtle); font-size: 0.875rem; overflow-wrap: anywhere; }
+.sale-detail-goods > div > span { flex: 1 1 12rem; min-width: 0; }
+.sale-detail-goods small { display: block; margin-top: 0.375rem; color: var(--text-secondary); }
+.sale-document-totals { background: var(--canvas); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); padding: 1rem; margin-block: 1rem; font-size: 0.875rem; }
+.sale-document-totals > * { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.375rem 1rem; margin-top: 0.5rem; overflow-wrap: anywhere; }
+.sale-document-totals > :first-child { margin-top: 0; }
+.sale-document-totals .sale-document-net { color: var(--text-primary); font-size: 1.125rem; font-weight: 700; padding-block: 0.375rem; }
+.sale-document-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+.sale-document-actions > button { min-width: 0; overflow-wrap: anywhere; }
+.sale-detail-corrections { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle); }
+.sale-detail-corrections h3 { font-size: 0.875rem; color: var(--text-secondary); font-weight: 700; margin-bottom: 0.75rem; }
+.sale-delete-action { width: 100%; color: var(--danger); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); padding: 0.75rem; }
+.sale-receipt-image { display: block; width: 100%; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); }
+.sale-invoice-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-block: 1rem; }
+.sale-invoice-table th { background: var(--action-tint); font-weight: 700; }
+.sale-invoice-table th, .sale-invoice-table td { padding: 0.75rem 0.5rem; border-bottom: 1px solid var(--border-subtle); text-align: start; overflow-wrap: anywhere; }
+@media (min-width: 900px) {
+  .sale-history-search { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem; }
+}
+@media (max-width: 479px) {
+  .sale-invoice-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .sale-invoice-table, .sale-invoice-table tbody { display: block; }
+  .sale-invoice-table tr { display: block; padding-block: 0.5rem; border-bottom: 1px solid var(--border-subtle); }
+  .sale-invoice-table td { display: flex; justify-content: space-between; gap: 1rem; padding: 0.375rem 0; border: 0; }
+  .sale-invoice-table td::before { content: attr(data-label); color: var(--text-secondary); flex-shrink: 0; }
+}
 .sale-finder, .sale-checkout { min-width: 0; }
 .sale-checkout { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); padding: 16px; }
 .sale-product-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }

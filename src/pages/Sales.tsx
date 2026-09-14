@@ -9,7 +9,7 @@ import { accessFlags, type Sale } from '../db'
 import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { clearWorkingSale, readWorkingSale, deleteSaleDraft, readSaleDrafts, saleDraftTotal, type SaleDraft } from '../lib/saleDrafts'
-import { Empty, Card, Modal } from '../components/ui'
+import { Empty, Modal } from '../components/ui'
 import { Icon } from '../components/Icon'
 import SalesStats from './sales/SalesStats'
 import ReturnModal from './sales/ReturnModal'
@@ -43,7 +43,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
   // اما در این لیست عملیاتی نمی‌آید تا مرجوعی/تبادله حساب پیوندشده را نیمه‌کاره نکند.
 
   const tabCls = (v: string) =>
-    `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
+    `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`
 
   function removeDraft(id: string) {
     try {
@@ -206,30 +206,23 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
       {view === 'list' && <SaleHistory>{(s) => {
         const remainder = s.total - s.paid
         return (
-          <Card key={s.id}>
-            <button onClick={() => s.directTrade ? setDirectDetail(s.directTrade.uuid) : setDetail(s)} className="sale-history-row w-full text-right" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold text-slate-800">
-                  {s.customerName || 'مشتری نقدی'}{' '}
-                  <span className="text-xs font-normal text-slate-400">
-                    ({s.directTrade ? 'مستقیم' : s.saleType === 'retail' ? 'پرچون' : 'عمده'})
-                  </span>
-                </p>
-                <p className="text-xs text-slate-500">{fmtDate(s.date)}</p>
+            <button key={s.id} onClick={() => s.directTrade ? setDirectDetail(s.directTrade.uuid) : setDetail(s)} className="sale-history-row" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
+            <div className="sale-history-row-heading">
+              <div className="sale-history-customer">
+                <p className="font-bold">{s.customerName || 'مشتری نقدی'}</p>
+                <p className="sale-history-meta">{s.directTrade ? 'مستقیم' : s.saleType === 'retail' ? 'پرچون' : 'عمده'} · {fmtDate(s.date)}</p>
               </div>
-              <div className="text-left">
-                <p className="font-bold text-teal-700">{fmtMoney(s.total)}</p>
-                {(s.discount ?? 0) > 0 && <p className="text-xs text-amber-600">تخفیف: {fmtMoney(s.discount!)}</p>}
-                {!s.directTrade && remainder > 0 && <p className="text-xs text-red-600">باقی: {fmtMoney(remainder)}</p>}
+              <div className="sale-history-amount">
+                <strong>{fmtMoney(s.total)}</strong>
+                {!s.directTrade && <span className={remainder > 0 ? 'sale-status-debt' : 'sale-status-paid'}>{remainder > 0 ? `باقی: ${fmtMoney(remainder)}` : 'پرداخت شده'}</span>}
+                {s.directTrade && <span className="sale-history-meta">حساب در جزئیات معامله</span>}
               </div>
             </div>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="sale-history-goods">
               {commercialSaleLines(s).map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
             </p>
-            <span className="mt-2 block text-xs font-bold text-teal-700">نمایش جزئیات و رسید</span>
+            <div className="sale-history-row-footer">{(s.discount ?? 0) > 0 && <span>تخفیف: {fmtMoney(s.discount!)}</span>}<span>جزئیات و رسید <span aria-hidden="true">←</span></span></div>
             </button>
-          </Card>
         )
       }}</SaleHistory>}
       {!accessFlags.readOnly && <div hidden={view !== 'new'}>
@@ -250,11 +243,12 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         />
       </div>}
       {detail && <Modal title={`جزئیات فروش ${fmtNum(detail.id ?? 0)}`} onClose={() => setDetail(null)}>
+        <div className="sale-document-heading"><strong>{detail.customerName || 'مشتری نقدی'}</strong><p>{fmtDate(detail.date)} · {detail.saleType === 'retail' ? 'پرچون' : 'عمده'}</p></div>
+        <section aria-label="اجناس فروش" className="sale-detail-goods">{detail.lines.map((line, index) => <div key={index}><span>{line.productName} {line.size} {line.color}<small>{fmtNum(line.qty)} × {fmtMoney(line.unitPrice)}</small></span><strong>{fmtMoney(line.qty * line.unitPrice)}</strong></div>)}</section>
+        <div className="sale-document-totals"><p className="sale-document-net"><span>مجموع</span><strong>{fmtMoney(detail.total)}</strong></p>{(detail.discount ?? 0) > 0 && <p><span>تخفیف</span><span>{fmtMoney(detail.discount!)}</span></p>}<p><span>دریافتی</span><span>{fmtMoney(detail.paid)}</span></p>{detail.total > detail.paid && <p className="sale-status-debt"><span>قرض</span><strong>{fmtMoney(detail.total - detail.paid)}</strong></p>}{detail.bookPage && <p><span>صفحهٔ دفتر</span><span>{detail.bookPage}</span></p>}</div>
+        <div className="sale-document-actions"><button className="primary-button" onClick={() => { setReceiptFor(detail); setDetail(null) }}>رسید</button><button className="sale-secondary-action" onClick={() => { setInvoiceFor(detail); setDetail(null) }}>فاکتور</button></div>
         <SaleShipping sale={detail} />
-        <p className="font-bold">{detail.customerName || 'مشتری نقدی'}</p><p className="mb-4 text-xs text-slate-500">{fmtDate(detail.date)} · {detail.saleType === 'retail' ? 'پرچون' : 'عمده'}</p>
-        <div className="divide-y divide-slate-100">{detail.lines.map((line, index) => <div key={index} className="flex justify-between gap-3 py-3 text-sm"><span>{line.productName} {line.size} {line.color}<span className="block text-xs text-slate-500">{fmtNum(line.qty)} × {fmtMoney(line.unitPrice)}</span></span><strong>{fmtMoney(line.qty * line.unitPrice)}</strong></div>)}</div>
-        <div className="my-4 rounded-xl bg-teal-50 p-3"><p className="flex justify-between font-bold"><span>مجموع</span><span>{fmtMoney(detail.total)}</span></p>{(detail.discount ?? 0) > 0 && <p className="mt-2 text-sm">تخفیف: {fmtMoney(detail.discount!)}</p>}<p className="mt-2 text-sm">دریافتی: {fmtMoney(detail.paid)}</p>{detail.total > detail.paid && <p className="mt-2 text-sm text-red-600">قرض: {fmtMoney(detail.total - detail.paid)}</p>}{detail.bookPage && <p className="mt-2 text-sm">صفحهٔ دفتر: {detail.bookPage}</p>}</div>
-        <div className="grid grid-cols-2 gap-2"><button className="rounded-xl bg-teal-700 py-3 font-bold text-white" onClick={() => { setReceiptFor(detail); setDetail(null) }}>رسید</button><button className="rounded-xl bg-slate-100 py-3 font-bold" onClick={() => { setInvoiceFor(detail); setDetail(null) }}>فاکتور</button>{!accessFlags.readOnly && <><button className="rounded-xl bg-slate-100 py-3 font-bold" onClick={() => { setReturning(detail); setDetail(null) }}>مرجوعی</button><button className="rounded-xl bg-amber-50 py-3 font-bold text-amber-800" onClick={() => { setExchanging(detail); setDetail(null) }}>تبادله</button><button disabled={deleting} className="col-span-2 rounded-xl bg-red-50 py-3 text-red-600" onClick={() => void confirmDelete(detail)}>{deleting ? 'در حال بررسی…' : 'حذف فروش'}</button></>}</div>
+        {!accessFlags.readOnly && <section className="sale-detail-corrections" aria-label="مرجوعی و تغییر فروش"><h3>مرجوعی و تغییر فروش</h3><div className="sale-document-actions"><button className="sale-secondary-action" onClick={() => { setReturning(detail); setDetail(null) }}>مرجوعی</button><button className="sale-secondary-action" onClick={() => { setExchanging(detail); setDetail(null) }}>تبادله</button></div><button disabled={deleting} className="sale-delete-action" onClick={() => void confirmDelete(detail)}>{deleting ? 'در حال بررسی…' : 'حذف فروش'}</button></section>}
       </Modal>}
       {receiptFor && (
         <ReceiptModal sale={receiptFor} onClose={() => setReceiptFor(null)} />
