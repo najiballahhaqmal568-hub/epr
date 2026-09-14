@@ -20,6 +20,7 @@ export function NewSaleModal({
   onSaved,
   onHeld,
   onPendingChange,
+  onStageChange,
   draft: suppliedDraft,
   embedded = false
 }: {
@@ -27,6 +28,7 @@ export function NewSaleModal({
   onSaved?: (sale: Sale) => void
   onHeld?: (draft: SaleDraft) => void
   onPendingChange?: (pending: boolean) => void
+  onStageChange?: (stage: 'selection' | 'payment') => void
   draft?: SaleDraft
   embedded?: boolean
 }) {
@@ -34,6 +36,15 @@ export function NewSaleModal({
   const pendingRef = useRef(false)
   const completedRef = useRef(false)
   const [pending, setPending] = useState(false)
+  const [stage, setStage] = useState<'selection' | 'payment'>('selection')
+  const stageHeading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => { onStageChange?.(stage) }, [stage, onStageChange])
+  function changeStage(next: 'selection' | 'payment') {
+    if (pendingRef.current) return
+    setStage(next)
+    setError('')
+    requestAnimationFrame(() => { stageHeading.current?.focus(); stageHeading.current?.scrollIntoView({ block: 'start' }) })
+  }
   useEffect(() => { onPendingChange?.(pending) }, [pending, onPendingChange])
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (pendingRef.current && !completedRef.current) { event.preventDefault(); event.returnValue = '' } }
@@ -323,8 +334,12 @@ export function NewSaleModal({
         {lines.length > 0 && <button disabled={pending} onClick={discard} className="text-red-600">پاک‌کردن سبد</button>}
       </div>
       <fieldset disabled={pending} className="min-w-0">
-      <div className={embedded ? 'sale-workspace' : ''}>
-      <section className="sale-finder">
+      <div className="sale-stage-heading">
+        <div><p className="text-xs text-slate-500">{stage === 'selection' ? '۱ از ۲ · انتخاب جنس' : '۲ از ۲ · پرداخت'}</p><h2 ref={stageHeading} tabIndex={-1} className="text-xl font-bold">{stage === 'selection' ? 'جنس و تعداد را انتخاب کنید' : 'پرداخت فروش'}</h2></div>
+        {stage === 'payment' && <button onClick={() => changeStage('selection')} className="sale-secondary-action">بازگشت به انتخاب</button>}
+      </div>
+      <div className={embedded ? 'sale-workspace' : ''} data-stage={stage}>
+      <section className="sale-finder" hidden={stage !== 'selection'}>
       <h2 className="mb-4 text-xl font-bold">انتخاب جنس</h2>
       <div className="segmented mb-4" role="group" aria-label="نوع فروش">
         {(['retail', 'wholesale'] as const).map((t) => (
@@ -478,6 +493,7 @@ export function NewSaleModal({
 
       </section>
       <section className="sale-checkout">
+      <div hidden={stage !== 'selection'}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
       {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
       {saleType === 'wholesale' && variants && <BulkSalePrice lines={lines} variants={variants} setLines={setLines} disabled={pending} />}
@@ -517,7 +533,13 @@ export function NewSaleModal({
           <div className="w-full"><StockSelectionSummary stock={variants ? variants.find(v => v.id === l.variantId)?.stockQty ?? 0 : undefined} selected={selectedQty(l.variantId)} /></div>
         </div>
       ))}
+      </div>
 
+      <div hidden={stage !== 'payment'}>
+      <div className="sale-payment-summary"><div><span>{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه · {saleType === 'retail' ? 'پرچون' : 'عمده'}</span><p className="mt-1 font-bold text-slate-800">{selectedCustomer?.name ?? (remainder > 0 ? 'مشتری را انتخاب کنید' : 'مشتری نقدی')}</p></div><div><span className="block text-xs">قابل پرداخت</span><strong>{fmtMoney(total)}</strong></div></div>
+      {stockInvalid && <p role="alert" className="mb-3 text-sm text-red-700">موجودی یا تعداد سبد درست نیست؛ به انتخاب برگردید و سبد را اصلاح کنید.</p>}
+      <div className="sale-payment-fields">
+      <div className="sale-payment-customer">
       {selectedCustomer ? (
         <div className="mb-3 flex items-center justify-between rounded-xl bg-teal-50 p-2.5">
           <div>
@@ -581,39 +603,34 @@ export function NewSaleModal({
           </button>
         </div>
       )}
+      </div>
 
-      <div className="mt-3 rounded-xl bg-teal-50 p-3">
+      <div className="sale-payment-amounts">
         <div className="flex justify-between text-slate-600">
           <span>مجموع اجناس</span>
           <span>{fmtMoney(subtotal)}</span>
         </div>
         {showDiscount ? (
           <Field label="تخفیف (اختیاری)">
-            <div className="flex gap-2">
-              <input className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
+            <div className="flex flex-wrap gap-2">
+              <input aria-label="تخفیف (اختیاری)" className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
+              <button type="button" className="px-3 text-sm text-red-700" onClick={() => { setDiscountStr(''); setShowDiscount(false) }}>حذف تخفیف</button>
               <button
                 type="button"
                 className="shrink-0 rounded-xl bg-white px-3 text-sm font-bold text-slate-500"
-                onClick={() => {
-                  setDiscountStr('')
-                  setShowDiscount(false)
-                }}
+                onClick={() => setShowDiscount(false)}
               >
-                حذف
+                بستن تخفیف
               </button>
             </div>
           </Field>
         ) : (
           <button type="button" onClick={() => setShowDiscount(true)} className="my-2 text-sm font-bold text-teal-700">
-            ＋ افزودن تخفیف
+            {discount > 0 ? `ویرایش تخفیف · ${fmtMoney(discount)}` : '＋ افزودن تخفیف'}
           </button>
         )}
-        <div className="flex items-center justify-between font-bold text-slate-800">
-          <span>قابل پرداخت{discount > 0 ? ` (با ${fmtMoney(discount)} تخفیف)` : ''}</span>
-          <span className="text-xl">{fmtMoney(total)}</span>
-        </div>
-        <div role="group" aria-label="روش پرداخت" className="my-4 flex gap-2">
-          {(['cash', 'credit', 'mixed'] as const).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} className={`flex-1 rounded-xl px-2 py-2 text-sm font-bold ${paymentMode === mode ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`} onClick={() => {
+        <div role="group" aria-label="روش پرداخت" className="segmented my-4">
+          {(['cash', 'credit', 'mixed'] as const).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} onClick={() => {
             setPaidTouched(mode !== 'cash')
             setPaidStr(mode === 'credit' ? '0' : '')
             if (mode !== 'cash') setShowCust(true)
@@ -654,6 +671,7 @@ export function NewSaleModal({
         )}
         {remainder < 0 && <p className="text-sm font-bold text-amber-600">بازگشت به مشتری: {fmtMoney(-remainder)}</p>}
       </div>
+      </div>
 
       {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
       {(saleType === 'wholesale' || shipping) && <div className="mb-3 rounded-xl border border-slate-200 p-3 text-sm">
@@ -666,6 +684,7 @@ export function NewSaleModal({
         {shipping && saleType !== 'wholesale' && <p role="alert" className="mt-2 text-red-700">کرایه برای عمده است؛ نوع فروش را اصلاح کنید یا کرایه را بردارید.</p>}
       </div>}
       {showShipping && <ShippingEditor sale={{ date: Date.now(), saleType, customerId: customerId || undefined, customerName: customers?.find(c => c.id === customerId)?.name, lines, total, paid }} prepared={shipping} onPrepared={setShipping} onClose={() => setShowShipping(false)} />}
+      </div>
       <div data-empty={!lines.length} className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : 'قابل پرداخت'}</p>
@@ -680,11 +699,11 @@ export function NewSaleModal({
           معطل
         </button>
         <button
-          onClick={save}
+          onClick={stage === 'selection' ? () => changeStage('payment') : save}
           disabled={!lines.length || pending || stockInvalid}
-          className="rounded-xl bg-teal-700 px-5 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
+          className="rounded-xl bg-[var(--action)] px-5 py-3 text-lg font-bold text-white disabled:opacity-40"
         >
-          {pending ? 'در حال ثبت…' : 'ثبت فروش'}
+          {pending ? 'در حال ثبت…' : stage === 'selection' ? 'ادامه به پرداخت' : 'ثبت فروش'}
         </button>
       </div>
       </section>

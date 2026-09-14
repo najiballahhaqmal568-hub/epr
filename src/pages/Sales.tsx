@@ -23,6 +23,7 @@ import SaleShipping from './sales/SaleShipping'
 export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
   const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
   const [workspaceKey, setWorkspaceKey] = useState(openNew ? 1 : 0)
+  const [checkoutStage, setCheckoutStage] = useState<'selection' | 'payment'>('selection')
   const [detail, setDetail] = useState<Sale | null>(null)
   const [newDirect, setNewDirect] = useState(false)
   const [directDetail, setDirectDetail] = useState<string | null>(null)
@@ -87,7 +88,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
   return (
     <div className="sales-page p-4">
       <header className="page-heading"><h1>میز فروش</h1><span className="text-sm text-slate-500">پرچون و عمده</span></header>
-      <fieldset disabled={pending} className="sale-tabs mb-5 flex min-w-0 gap-2" aria-label="بخش‌های فروش">
+      <fieldset hidden={view === 'new' && checkoutStage === 'payment'} disabled={pending} className="sale-tabs mb-5 flex min-w-0 gap-2" aria-label="بخش‌های فروش">
         {!accessFlags.readOnly && <button onClick={() => setView('new')} className={tabCls('new')}>فروش جدید</button>}
         <button onClick={() => setView('list')} className={tabCls('list')}>
           تاریخچه
@@ -97,7 +98,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
           آمار
         </button>
       </fieldset>
-      {!accessFlags.readOnly && !isStaff && <button disabled={pending || directEnabled === undefined} className="mb-4 w-full rounded-xl border border-teal-200 bg-teal-50 p-3 font-bold text-teal-800" onClick={() => directEnabled ? setNewDirect(true) : setEnableDirect(true)}>فروش مستقیم</button>}
+      {!accessFlags.readOnly && !isStaff && !(view === 'new' && checkoutStage === 'payment') && <button disabled={pending || directEnabled === undefined} className="sale-secondary-action mb-4" onClick={() => directEnabled ? setNewDirect(true) : setEnableDirect(true)}>فروش مستقیم</button>}
       {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {view === 'stats' && <SalesStats isStaff={isStaff} />}
       {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." />}
@@ -236,6 +237,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
           key={`${workspaceKey}-${activeDraft?.id ?? 'new-sale'}`}
           embedded
           onPendingChange={onPendingChange}
+          onStageChange={setCheckoutStage}
           draft={activeDraft ?? undefined}
           onClose={resetWorkspace}
           onHeld={() => { setDrafts(readSaleDrafts()); setView('held') }}

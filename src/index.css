@@ -137,6 +137,18 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .modal-heading h2 { min-width: 0; font-size: 1.25rem; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
 .modal-heading button { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 50%; background: var(--surface-grouped); }
 .sale-workspace { display: grid; gap: 22px; align-items: start; }
+.sale-workspace[data-stage="payment"] { display: block; max-width: 680px; margin-inline: auto; }
+.sale-stage-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.sale-stage-heading h2 { margin-top: 4px; }
+.sale-secondary-action { border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--action); padding: 10px 14px; font-weight: 700; }
+.sale-payment-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.sale-payment-summary strong { font-size: 1.75rem; color: var(--text-primary); overflow-wrap: anywhere; }
+.sale-payment-fields { display: flex; flex-direction: column; gap: 16px; }
+.sale-payment-customer { order: 1; }
+.sale-payment-amounts { min-width: 0; }
+.sale-workspace[data-stage="payment"] .sale-checkout { position: static; padding-bottom: 16px; }
+.sale-workspace[data-stage="payment"] .sale-commit-bar { position: static; padding: 16px 0 0; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; }
+.sale-tabs[hidden] { display: none; }
 .sale-finder, .sale-checkout { min-width: 0; }
 .sale-checkout { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); padding: 16px; }
 .sale-product-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }

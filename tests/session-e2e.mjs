@@ -3,7 +3,8 @@ import { localApp } from './local-app.mjs'
 import assert from 'node:assert/strict'
 const app = await localApp()
 const { page, origin } = app
-page.on('pageerror', (e) => console.error('خطای صفحه:', e.message))
+const errors = []
+page.on('pageerror', (e) => errors.push(e.message))
 const fail = (m) => {
   console.error('❌ ' + m)
   throw new Error(m)
@@ -62,6 +63,7 @@ const original = JSON.parse(working)
 delete resumed.updatedAt
 delete original.updatedAt
 assert.deepEqual(resumed, original, 'Home does not discard the working sale')
+await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
 await page.click('button:has-text("ثبت فروش")')
 await page.waitForTimeout(1200)
 const sold = await page.evaluate(async () => {
@@ -88,4 +90,5 @@ await page.waitForTimeout(700)
 body = await page.locator('body').innerText()
 if (!/خانه/.test(body)) fail('راه برگشت از صفحهٔ ورود بسته بود:\n' + body.slice(0, 400))
 console.log('✅ از صفحهٔ ورود راه برگشت به اپ باز است')
+assert.deepEqual(errors, [])
 } finally { await app.close() }

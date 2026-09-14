@@ -58,6 +58,7 @@ try {
   const draft=await page.evaluate(async()=> (await import('/src/lib/saleDrafts.ts')).readWorkingSale())
   assert.deepEqual(draft.lines.map(l=>l.unitPrice),[750,760,900])
   assert.equal(draft.discountStr,'100')
+  await page.getByRole('button',{name:'ادامه به پرداخت',exact:true}).click()
   await page.getByRole('button',{name:'ثبت فروش',exact:true}).click()
   await page.waitForFunction(()=>!!window.saved)
   assert.equal(await page.evaluate(()=>window.saved.total),3060)

@@ -1,62 +1,95 @@
-/** آزمایش واقعی مرورگر: بعد از ثبت فروش، رسید خودبه‌خود باز نشود */
-import { chromium } from 'playwright-core'
-
-const URL = process.env.URL ?? 'http://localhost:4173/'
-const page = await (
-  await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
-).newPage()
-page.on('pageerror', (e) => console.error('خطای صفحه:', e.message))
-const fail = (m) => {
-  console.error('❌ ' + m)
-  process.exit(1)
-}
-
-await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-
-await page.evaluate(async () => {
-  const open = indexedDB.open('shoeErp')
-  await new Promise((r) => (open.onsuccess = r))
-  const dbx = open.result
-  const put = (store, obj) =>
-    new Promise((res, rej) => {
-      const t = dbx.transaction(store, 'readwrite')
-      const q = t.objectStore(store).add(obj)
-      q.onsuccess = () => res(q.result)
-      q.onerror = () => rej(q.error)
-    })
-  const pid = await put('products', { name: 'کوهستان', createdAt: Date.now() })
-  await put('variants', {
-    productId: pid, size: '42', color: 'سیاه',
-    stockQty: 20, purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, lowStock: 2
+// Actual App, disposable stock, external requests blocked by localApp.
+import assert from 'node:assert/strict'
+import { localApp } from './local-app.mjs'
+const app = await localApp()
+const { page } = app
+const errors = []
+page.on('pageerror', error => errors.push(error.message))
+try {
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db.ts')
+    const { setOpeningStock } = await import('/src/lib/ops.ts')
+    const productId = await db.products.add({ name: 'کوهستان', createdAt: Date.now() })
+    window.variantId = await db.variants.add({ productId, size: '42', color: 'سیاه', stockQty: 0, purchasePrice: 500, retailPrice: 900, wholesalePrice: 800 })
+    await setOpeningStock(window.variantId, 20)
+    window.customerId = await db.customers.add({ name: 'مشتری آزمایشی', type: 'retail', balance: 0, bookPage: '12', createdAt: Date.now() })
+    window.result = async () => ({ stock: (await db.variants.get(window.variantId)).stockQty, cash: (await db.cashMovements.toArray()).filter(x => !x.deleted).reduce((sum, x) => sum + x.amount, 0), debt: (await db.customers.get(window.customerId)).balance, sales: (await db.sales.toArray()).filter(x => !x.deleted).length })
   })
-})
-await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=فروش')
-await page.click('button:has-text("فروش جدید")')
-await page.waitForTimeout(700)
-
-// جنس را از تایل پرفروش یا جستجو اضافه کن
-const tile = page.locator('button:has-text("کوهستان")').first()
-await tile.click()
-await page.waitForSelector('text=انتخاب سایز')
-await page.click('button:has-text("42 سیاه")')
-await page.waitForTimeout(500)
-await page.click('button:has-text("ثبت فروش")')
-await page.waitForTimeout(1200)
-
-const body = await page.locator('body').innerText()
-// رسید نباید خودش باز شده باشد
-if (/رسید فروش|چاپ|اشتراک/.test(body)) fail('رسید خودبه‌خود باز شد:\n' + body.slice(0, 700))
-if (!/فروش ثبت شد/.test(body)) fail('تأیید ثبت فروش نیامد:\n' + body.slice(0, 700))
-if (!/فروش بعدی/.test(body)) fail('دکمهٔ «فروش بعدی» نیامد')
-console.log('✅ رسید خودبه‌خود باز نشد — فقط تأیید کوتاه آمد')
-
-// ولی اگر رسید بخواهند، از همان‌جا باز می‌شود
-await page.click('button:has-text("🧾 رسید")')
-await page.waitForTimeout(700)
-const body2 = await page.locator('body').innerText()
-if (!/کوهستان/.test(body2)) fail('رسید با دکمه باز نشد:\n' + body2.slice(0, 700))
-console.log('✅ رسید با دکمه باز می‌شود')
-process.exit(0)
+  await page.getByRole('navigation').getByRole('button', { name: 'فروش', exact: true }).click()
+  const payment = () => page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
+  const add = async () => {
+    await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
+    await page.getByRole('dialog').getByRole('button').filter({ hasText: '42 سیاه' }).click()
+  }
+  await add()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.screenshot({ path: `.superpowers/sdd/plan/task-4-selection-${width}.png`, fullPage: true })
+  }
+  assert.equal(await page.getByLabel('مبلغ دریافتی (نقد)', { exact: true }).isVisible(), false, 'selection hides payment inputs')
+  await payment()
+  assert.equal(await page.getByLabel('جستجوی جنس', { exact: true }).isVisible(), false)
+  assert.equal(await page.getByLabel('مبلغ دریافتی (نقد)', { exact: true }).inputValue(), '900')
+  await page.getByRole('button', { name: 'ثبت فروش', exact: true }).evaluate(button => { button.click(); button.click() })
+  await page.getByText(/فروش ثبت شد/).first().waitFor()
+  assert.deepEqual(await page.evaluate(() => window.result()), { stock: 19, cash: 900, debt: 0, sales: 1 })
+  assert.equal(await page.getByRole('dialog').count(), 0, 'receipt never auto-opens')
+  await page.getByRole('button', { name: 'رسید', exact: true }).click()
+  await page.getByRole('dialog').waitFor()
+  await page.getByRole('dialog').locator('img').waitFor()
+  await page.getByRole('dialog').getByRole('button', { name: 'بستن', exact: true }).first().click()
+  await add(); await payment()
+  await page.getByRole('button', { name: 'قرض', exact: true }).click()
+  await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: 'باید مشتری' }).waitFor()
+  await page.getByPlaceholder('جستجوی نام یا تلفن مشتری...').fill('آزمایشی')
+  await page.getByRole('button', { name: 'مشتری آزمایشی', exact: true }).click()
+  await page.getByLabel('صفحهٔ دفتر (این قرض در کدام ورق نوشته شد)', { exact: true }).fill('25')
+  await page.getByLabel('وعدهٔ پرداخت (اختیاری)', { exact: true }).fill('2026-10-10')
+  await page.getByRole('button', { name: 'نقد و قرض', exact: true }).click()
+  await page.getByLabel('مبلغ دریافتی (نقد)', { exact: true }).fill('300')
+  await page.getByRole('button', { name: /افزودن تخفیف/ }).click()
+  await page.getByLabel('تخفیف (اختیاری)', { exact: true }).fill('50')
+  await page.getByRole('button', { name: 'بستن تخفیف', exact: true }).click()
+  await page.getByRole('button', { name: /ویرایش تخفیف/ }).click()
+  await page.getByRole('button', { name: 'حذف تخفیف', exact: true }).click()
+  await page.getByRole('button', { name: /افزودن تخفیف/ }).click()
+  assert.equal(await page.getByLabel('تخفیف (اختیاری)', { exact: true }).inputValue(), '')
+  await page.getByLabel('تخفیف (اختیاری)', { exact: true }).fill('50')
+  await page.getByRole('button', { name: 'بستن تخفیف', exact: true }).click()
+  const draft = () => page.evaluate(async () => { const d = (await import('/src/lib/saleDrafts.ts')).readWorkingSale(); delete d.updatedAt; return d })
+  const before = await draft()
+  await page.getByRole('button', { name: 'بازگشت به انتخاب', exact: true }).click()
+  await payment()
+  assert.deepEqual(await draft(), before, 'back preserves all commercial fields')
+  for (const width of [390, 1440, 320, 768]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(() => document.documentElement.style.fontSize = '20px')
+    const overflow = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.left < -1 || r.right > innerWidth + 1) }).map(el => [el.tagName, el.className, el.getBoundingClientRect().width]))
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `scaled payment fits ${width}: ${JSON.stringify(overflow)}`)
+    if ([390, 1440].includes(width)) await page.screenshot({ path: `.superpowers/sdd/plan/task-4-payment-${width}.png`, fullPage: true })
+  }
+  await page.getByRole('button', { name: 'معطل', exact: true }).click()
+  assert.deepEqual(await page.evaluate(() => window.result()), { stock: 19, cash: 900, debt: 0, sales: 1 })
+  await page.getByRole('button', { name: 'ادامه و ثبت', exact: true }).click()
+  await payment()
+  assert.equal(await page.getByLabel('مبلغ دریافتی (نقد)', { exact: true }).inputValue(), '300')
+  await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
+  await page.getByText(/فروش ثبت شد/).first().waitFor()
+  assert.deepEqual(await page.evaluate(() => window.result()), { stock: 18, cash: 1200, debt: 550, sales: 2 })
+  const last = await page.evaluate(async () => (await (await import('/src/db.ts')).db.sales.toArray()).at(-1))
+  assert.equal(last.bookPage, '25'); assert.equal(last.discount, 50); assert.ok(last.promiseDate)
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.getByRole('button', { name: 'فروش بعدی', exact: true }).click()
+  await add(); await payment()
+  await page.getByRole('button', { name: 'قرض', exact: true }).click()
+  await page.getByPlaceholder('جستجوی نام یا تلفن مشتری...').fill('آزمایشی')
+  await page.getByRole('button').filter({ hasText: /^مشتری آزمایشی/ }).click()
+  await page.getByLabel('وعدهٔ پرداخت (اختیاری)', { exact: true }).fill('2026-10-11')
+  await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
+  await page.getByText(/فروش ثبت شد/).first().waitFor()
+  assert.deepEqual(await page.evaluate(() => window.result()), { stock: 17, cash: 1200, debt: 1450, sales: 3 }, 'full credit posts no cash')
+  assert.deepEqual(errors, [])
+  console.log('PASS: cash/mixed stages, required customer, debt date/page, back/discount persistence, held resume, exact accounts, double-submit, optional receipt and scaled widths')
+} finally { await app.close() }
