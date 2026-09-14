@@ -24,11 +24,11 @@ export default function BulkSalePrice({ lines, variants, setLines, disabled }: {
   return <>
     {[...groups].filter(([, rows]) => rows.length > 1).map(([id, rows]) => <button
       key={id} disabled={disabled}
-      className="mb-2 w-full rounded-lg border border-teal-200 bg-teal-50 p-3 text-right text-sm font-bold text-teal-800 disabled:opacity-40"
+      className="sale-bulk-price mb-3 w-full rounded-xl p-3 text-right text-sm font-bold disabled:opacity-40"
       onClick={() => { setSelected(id); setPriceText(rows.every(l => l.unitPrice === rows[0].unitPrice) ? String(rows[0].unitPrice) : '') }}
     >تغییر قیمت همهٔ سایزهای {rows[0].productName}</button>)}
     {selected !== null && <Modal title="قیمت یکسان سایزها" onClose={() => setSelected(null)}>
-      <p className="mb-3 font-bold">{chosen[0]?.productName}</p>
+      <p className="mb-3 break-words font-bold">{chosen[0]?.productName}</p>
       <p className="mb-3 text-sm text-slate-600">روی تمام سایزها و رنگ‌های همین جنس که اکنون در سبد هستند اعمال می‌شود؛ قیمت گدام و فروش‌های قبلی تغییر نمی‌کند.</p>
       <p className="mb-3 text-sm">{chosen.map(l => `${l.size} ${l.color} ×${fmtNum(l.qty)}`).join('، ')}</p>
       <Field label="قیمت یکسان فی‌جوره (افغانی)"><input className={inputCls} inputMode="numeric" value={priceText} onChange={e => setPriceText(e.target.value)} disabled={disabled} /></Field>
