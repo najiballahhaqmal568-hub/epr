@@ -7,6 +7,7 @@ import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
+import { Icon } from '../components/Icon'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -94,48 +95,47 @@ export default function Dashboard({
 
   return (
     <div className="p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-900">خانه</h1>
+      <div className="page-heading">
+        <div><h1>خانه</h1><p>خلاصهٔ امروز دکان</p></div>
         <SyncChip />
       </div>
       <DirectTradeWarning review={directReview} />
 
-      {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
-        <div className="mb-3 rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 p-4 text-sm text-slate-700">
-          <p className="mb-2 font-bold text-teal-800">برای شروع فروشگاه:</p>
-          <p>۱. اجناس و قیمت‌ها را در گدام ثبت کنید.</p>
-          <p>۲. موجودی صندوق را در مصارف و صندوق تصفیه کنید.</p>
-          <p>۳. حساب‌های قبلی مشتریان و تأمین‌کنندگان را ثبت کنید.</p>
-        </div>
-      )}
-
-      <button
-        onClick={() => goTo('sales-new')}
-        className="mb-2 w-full rounded-2xl bg-teal-700 py-4 text-lg font-bold text-white shadow-sm active:bg-teal-800"
-      >
-        فروش جدید
-      </button>
-      <div className="mb-4 grid grid-cols-2 gap-2">
-        <button onClick={() => goTo('purchases-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
-          خرید جدید
-        </button>
-        <button onClick={() => goTo('expenses-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
-          مصرف جدید
-        </button>
-      </div>
-
-      <div className="mb-4 rounded-2xl bg-teal-800 p-4 text-white shadow-sm">
-        <p className="text-sm text-teal-100">فروش امروز</p>
-        <p className="mt-1 text-3xl font-bold">{fmtMoney(todayTotal)}</p>
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-teal-50">
+      <section aria-label="فروش امروز" className="surface mb-4 p-5">
+        <p className="text-sm text-slate-500">فروش امروز</p>
+        <p className="mt-2 text-4xl font-bold text-slate-900">{fmtMoney(todayTotal)}</p>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
           <span>{fmtNum(todaySales.length)} فروش</span>
           <span>نقد فروش عادی: {fmtMoney(todayCash)}</span>
           <span>رسید مستقیم: {fmtMoney(todayDirectReceipts)}</span>
           {!isStaff && <span>مفاد: {fmtMoney(todayProfit)}</span>}
         </div>
+      </section>
+
+      <button
+        onClick={() => goTo('sales-new')}
+        className="primary-button mb-3 flex items-center justify-center gap-2 py-4 text-lg"
+      >
+        <Icon name="plus" /> فروش جدید
+      </button>
+      <div className="mb-4 grid grid-cols-2 gap-2">
+        <button onClick={() => goTo('purchases-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
+          <Icon name="stock" className="mx-auto mb-1" /> خرید جدید
+        </button>
+        <button onClick={() => goTo('expenses-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
+          <Icon name="wallet" className="mx-auto mb-1" /> مصرف جدید
+        </button>
       </div>
 
       <section className="mb-4">
+        {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
+          <div className="surface mb-4 p-4 text-sm text-slate-600">
+            <p className="mb-2 font-bold text-slate-800">برای شروع فروشگاه:</p>
+            <p>۱. اجناس و قیمت‌ها را در گدام ثبت کنید.</p>
+            <p>۲. موجودی صندوق را در مصارف و صندوق تصفیه کنید.</p>
+            <p>۳. حساب‌های قبلی مشتریان و تأمین‌کنندگان را ثبت کنید.</p>
+          </div>
+        )}
         <h2 className="mb-2 text-lg font-bold text-slate-800">کارهای امروز</h2>
         {!hasTasks && <div className="rounded-2xl bg-teal-50 p-3 text-sm font-bold text-teal-700">کار ضروری ثبت‌نشده ندارید.</div>}
         <div className="space-y-2">
