@@ -56,7 +56,7 @@ console.log('✅ سند «موجودی اولیه» نوشته شد')
 // کنترل حساب‌ها باید سالم باشد
 await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
 await page.getByText('تنظیمات پیشرفته', { exact: true }).click()
-await page.getByRole('button', { name: 'کنترل حساب‌ها', exact: true }).click()
+await page.getByRole('button', { name: /^کنترل حساب‌ها/ }).click()
 await page.getByRole('button', { name: 'اجرای کنترل', exact: true }).click()
 await page.waitForTimeout(1500)
 body = await page.locator('body').innerText()

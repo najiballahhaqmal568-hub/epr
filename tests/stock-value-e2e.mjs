@@ -55,7 +55,7 @@ console.log('✅ ارزش هر جنس و مجموع گدام درست است')
 // همان عدد باید در ویزارد شروع سال هم بیاید
 await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
 await page.getByText('تنظیمات پیشرفته', { exact: true }).click()
-await page.getByRole('button', { name: 'شروع سال مالی', exact: true }).click()
+await page.getByRole('button', { name: /^شروع سال مالی/ }).click()
 await page.getByRole('button', { name: 'شروع سال مالی', exact: true }).click()
 await page.getByText('۱) اول این‌ها را در اپ ثبت کنید', { exact: true }).waitFor()
 await page.waitForTimeout(600)
