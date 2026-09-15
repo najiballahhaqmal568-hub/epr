@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Product, type Variant } from '../db'
+import { accessFlags, db, type Product, type Variant } from '../db'
 import { fmtNum, fmtMoney, ageLabel } from '../lib/format'
-import { inputCls, Fab, Empty, Card } from '../components/ui'
+import { inputCls, Empty, Card } from '../components/ui'
 import StockCartonWizard from './inventory/StockCartonWizard'
 import StocktakeModal from './inventory/StocktakeModal'
 import AdjustModal from './inventory/AdjustModal'
@@ -123,8 +123,8 @@ export default function Inventory({
       <div className="page-heading"><div><h1>گدام و خرید</h1><p>موجودی، خرید و سفارش مجدد</p></div></div>
 
       <section className="mb-5 surface inventory-summary" aria-label="خلاصهٔ موجودی">
-        <div><span>موجودی</span><strong>{fmtNum(totalPairs)} جوړه</strong></div>
-        <div><span>ارزش خرید</span><strong>{fmtMoney(totalValue)}</strong></div>
+        <div><span>موجودی</span><strong className="inventory-money">{fmtNum(totalPairs)} جوړه</strong></div>
+        <div><span>ارزش خرید</span><strong className="inventory-money">{fmtMoney(totalValue)}</strong></div>
         {noPricePairs > 0 && <p className="mt-2 text-xs font-bold text-amber-700">{fmtNum(noPricePairs)} جوړه هنوز قیمت خرید ندارد</p>}
       </section>
 
@@ -179,7 +179,7 @@ export default function Inventory({
             ))}
           </div>
         </div>
-        <button onClick={() => setShowWizard(true)} className="inventory-add">＋ افزودن بوت جدید</button>
+        {!accessFlags.readOnly && <button onClick={() => setShowWizard(true)} className="inventory-add">＋ افزودن بوت جدید</button>}
         {showTools && <div className="inventory-tools">
           <button onClick={() => setShowStocktake(true)}>شمارش موجودی</button>
           <button onClick={() => setShowMerge(true)}>یکجا کردن جنس تکراری</button>
@@ -251,7 +251,7 @@ export default function Inventory({
                   {vs.some((v) => v.stockQty > 0 && v.purchasePrice <= 0) ? (
                     <p className="text-xs font-bold text-red-600">⚠️ قیمت خرید ندارد</p>
                   ) : (
-                    value > 0 && <p className="text-xs font-bold text-slate-600">ارزش: {fmtMoney(value)}</p>
+                    value > 0 && <p className="text-xs font-bold text-slate-600">ارزش: <span className="inventory-money">{fmtMoney(value)}</span></p>
                   )}
                   {(() => {
                     const pairs = pairsPerCartonOf(p)
@@ -302,7 +302,6 @@ export default function Inventory({
         })}
       </section>
 
-      <Fab onClick={() => setShowWizard(true)} label="بوت جدید" />
       {showWizard && (
         <StockCartonWizard
           onClassic={(d) => {

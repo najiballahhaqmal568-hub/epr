@@ -10,7 +10,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
   await page.route('**/*', route => ['localhost', '127.0.0.1'].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort())
   await page.goto(url)
-  await page.getByRole('heading', { name: 'میز فروش' }).waitFor()
+  await page.getByRole('heading', { name: 'خانه' }).waitFor()
   await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
   assert.ok(await page.evaluate(() => Boolean(document.querySelector('details').compareDocumentPosition(document.querySelector('[aria-label="فهرست حساب‌ها"]')) & Node.DOCUMENT_POSITION_FOLLOWING)))
   await page.evaluate(async () => {

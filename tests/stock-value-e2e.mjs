@@ -53,11 +53,11 @@ if (!/۱۹ جوړه/.test(await summary.innerText())) fail('مجموع جوړه 
 console.log('✅ ارزش هر جنس و مجموع گدام درست است')
 
 // همان عدد باید در ویزارد شروع سال هم بیاید
-await page.locator('nav').getByRole('button', { name: 'خانه', exact: true }).click()
-await page.click('text=⚙️')
-await page.waitForSelector('text=🎬 شروع سال مالی')
-await page.click('button:has-text("شروع سال مالی")')
-await page.waitForSelector('text=اول این‌ها را در اپ ثبت کنید')
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByText('تنظیمات پیشرفته', { exact: true }).click()
+await page.getByRole('button', { name: 'شروع سال مالی', exact: true }).click()
+await page.getByRole('button', { name: 'شروع سال مالی', exact: true }).click()
+await page.getByText('۱) اول این‌ها را در اپ ثبت کنید', { exact: true }).waitFor()
 await page.waitForTimeout(600)
 const body2 = await page.locator('body').innerText()
 if (!/۱۲٬۰۰۰/.test(body2)) fail('ویزارد شروع سال عدد دیگری می‌گوید:\n' + body2.slice(0, 900))

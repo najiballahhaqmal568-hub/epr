@@ -79,7 +79,7 @@ try {
       color: 'سیاه',
       sku: 'SKU-42-BLACK',
       stockQty: 7,
-      purchasePrice: 1_234_567,
+      purchasePrice: 987_654_321_098,
       retailPrice: 1_500_000,
       wholesalePrice: 1_400_000,
       lowStock: 2,
@@ -109,7 +109,7 @@ try {
   const summary = main.getByRole('region', { name: 'خلاصهٔ موجودی' })
   await summary.waitFor()
   assert.match(await summary.innerText(), /۷ جوړه/)
-  assert.match(await summary.innerText(), /۸٬۶۴۱٬۹۶۹/)
+  assert.match(await summary.innerText(), /۶٬۹۱۳٬۵۸۰٬۲۴۷٬۶۸۶/)
 
   const search = main.getByRole('searchbox', { name: 'جستجوی موجودی' })
   await search.waitFor()
@@ -122,6 +122,7 @@ try {
   ), [await management.elementHandle(), await list.elementHandle()]), 'management actions should appear before the inventory list')
   await main.getByRole('group', { name: 'چیدمان فهرست' }).waitFor()
   await main.getByRole('button', { name: 'افزودن بوت جدید' }).waitFor()
+  assert.equal(await main.getByRole('button', { name: /بوت جدید/ }).count(), 1, 'writable inventory has one inline add action')
 
   await list.getByAltText(`عکس بوت ${modelName}`).waitFor()
   assert.match(await list.innerText(), new RegExp(modelName))
@@ -167,7 +168,7 @@ try {
   await mkdir('artifacts', { recursive: true })
 
   for (const viewport of [
-    { width: 320, height: 760, fontScale: '100%' },
+    { width: 320, height: 760, fontScale: '125%' },
     { width: 390, height: 844, fontScale: '100%' },
     { width: 768, height: 900, fontScale: '100%' },
     { width: 1440, height: 960, fontScale: '125%' }
@@ -175,8 +176,42 @@ try {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.evaluate((fontScale) => { document.documentElement.style.fontSize = fontScale }, viewport.fontScale)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, `horizontal overflow at ${viewport.width}px`)
+    if (viewport.width === 320) {
+      const add = main.getByRole('button', { name: 'افزودن بوت جدید' })
+      const listBox = await list.boundingBox()
+      const addBox = await add.boundingBox()
+      assert.ok(addBox && listBox && addBox.y + addBox.height <= listBox.y + 1, 'the only add action must not overlay the product list on mobile')
+      const amount = summary.locator('.inventory-money').last()
+      assert.equal(await amount.evaluate((element) => {
+        const range = document.createRange()
+        range.selectNodeContents(element)
+        return new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.y))).size
+      }), 1, 'a large AFN token stays on one line at 320px with enlarged text')
+    }
     await page.screenshot({ path: `artifacts/task-6a-inventory-${viewport.width}.png`, fullPage: true })
   }
+
+  await page.evaluate(async () => {
+    const { default: React } = await import('/node_modules/.vite/deps/react.js')
+    const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js')
+    const { default: Inventory } = await import('/src/pages/Inventory.tsx')
+    const { accessFlags } = await import('/src/db.ts')
+    accessFlags.readOnly = true
+    window.readOnlyInventoryHost = document.createElement('section')
+    window.readOnlyInventoryHost.setAttribute('aria-label', 'آزمایش موجودی فقط مشاهده')
+    document.body.append(window.readOnlyInventoryHost)
+    window.readOnlyInventoryRoot = ReactDOM.createRoot(window.readOnlyInventoryHost)
+    window.readOnlyInventoryRoot.render(React.createElement(Inventory))
+  })
+  const readOnlyInventory = page.getByRole('region', { name: 'آزمایش موجودی فقط مشاهده' })
+  await readOnlyInventory.getByRole('heading', { name: 'گدام و خرید' }).waitFor()
+  assert.equal(await readOnlyInventory.getByRole('button', { name: /بوت جدید/ }).count(), 0, 'read-only inventory must not expose an add action')
+  await page.evaluate(async () => {
+    window.readOnlyInventoryRoot.unmount()
+    window.readOnlyInventoryHost.remove()
+    const { accessFlags } = await import('/src/db.ts')
+    accessFlags.readOnly = false
+  })
 
   console.log('PASS: inventory hierarchy, product/photo identity, value/age/reorder/carton signals, cancel safety, search, and responsive widths')
 } finally {
