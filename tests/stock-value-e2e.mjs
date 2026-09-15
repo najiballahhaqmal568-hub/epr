@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: ارزش هر جنس در گدام، و برابری با ویزارد شروع سال */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // کوهستان: ۱۰×۵۰۰ + ۵×۶۰۰ = ۸٬۰۰۰   بامیان: ۴×۱٬۰۰۰ = ۴٬۰۰۰   مجموع ۱۲٬۰۰۰
 await page.evaluate(async () => {
@@ -38,20 +38,22 @@ await page.evaluate(async () => {
   await mkV(p2, '40', 4, 1000)
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 await page.waitForTimeout(700)
 
 const body = await page.locator('body').innerText()
+const summary = page.getByRole('region', { name: 'خلاصهٔ موجودی' })
 if (!/ارزش: ۸٬۰۰۰/.test(body)) fail('ارزش کوهستان ۸٬۰۰۰ نیامد:\n' + body.slice(0, 900))
 if (!/ارزش: ۴٬۰۰۰/.test(body)) fail('ارزش بامیان ۴٬۰۰۰ نیامد:\n' + body.slice(0, 900))
-if (!/مجموع گدام/.test(body)) fail('نوار مجموع نیامد')
-if (!/۱۲٬۰۰۰/.test(body)) fail('مجموع ۱۲٬۰۰۰ نیامد:\n' + body.slice(0, 900))
-if (!/۱۹ جوړه/.test(body)) fail('مجموع جوړه ۱۹ نیامد')
+if (!(await summary.count())) fail('نوار مجموع نیامد')
+if (!/۱۲٬۰۰۰/.test(await summary.innerText())) fail('مجموع ۱۲٬۰۰۰ نیامد:\n' + await summary.innerText())
+if (!/۱۹ جوړه/.test(await summary.innerText())) fail('مجموع جوړه ۱۹ نیامد')
 console.log('✅ ارزش هر جنس و مجموع گدام درست است')
 
 // همان عدد باید در ویزارد شروع سال هم بیاید
-await page.click('nav >> text=داشبورد')
+await page.locator('nav').getByRole('button', { name: 'خانه', exact: true }).click()
 await page.click('text=⚙️')
 await page.waitForSelector('text=🎬 شروع سال مالی')
 await page.click('button:has-text("شروع سال مالی")')
@@ -81,12 +83,13 @@ await page.evaluate(async () => {
   })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 await page.waitForTimeout(700)
 const body3 = await page.locator('body').innerText()
 if (!/قیمت خرید ندارد/.test(body3)) fail('هشدارِ «قیمت خرید ندارد» نیامد:\n' + body3.slice(0, 900))
-if (!/۴۲ جوړه بی‌قیمت شمرده نشده/.test(body3)) fail('نوار مجموع نگفت چند جوړه شمرده نشده:\n' + body3.slice(0, 900))
+if (!/۴۲ جوړه هنوز قیمت خرید ندارد/.test(body3)) fail('نوار مجموع نگفت چند جوړه شمرده نشده:\n' + body3.slice(0, 900))
 // مجموع نباید عوض شده باشد — چون آن ۴۲ جوړه قیمت ندارد
 if (!/۱۲٬۰۰۰/.test(body3)) fail('مجموع باید همان ۱۲٬۰۰۰ بماند')
 console.log('✅ جنس بدون قیمت خرید با هشدار سرخ نشان داده می‌شود، نه پنهان')

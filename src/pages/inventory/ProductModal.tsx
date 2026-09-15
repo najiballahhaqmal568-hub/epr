@@ -179,13 +179,14 @@ export function ProductModal({
 
   return (
     <Modal title={product ? 'ویرایش بوت' : 'بوت جدید'} onClose={onClose}>
-      <ProductPhotoPicker photo={photo} onChange={setPhoto} />
+      <section aria-label="مشخصات اصلی" className="product-form-section">
+        <ProductPhotoPicker photo={photo} onChange={setPhoto} />
 
-      <Field label="نام بوت *">
+        <Field label="نام بوت *">
         <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً بوت چرمی مردانه" />
-      </Field>
-      <DuplicateNameHint name={name} ignoreId={product?.id} />
-      <div className="grid grid-cols-2 gap-2">
+        </Field>
+        <DuplicateNameHint name={name} ignoreId={product?.id} />
+        <div className="grid grid-cols-2 gap-2">
         <Field label="برند">
           <input className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)} list="brand-list" />
           <datalist id="brand-list">
@@ -202,8 +203,10 @@ export function ProductModal({
             ))}
           </datalist>
         </Field>
-      </div>
+        </div>
+      </section>
 
+      <section aria-label="سایزها، رنگ‌ها و قیمت‌ها" className="product-form-section">
       <p className="mb-2 font-bold text-slate-700">سایزها و رنگ‌ها</p>
       {forms.map((f, i) => (
         <div key={i} className="mb-3 rounded-xl border border-slate-200 p-3">
@@ -246,7 +249,9 @@ export function ProductModal({
       >
         ＋ افزودن سایز دیگر
       </button>
+      </section>
 
+      <section aria-label="تنظیم خرید مجدد و کارتن" className="product-form-section">
       <div className="mb-4 rounded-xl bg-red-50 p-3">
         <p className="mb-2 text-sm font-bold text-red-800">⚠️ حد خرید مجدد برای کل جنس</p>
         <div className="grid grid-cols-2 gap-2">
@@ -327,6 +332,7 @@ export function ProductModal({
           </div>
         )
       })()}
+      </section>
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <PrimaryBtn onClick={save}>ذخیره</PrimaryBtn>
