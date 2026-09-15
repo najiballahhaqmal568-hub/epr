@@ -99,13 +99,14 @@ export function StockCartonWizard({
   )
 
   return (
-    <Modal title={`📦 جنس کارتنی جدید${name ? ` — ${name}` : ''}`} onClose={onClose}>
-      <div className="mb-3 flex items-center justify-center gap-2">{[1, 2, 3, 4, 5].map(stepDot)}</div>
+    <Modal title={`جنس کارتنی جدید${name ? ` — ${name}` : ''}`} onClose={onClose}>
+      <div className="mb-4 flex items-center justify-center gap-2" role="region" aria-label="مراحل ثبت کارتن">{[1, 2, 3, 4, 5].map(stepDot)}</div>
 
       {step === 1 && (
         <>
-          <p className="mb-2 text-sm font-bold text-slate-700">۱) مشخصات جنس</p>
-      <ProductPhotoPicker photo={photo} onChange={setPhoto} />
+          <p className="mb-2 text-base font-bold text-slate-800">۱) مشخصات و قیمت‌ها</p>
+          <p className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm text-slate-700">قیمت‌ها برای هر جوړه ثبت می‌شوند و بعداً در قیمت و ارزش گدام محفوظ می‌مانند.</p>
+          <ProductPhotoPicker photo={photo} onChange={setPhoto} />
           <Field label="نام جنس *">
             <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً اسکچرز" />
           </Field>
@@ -140,7 +141,7 @@ export function StockCartonWizard({
                 wholesalePrice: wholesale
               })
             }
-            className="mb-2 text-sm text-teal-700"
+            className="mb-3 min-h-[44px] text-sm font-bold text-blue-700"
           >
             ثبت عادی بدون کارتن (فورم کامل) ←
           </button>
@@ -151,7 +152,7 @@ export function StockCartonWizard({
         <>
           <p className="mb-2 text-sm font-bold text-slate-700">۲) چند کارتن دارید؟</p>
           <input
-            className="mb-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-4 text-center text-3xl font-bold"
+            className="mb-3 min-h-[64px] w-full rounded-2xl border border-blue-200 bg-white px-3 text-center text-3xl font-bold"
             inputMode="numeric"
             autoFocus
             placeholder="۳"
@@ -165,7 +166,7 @@ export function StockCartonWizard({
         <>
           <p className="mb-2 text-sm font-bold text-slate-700">۳) هر کارتن چند جوړه دارد؟</p>
           <input
-            className="mb-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-4 text-center text-3xl font-bold"
+            className="mb-3 min-h-[64px] w-full rounded-2xl border border-blue-200 bg-white px-3 text-center text-3xl font-bold"
             inputMode="numeric"
             autoFocus
             placeholder="۱۲"
@@ -179,16 +180,16 @@ export function StockCartonWizard({
         <>
           <p className="mb-1 text-sm font-bold text-slate-700">۴) شماره‌بندی داخل یک کارتن</p>
           <p
-            className={`mb-2 rounded-xl p-2 text-center text-sm font-bold ${
-              filled === cap ? 'bg-teal-50 text-teal-700' : filled > cap ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+            className={`mb-3 rounded-2xl p-3 text-center text-sm font-bold ${
+              filled === cap ? 'bg-blue-50 text-blue-700' : filled > cap ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
             }`}
           >
             {filled === cap ? `✅ پوره شد: ${fmtNum(cap)} جوړه` : filled > cap ? `⚠️ ${fmtNum(filled - cap)} جوړه زیادتر از ظرفیت!` : `${fmtNum(filled)} از ${fmtNum(cap)} جوړه`}
           </p>
           {rows.map((r, i) => (
-            <div key={i} className="mb-1 flex items-center gap-2 rounded-lg bg-slate-50 p-2">
+            <div key={i} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2.5">
               <input
-                className="w-20 rounded-lg border border-slate-300 bg-white px-1 py-1.5 text-center text-sm"
+                className="min-h-[44px] w-20 rounded-xl border border-slate-300 bg-white px-1 text-center text-sm"
                 placeholder="سایز"
                 inputMode="numeric"
                 value={r.size}
@@ -197,7 +198,7 @@ export function StockCartonWizard({
               <span className="flex-1 text-xs text-slate-400">{color.trim()}</span>
               <span className="text-xs text-slate-400">در کارتن:</span>
               <input
-                className="w-16 rounded-lg border border-slate-300 bg-white px-1 py-1.5 text-center font-bold"
+                className="min-h-[44px] w-16 rounded-xl border border-slate-300 bg-white px-1 text-center font-bold"
                 inputMode="numeric"
                 placeholder="۰"
                 value={r.qty}
@@ -206,7 +207,7 @@ export function StockCartonWizard({
             </div>
           ))}
           <button
-            className="mb-2 w-full rounded-xl border border-dashed border-teal-600 py-1.5 text-sm text-teal-700"
+            className="mb-3 min-h-[44px] w-full rounded-xl border border-dashed border-blue-300 bg-blue-50 px-3 text-sm font-bold text-blue-700"
             onClick={() => setRows((rs) => [...rs, { size: '', qty: '' }])}
           >
             ＋ سایز دیگر
@@ -217,7 +218,7 @@ export function StockCartonWizard({
       {step === 5 && (
         <>
           <p className="mb-2 text-sm font-bold text-slate-700">۵) حساب خودکار — بررسی و ثبت در گدام</p>
-          <div className="mb-2 rounded-xl bg-teal-50 p-3 text-center font-bold text-teal-800">
+          <div className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-center font-bold text-blue-800">
             {fmtNum(nCartons)} کارتن × {fmtNum(cap)} جوړه = {fmtNum(nCartons * cap)} جوړه
           </div>
           {activeRows.map((r, i) => (
@@ -240,16 +241,16 @@ export function StockCartonWizard({
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
       <div className="flex gap-2">
         {step > 1 && (
-          <button onClick={() => setStep(step - 1)} className="rounded-xl bg-slate-100 px-6 py-3 font-bold text-slate-600">
+          <button onClick={() => setStep(step - 1)} className="min-h-[44px] rounded-xl bg-slate-100 px-6 font-bold text-slate-600">
             قبلی
           </button>
         )}
         {step < 5 ? (
-          <button onClick={next} className="flex-1 rounded-xl bg-teal-700 py-3 font-bold text-white active:bg-teal-800">
+          <button onClick={next} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
             بعدی
           </button>
         ) : (
-          <button onClick={() => void confirm()} className="flex-1 rounded-xl bg-teal-700 py-3 font-bold text-white active:bg-teal-800">
+          <button onClick={() => void confirm()} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
             ✓ ثبت در گدام
           </button>
         )}

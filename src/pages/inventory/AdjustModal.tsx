@@ -54,7 +54,7 @@ export function AdjustModal({ variant, product, onClose }: { variant: Variant; p
 
   return (
     <Modal title={`تعدیل گدام — ${product.name} ${v.size} ${v.color}`} onClose={onClose}>
-      <p className="mb-2 text-sm text-slate-600">
+      <p className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm text-slate-700">
         موجودی فعلی: <b>{fmtNum(v.stockQty)}</b> {v.sku && <span className="text-slate-400">· کود: {v.sku}</span>}
       </p>
       <Field label="دلیل">
@@ -80,21 +80,22 @@ export function AdjustModal({ variant, product, onClose }: { variant: Variant; p
       </Field>
       {/* نتیجه پیش از ثبت دیده شود تا اشتباه نشود */}
       {qty.trim() !== '' && (
-        <p className="-mt-2 mb-3 rounded-lg bg-slate-50 p-2.5 text-center text-sm">
+        <section className="-mt-2 mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-center text-sm" aria-label="اثر تعدیل">
+          <span className="block text-xs font-bold text-slate-500">اثر تعدیل بر موجودی</span>
           موجودی: <span className="font-bold">{fmtNum(v.stockQty)}</span> ←{' '}
-          <span className={`text-lg font-bold ${preview < 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtNum(preview)}</span>
+          <span className={`text-lg font-bold ${preview < 0 ? 'text-red-600' : 'text-blue-700'}`}>{fmtNum(preview)}</span>
           {preview < 0 && <span className="block text-xs font-bold text-red-600">موجودی منفی می‌شود!</span>}
-        </p>
+        </section>
       )}
       <Field label="یادداشت">
         <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
       <PrimaryBtn onClick={save}>ثبت تعدیل</PrimaryBtn>
 
       {history && history.length > 0 && (
         <>
-          <p className="mt-4 mb-2 font-bold text-slate-700">تعدیل‌های قبلی</p>
+          <p className="mt-4 mb-2 font-bold text-slate-800">تعدیل‌های قبلی</p>
           {history.slice(0, 10).map((a) => (
             <div key={a.id} className="mb-1 flex justify-between rounded-lg bg-slate-50 p-2 text-sm">
               <span>

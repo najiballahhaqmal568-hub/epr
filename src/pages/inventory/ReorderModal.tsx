@@ -11,22 +11,27 @@ export function ReorderModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="لیست خرید مجدد" onClose={onClose}>
-      {low.length === 0 && <p className="text-slate-400">همه اجناس کافی است ✓</p>}
+      {low.length === 0 && <p className="rounded-2xl bg-blue-50 p-4 text-center text-sm text-blue-800">همه اجناس کافی است.</p>}
       {low.map((info) => (
-          <div key={info.product.id} className="mb-2 rounded-lg bg-slate-50 p-3 text-sm">
+          <section key={info.product.id} className="mb-3 rounded-2xl border border-blue-100 bg-white p-4 text-sm shadow-sm" aria-label={`خرید مجدد ${info.product.name}`}>
             <div className="flex justify-between gap-2">
-            <span>
+            <span className="font-bold text-slate-800">
               {info.product.name}
               {info.product.brand && <span className="text-slate-400"> ({info.product.brand})</span>}
             </span>
-            <span className="font-bold text-red-600">
-              {fmtNum(info.stockPairs)} / حد {fmtNum(info.thresholdPairs)} جفت
+            <span className="text-left font-bold text-red-600">
+              {fmtNum(info.stockPairs)} / {fmtNum(info.thresholdPairs)} جفت
             </span>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              هر کارتن {fmtNum(info.pairsPerCarton)} جفت · هشدار در {fmtNum(info.reorderCartons)} کارتن
+            <p className="mt-3 rounded-xl bg-blue-50 p-2.5 text-xs leading-5 text-blue-900">
+              موجودی همهٔ رنگ‌ها و سایزها: <b>{fmtNum(info.stockPairs)} جفت</b> · حد خرید مجدد: <b>{fmtNum(info.reorderCartons)} کارتن × {fmtNum(info.pairsPerCarton)} جفت</b>
             </p>
-          </div>
+            <p className="mt-2 text-xs text-slate-500">
+              {info.product.carton?.items.length
+                ? `${fmtNum(info.fullCartons)} کارتن کامل${info.loosePairs ? ` و ${fmtNum(info.loosePairs)} جفت` : ''}`
+                : `معادل ${fmtNum(info.fullCartons)} کارتن${info.loosePairs ? ` و ${fmtNum(info.loosePairs)} جفت` : ''}؛ ترکیب کامل کارتن ثبت نشده است`}
+            </p>
+          </section>
       ))}
     </Modal>
   )
