@@ -1,6 +1,6 @@
 # Current plan: approved iOS-inspired UI, preserve all features
 
-Owner approved the visual samples on 2026-09-08 with the explicit requirement that no feature be omitted. Implementation has not started. Coverage contract: `docs/ios-redesign-feature-coverage.md`; executable financial feature plan remains separately in `docs/superpowers/plans/2026-09-08-direct-sales.md`.
+Owner approved the visual samples on 2026-09-08 with the explicit requirement that no feature be omitted. Slices 1–5 (shared UI, navigation/home, sales selection/payment, history/documents, returns/exchanges) are implemented and independently reviewed. Coverage contract: `docs/ios-redesign-feature-coverage.md`. Direct sales first release is published and integrated; preserve its implemented scope from `docs/direct-sales-first-release.md`.
 
 ## UI delivery slices
 
