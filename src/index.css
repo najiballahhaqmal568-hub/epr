@@ -189,6 +189,20 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .sale-detail-corrections h3 { font-size: 0.875rem; color: var(--text-secondary); font-weight: 700; margin-bottom: 0.75rem; }
 .sale-delete-action { width: 100%; color: var(--danger); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); padding: 0.75rem; }
 .sale-receipt-image { display: block; width: 100%; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); }
+.sale-correction-fields { min-width: 0; }
+.sale-correction-group { margin-block: 1.25rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); background: var(--surface); overflow-wrap: anywhere; }
+.sale-correction-group h3 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+.sale-correction-help { font-size: 0.875rem; color: var(--text-secondary); line-height: 1.9; margin-block: 0.75rem; overflow-wrap: anywhere; }
+.sale-correction-check { display: flex; align-items: center; gap: 0.75rem; min-height: 44px; font-size: 0.875rem; line-height: 1.9; }
+.sale-correction-check input { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--action); }
+.sale-correction-summary { border: 1px solid var(--border-subtle); background: var(--action-tint); border-radius: var(--radius-control); padding: 1rem; font-size: 0.875rem; line-height: 1.9; }
+.sale-correction-summary dl > div, .sale-correction-difference { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 0.75rem; }
+.sale-correction-summary dd, .sale-correction-difference { font-weight: 700; color: var(--text-primary); }
+.sale-correction-summary > p { margin-top: 0.75rem; }
+.sale-correction-match { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1rem; width: 100%; padding: 0.75rem; border-bottom: 1px solid var(--border-subtle); text-align: start; }
+.sale-correction-match:last-child { border-bottom: 0; }
+.sale-correction-price { width: min(100%, 10rem); }
+.sale-correction-error { color: var(--danger); background: var(--canvas); border-inline-start: 3px solid var(--danger); border-radius: 0.5rem; padding: 0.75rem; font-size: 0.875rem; line-height: 1.9; margin-block: 1rem; overflow-wrap: anywhere; }
 .sale-invoice-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-block: 1rem; }
 .sale-invoice-table th { background: var(--action-tint); font-weight: 700; }
 .sale-invoice-table th, .sale-invoice-table td { padding: 0.75rem 0.5rem; border-bottom: 1px solid var(--border-subtle); text-align: start; overflow-wrap: anywhere; }
