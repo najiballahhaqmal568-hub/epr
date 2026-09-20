@@ -1,5 +1,6 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
+import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
@@ -19,6 +20,7 @@ const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اص
 const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
 
 function assertOrdinarySale(sale: Sale): void {
+  if (sale.goodsReceiptChild || sale.goodsReceiptLines) throw new Error(GOODS_RECEIPT_ERROR)
   if (sale.directTrade) throw new Error(DIRECT_SALE_ERROR)
 }
 
@@ -27,6 +29,7 @@ function assertOrdinaryPurchase(purchase: Purchase): void {
 }
 
 function assertOrdinaryPayment(payment: Payment): void {
+  if (payment.goodsReceipt) throw new Error(GOODS_RECEIPT_ERROR)
   if (payment.directPayment) throw new Error(DIRECT_PAYMENT_ERROR)
 }
 
@@ -1319,6 +1322,7 @@ export interface SaleShippingInput extends ShippingAmounts {
 
 async function shippingSale(saleId: number): Promise<Sale> {
   const sale = await db.sales.get(saleId)
+  if (sale?.goodsReceiptChild || sale?.goodsReceiptLines) throw new Error(GOODS_RECEIPT_ERROR)
   if (!sale || sale.deleted || !sale.uuid || sale.saleType !== 'wholesale' || sale.groupUuid || sale.lenderAction || sale.expenseCreditorId) {
     throw new Error('فروش عمدهٔ مربوط به کرایه یافت نشد')
   }
@@ -2582,6 +2586,7 @@ export async function renameCategory(categoryId: number, newName: string): Promi
 
 /** تعدیل گدام با دلیل (داغمه/مفقود/تصحیح) */
 export async function addAdjustment(adj: Adjustment): Promise<number> {
+  if (adj.goodsReceiptChild) throw new Error(GOODS_RECEIPT_ERROR)
   return db.transaction('rw', db.adjustments, db.variants, async () => {
     const v = await db.variants.get(adj.variantId)
     if (!v) throw new Error('جنس یافت نشد')
