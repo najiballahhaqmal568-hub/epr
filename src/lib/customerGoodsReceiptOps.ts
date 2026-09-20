@@ -1,5 +1,5 @@
 import { accessFlags, db, SYNC_TABLES, type Adjustment, type Payment, type Sale } from '../db'
-import { applyRebuiltCosts } from './costing'
+import { applyRebuiltCosts, computeCosts } from './costing'
 import { effectsOf, type DocTable } from './effects'
 import { boxOf, postCashMovement } from './financialPosting'
 import { customerGoodsReceiptFeatureEnabled, loadCustomerGoodsReceipt } from './customerGoodsReceiptState'
@@ -8,9 +8,30 @@ export { customerGoodsReceiptFeatureEnabled, loadCustomerGoodsReceipt }
 export type { CreateCustomerGoodsReceiptInput, CustomerGoodsReceiptState } from './customerGoodsReceiptTypes'
 
 const tables = () => [...SYNC_TABLES.map(t => db.table(t)), db.settings, db.syncState]
+const LEGACY_COST_BASIS_ERROR = 'قیمت خرید این جنس از اسناد قبلی به‌طور ثابت بازسازی نمی‌شود؛ ابتدا قیمت خرید قبلی را با سند «اصلاح قیمت خرید» ثبت کنید.'
 async function eligibility(): Promise<void> {
   if (accessFlags.readOnly) throw new Error('حساب شما فقط اجازهٔ مشاهده دارد.')
   if (!await customerGoodsReceiptFeatureEnabled()) throw new Error('ابتدا سازگاری نسخهٔ همهٔ دستگاه‌ها را تأیید کنید.')
+}
+async function requireDeterministicCostBasis(incoming: Adjustment): Promise<void> {
+  const variantId = incoming.variantId
+  const live = <T extends { deleted?: boolean }>(rows: T[]) => rows.filter(row => !row.deleted)
+  const [sales, purchases, adjustments, returns] = await Promise.all([
+    db.sales.toArray().then(live),
+    db.purchases.toArray().then(live),
+    db.adjustments.toArray().then(live),
+    db.returns.toArray().then(live)
+  ])
+  // rebuildCosts deliberately has no fallback for variants with a real,
+  // received purchase; their chronology already establishes the cost.
+  const purchased = purchases.some(purchase => !purchase.directTrade && purchase.received !== false && purchase.lines.some(line => line.variantId === variantId))
+  if (purchased) return
+  // Include the proposed receipt itself. If chronological quantity has reached
+  // zero, weightedCost resets to its unit cost and both replays converge.
+  const withIncoming = [...adjustments, incoming]
+  const reconstructed = computeCosts(sales, purchases, withIncoming, returns, new Map([[variantId, 0]])).get(variantId)
+  const changedFallback = computeCosts(sales, purchases, withIncoming, returns, new Map([[variantId, Number.MAX_SAFE_INTEGER]])).get(variantId)
+  if (reconstructed === undefined || changedFallback === undefined || reconstructed !== changedFallback) throw new Error(LEGACY_COST_BASIS_ERROR)
 }
 async function normalized(input: CreateCustomerGoodsReceiptInput): Promise<CustomerGoodsReceiptSnapshot> {
   if (!input || !RECEIPT_UUID.test(input.receiptUuid)) throw new Error('شناسهٔ دریافت معتبر نیست.')
@@ -83,6 +104,7 @@ async function insert(snapshot: CustomerGoodsReceiptSnapshot, correctionOfUuid?:
         const id = variant.id!, later = (row: { date: number; deleted?: boolean }) => !row.deleted && row.date >= snapshot.date
         const [sales, purchases, adjustments, returns] = await Promise.all([db.sales.toArray(), db.purchases.toArray(), db.adjustments.toArray(), db.returns.toArray()])
         if (sales.some(s => later(s) && s.lines.some(l => l.variantId === id)) || purchases.some(p => later({ ...p, date: p.receivedAt ?? p.date }) && p.lines.some(l => l.variantId === id)) || adjustments.some(a => later(a) && a.variantId === id) || returns.some(r => later(r) && r.lines.some(l => l.variantId === id))) throw new Error('در این تاریخ یا پس از آن برای جنس انتخاب‌شده معامله ثبت شده است؛ دریافت با تاریخ قدیمی قیمت فروش‌های ثبت‌شده را تغییر می‌دهد.')
+        await requireDeterministicCostBasis({ date: snapshot.date, variantId: id, productName: line.productName, size: line.size, color: line.color, qtyChange: line.qty, unitCost: line.unitCost, reason: 'correction' })
       }
       if (!variant) {
         const productId = await db.products.add({ uuid: receiptStableUuid(`goods-product:${receiptUuid}:${line.lineUuid}`), name: line.productName, photo: line.photo, createdAt: meta.createdAt }) as number

@@ -29,13 +29,18 @@ try {
     const report = []
     const eq = (got, want, name) => { if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${name}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`); report.push(name) }
     let receipt
-    try { receipt = await import('/src/lib/customerGoodsReceiptOps.ts') } catch { receipt = {} }
+    try { receipt = await import('/src/lib/customerGoodsReceiptOps.ts') } catch (error) { throw new Error(`receipt module import failed: ${error instanceof Error ? error.message : String(error)}`) }
     eq(typeof receipt.createCustomerGoodsReceipt, 'function', 'dedicated creation export exists')
     const { db, accessFlags } = await import('/src/db.ts')
     const ops = await import('/src/lib/ops.ts')
     const { cashBalance } = ops
+    const { applyRebuiltCosts } = await import('/src/lib/costing.ts')
     const { commercialSaleLines } = await import('/src/lib/commercialLines.ts')
     const rejected = async (work, name) => { let failed = false; try { await work() } catch { failed = true }; eq(failed, true, name) }
+    const rejection = async (work, name) => {
+      try { await work() } catch (error) { report.push(name); return error instanceof Error ? error.message : String(error) }
+      throw new Error(`${name}: expected rejection`)
+    }
     const uuid = () => crypto.randomUUID()
     const sourceId = await db.customers.add({ uuid: uuid(), name: 'source', type: 'wholesale', balance: 10000 })
     await db.settings.put({ key: 'goodsReceiptCompatibilityAcknowledged', value: true })
@@ -157,11 +162,42 @@ try {
     const existingState = await receipt.createCustomerGoodsReceipt(existingInput)
     eq((await db.variants.get(existingId)).stockQty, 4, 'selected existing stock')
     eq((await db.variants.get(existingId)).purchasePrice, 750, 'selected existing weighted cost')
+    await applyRebuiltCosts()
+    await applyRebuiltCosts()
+    eq((await db.variants.get(existingId)).purchasePrice, 750, 'selected existing cost stays stable across repeated rebuilds')
     const existingCancel = await receipt.previewCustomerGoodsReceiptCancellation(existingInput.receiptUuid)
     await receipt.cancelCustomerGoodsReceipt(existingInput.receiptUuid, existingCancel.token, 'cancel existing')
     eq((await db.variants.get(existingId)).stockQty, 2, 'selected existing stock restored')
     eq((await db.variants.get(existingId)).purchasePrice, 500, 'selected existing cost restored')
     await rejected(() => receipt.createCustomerGoodsReceipt({ ...existingInput, receiptUuid: uuid(), date: 1599999999999 }), 'backdated receipt before existing inventory activity blocked')
+
+    const legacyProductId = await db.products.add({ uuid: uuid(), name: 'Legacy', createdAt: 1500000000000 })
+    const legacyId = await db.variants.add({ uuid: uuid(), productId: legacyProductId, size: '43', color: 'Gray', stockQty: 2, purchasePrice: 500, retailPrice: 0, wholesalePrice: 0, lowStock: 0 })
+    await db.adjustments.add({ uuid: uuid(), date: 1500000000000, variantId: legacyId, productName: 'Legacy', size: '43', color: 'Gray', qtyChange: 2, reason: 'correction', note: 'موجودی اولیه' })
+    const legacySourceId = await db.customers.add({ uuid: uuid(), name: 'legacy source', type: 'wholesale', balance: 20000 })
+    const legacyInput = { ...input, receiptUuid: uuid(), date: Date.now() + 20000, customerId: legacySourceId, lines: [{ lineUuid: uuid(), productName: 'Legacy', size: '43', color: 'Gray', qty: 2, unitCost: 1000, variantId: legacyId }] }
+    const beforeLegacy = await dump()
+    const legacyError = await rejection(() => receipt.createCustomerGoodsReceipt(legacyInput), 'quantity-only legacy opening rejected')
+    eq(legacyError.includes('اصلاح قیمت خرید'), true, 'legacy rejection explains documented cost reset')
+    eq(await dump(), beforeLegacy, 'legacy rejection makes no writes')
+
+    const resetProductId = await db.products.add({ uuid: uuid(), name: 'Reset legacy', createdAt: 1500000000000 })
+    const resetId = await db.variants.add({ uuid: uuid(), productId: resetProductId, size: '44', color: 'Blue', stockQty: 2, purchasePrice: 499, retailPrice: 0, wholesalePrice: 0, lowStock: 0 })
+    await db.adjustments.add({ uuid: uuid(), date: 1500000000000, variantId: resetId, productName: 'Reset legacy', size: '44', color: 'Blue', qtyChange: 2, reason: 'correction', note: 'موجودی اولیه' })
+    await ops.setPurchaseCost(resetId, 500, 'Reset legacy')
+    const resetSourceId = await db.customers.add({ uuid: uuid(), name: 'reset source', type: 'wholesale', balance: 20000 })
+    const resetInput = { ...input, receiptUuid: uuid(), date: Date.now() + 20000, customerId: resetSourceId, lines: [{ lineUuid: uuid(), productName: 'Reset legacy', size: '44', color: 'Blue', qty: 2, unitCost: 1000, variantId: resetId }] }
+    await receipt.createCustomerGoodsReceipt(resetInput)
+    eq((await db.variants.get(resetId)).purchasePrice, 750, 'documented cost reset makes legacy variant eligible')
+    await applyRebuiltCosts()
+    await applyRebuiltCosts()
+    eq((await db.variants.get(resetId)).purchasePrice, 750, 'reset legacy receipt cost stays stable across repeated rebuilds')
+    const resetCorrection = { ...resetInput, receiptUuid: uuid(), lines: [{ lineUuid: uuid(), productName: 'Legacy', size: '43', color: 'Gray', qty: 2, unitCost: 1000, variantId: legacyId }] }
+    const resetPreview = await receipt.previewCustomerGoodsReceiptCorrection(resetInput.receiptUuid, resetCorrection)
+    const beforeUnsafeCorrection = await dump()
+    const correctionError = await rejection(() => receipt.correctCustomerGoodsReceipt(resetInput.receiptUuid, resetCorrection, resetPreview.token, 'change quantity'), 'correction insert rechecks legacy cost basis')
+    eq(correctionError.includes('اصلاح قیمت خرید'), true, 'correction rejection explains documented cost reset')
+    eq(await dump(), beforeUnsafeCorrection, 'unsafe correction rolls back original receipt changes')
     const buyer2 = await db.customers.add({ uuid: uuid(), name: 'buyer2', type: 'wholesale', balance: 0 })
     const onward2 = { ...onward, receiptUuid: uuid(), date: Date.now() + 10000, onward: { buyerId: buyer2, paid: 500 } }
     await receipt.createCustomerGoodsReceipt(onward2)
