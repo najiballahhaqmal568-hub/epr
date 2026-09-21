@@ -148,3 +148,45 @@ parties, cursor preservation, mismatched revisions, stable tokens,
 feature/read-only/stale guards and exact customer/supplier/cash balances. Existing
 sync regressions remain `node tests/sync-safety.mjs` and
 `node tests/sync-status.mjs`.
+
+## Customer goods receipt aggregate safety — 2026-09-21
+
+Customer goods receipts use the existing row-wise cloud tables. The anchor,
+warehouse adjustment or onward sale, and optional cash row therefore do not arrive
+atomically. A child may be stored and have its ordinary accounting effect before
+the anchor arrives; `loadCustomerGoodsReceipt` reports that group as incomplete
+and blocks edits until the deterministic manifest is complete. Conflicting
+cancellation/correction evidence is retained under
+`goodsReceiptConflict:<receiptUuid>:<table>:<rowUuid>` in local sync state and also
+blocks edits. A delayed active row cannot roll a cancelled member back, and an old
+client that removes an existing receipt marker cannot silently replace that row.
+
+Receipt source customers, onward buyers and warehouse variants are encoded by
+UUID. Sender-local numeric IDs are removed and are never accepted as a fallback.
+Active rows require live matching masters. Cancelled audit rows may resolve an
+existing deleted master so retained history remains readable, but a missing UUID
+master is still a recoverable sync error and the pull cursor does not advance.
+Receipt adjustment insertion, replacement and cancellation use reverse/apply
+effects and rebuild acquisition cost; the anchor's saved prior cost restores the
+fallback basis after cancellation.
+
+Backup import validates every receipt aggregate, total, deterministic member,
+local ID-to-UUID master mapping, and reciprocal correction chain before sync is
+paused or any table is cleared. Partial groups, stripped markers, broken links and
+foreign numeric references are rejected with the current local data unchanged.
+Cancelled tombstones and audit links are preserved. The per-device
+`goodsReceiptCompatibilityAcknowledged` setting is neither exported nor imported.
+
+Local verification is `node tests/customer-goods-receipt-sync.mjs` on port 5204.
+It uses isolated real Dexie contexts and real sync/backup operations with an
+in-memory fake transport; all non-localhost requests and service workers are
+blocked. It compares stock, customer debts, cash, current acquisition costs and
+frozen onward-sale cost/profit across devices with different local IDs, including
+shuffled and repeated replay, correction, cancellation and rejected restore.
+
+This adds no backend schema, transaction fence, active-client version fence or
+atomic multi-device receipt guarantee. Before enabling receipt writes, refresh
+every client and acknowledge compatibility separately on each device. Edit a
+given receipt on only one device at a time and wait for sync before correcting or
+cancelling it. After receipt records exist, do not use an older client that does
+not understand their markers.

@@ -72,22 +72,25 @@ export function validateCustomerGoodsReceiptRows(receiptUuid: string, rows: Cust
 
 export async function loadCustomerGoodsReceipt(receiptUuid: string): Promise<CustomerGoodsReceiptState> {
   receiptUuid = receiptUuid.toLowerCase()
-  const [payments, adjustments, sales, cashMovements, customers, variants, products, purchases, returns, featureEnabled] = await Promise.all([
-    db.payments.toArray(), db.adjustments.toArray(), db.sales.toArray(), db.cashMovements.toArray(), db.customers.toArray(), db.variants.toArray(), db.products.toArray(), db.purchases.toArray(), db.returns.toArray(), customerGoodsReceiptFeatureEnabled()
+  const [payments, adjustments, sales, cashMovements, customers, variants, products, purchases, returns, featureEnabled, syncConflicts] = await Promise.all([
+    db.payments.toArray(), db.adjustments.toArray(), db.sales.toArray(), db.cashMovements.toArray(), db.customers.toArray(), db.variants.toArray(), db.products.toArray(), db.purchases.toArray(), db.returns.toArray(), customerGoodsReceiptFeatureEnabled(),
+    db.syncState.filter(row => row.key.startsWith(`goodsReceiptConflict:${receiptUuid}:`)).toArray()
   ])
   const base = validateCustomerGoodsReceiptRows(receiptUuid, { payments, adjustments, sales, cashMovements })
   const meta = base.payment?.goodsReceipt
   const issues = [...base.issues]
+  if (syncConflicts.length) issues.push('نسخه‌های رقیب دریافت در همگام‌سازی یافت شد؛ نوشتن مسدود است.')
   if (meta) {
+    const requireLiveMasters = meta.status === 'active'
     const source = customers.find(c => c.id === base.payment?.partyId)
-    if (!source || source.deleted || source.uuid !== meta.snapshot.customerUuid) issues.push('حساب مشتری دریافت یافت نشد یا هماهنگ نیست.')
+    if (!source || (requireLiveMasters && source.deleted) || source.uuid !== meta.snapshot.customerUuid) issues.push('حساب مشتری دریافت یافت نشد یا هماهنگ نیست.')
     if (base.sale) {
       const buyer = customers.find(c => c.id === base.sale?.customerId)
-      if (!buyer || buyer.deleted || buyer.uuid !== meta.snapshot.onward?.buyerUuid) issues.push('حساب خریدار یافت نشد یا هماهنگ نیست.')
+      if (!buyer || (requireLiveMasters && buyer.deleted) || buyer.uuid !== meta.snapshot.onward?.buyerUuid) issues.push('حساب خریدار یافت نشد یا هماهنگ نیست.')
     }
     for (const a of base.adjustments) {
       const v = variants.find(v => v.id === a.variantId), member = meta.members.find(m => m.uuid === a.uuid)
-      if (!v || v.deleted || v.uuid !== member?.variantUuid || !products.some(p => p.id === v.productId && !p.deleted)) issues.push('جنس دریافت یافت نشد یا هماهنگ نیست.')
+      if (!v || (requireLiveMasters && v.deleted) || v.uuid !== member?.variantUuid || !products.some(p => p.id === v.productId && (!requireLiveMasters || !p.deleted))) issues.push('جنس دریافت یافت نشد یا هماهنگ نیست.')
     }
     const successors = payments.filter(p => p.goodsReceipt?.correctionOfUuid === receiptUuid)
     if (successors.length > 1 || (successors.length && meta.correctedByUuid !== successors[0].uuid) || (meta.correctedByUuid && !successors.some(p => p.uuid === meta.correctedByUuid))) issues.push('پیوند اصلاح دریافت کامل یا یکتا نیست.')

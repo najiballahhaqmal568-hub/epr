@@ -2,6 +2,7 @@ import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost
 import { effectsOf } from './effects'
 import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
+import { validateCustomerGoodsReceiptBackup } from './customerGoodsReceiptBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
@@ -2985,7 +2986,7 @@ const TABLES = [
 // A backup may come from another owner/shop, so these rows must never replace it.
 const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
 // Compatibility acknowledgement belongs to this device, never to a backup.
-const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled'])
+const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled', 'goodsReceiptCompatibilityAcknowledged'])
 
 export async function exportBackup(): Promise<string> {
   const data: Record<string, unknown[]> = {}
@@ -3005,6 +3006,7 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
   validateDirectBackup(parsed.data)
+  validateCustomerGoodsReceiptBackup(parsed.data)
   const restoreTimestamp = Date.now()
 
   const sync = await import('./sync')
