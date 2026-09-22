@@ -158,7 +158,10 @@ the anchor arrives; `loadCustomerGoodsReceipt` reports that group as incomplete
 and blocks edits until the deterministic manifest is complete. Conflicting
 cancellation/correction evidence is retained under
 `goodsReceiptConflict:<receiptUuid>:<table>:<rowUuid>` in local sync state and also
-blocks edits. A delayed active row cannot roll a cancelled member back, and an old
+blocks edits. An unresolved conflict on a cancelled predecessor also blocks its
+linked active correction successor (and the affected correction family), including
+previews and mutations; correction links are traversed with cycle protection. A
+delayed active row cannot roll a cancelled member back, and an old
 client that removes an existing receipt marker cannot silently replace that row.
 
 Receipt source customers, onward buyers and warehouse variants are encoded by
@@ -176,6 +179,12 @@ paused or any table is cleared. Partial groups, stripped markers, broken links a
 foreign numeric references are rejected with the current local data unchanged.
 Cancelled tombstones and audit links are preserved. The per-device
 `goodsReceiptCompatibilityAcknowledged` setting is neither exported nor imported.
+Export reads receipt rows and receipt-specific conflict evidence in one local
+snapshot and includes that evidence in the optional
+`customerGoodsReceiptConflicts` backup field. Import checks its exact key namespace,
+referenced rows and value shape before clearing anything, then restores only these
+receipt conflict keys. Older backups without the field remain accepted; unrelated
+sync state, cursors and device identity are never restored from this field.
 
 Local verification is `node tests/customer-goods-receipt-sync.mjs` on port 5204.
 It uses isolated real Dexie contexts and real sync/backup operations with an

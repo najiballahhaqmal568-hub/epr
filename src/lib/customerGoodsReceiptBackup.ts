@@ -1,4 +1,4 @@
-import type { Adjustment, CashMovement, Customer, Payment, Product, Sale, Variant } from '../db'
+import type { Adjustment, CashMovement, Customer, Payment, Product, Sale, SyncStateRow, Variant } from '../db'
 import { validateCustomerGoodsReceiptRows } from './customerGoodsReceiptState'
 import { RECEIPT_UUID, type CustomerGoodsReceiptMeta } from './customerGoodsReceiptTypes'
 
@@ -15,6 +15,34 @@ function rows(data: Row, table: string): Row[] {
   return (value ?? []) as Row[]
 }
 const validId = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
+const conflictKey = /^goodsReceiptConflict:([^:]+):(payments|sales|adjustments|cashMovements):([^:]+)$/
+
+/** Only receipt conflict evidence crosses a backup boundary; cursors, cloud
+ * identity and other device sync state must never be copied. */
+export function validateCustomerGoodsReceiptConflictEvidence(dataValue: unknown, evidenceValue: unknown): SyncStateRow[] {
+  if (evidenceValue === undefined) return [] // Backups predating this envelope remain readable.
+  try {
+    const data = object(dataValue)
+    check(Array.isArray(evidenceValue))
+    const anchors = rows(data, 'payments')
+    const seen = new Set<string>()
+    return evidenceValue.map(candidate => {
+      const evidence = object(candidate)
+      check(typeof evidence.key === 'string')
+      const match = conflictKey.exec(evidence.key)
+      check(!!match && RECEIPT_UUID.test(match[1]) && RECEIPT_UUID.test(match[3]) && !seen.has(evidence.key))
+      check(anchors.some(anchor => anchor.uuid === match[1] && object(anchor.goodsReceipt).receiptUuid === match[1]))
+      check(rows(data, match[2]).some(row => row.uuid === match[3]))
+      check(Array.isArray(evidence.value) && evidence.value.length === 2 &&
+        evidence.value.every(part => typeof part === 'string' && part.length > 0) &&
+        evidence.value[0] < evidence.value[1])
+      seen.add(evidence.key)
+      return { key: evidence.key, value: [...evidence.value] }
+    })
+  } catch {
+    throw failure()
+  }
+}
 
 function exactMaster<T extends Row>(masterRows: T[], id: unknown, uuid: unknown, requireLive: boolean): T {
   check(validId(id) && typeof uuid === 'string' && RECEIPT_UUID.test(uuid))

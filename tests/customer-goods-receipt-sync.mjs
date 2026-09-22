@@ -268,6 +268,7 @@ try {
     const competing = { ...encoded, goodsReceipt: { ...encoded.goodsReceipt, correctedByUuid: alternate } }
     await sync.applyRemoteRow('payments', { uuid: oldUuid, deleted: true, data: competing })
     const afterConflict = await state.loadCustomerGoodsReceipt(oldUuid)
+    const originalWinner = (await db.payments.where('uuid').equals(oldUuid).first()).goodsReceipt.correctedByUuid === encoded.goodsReceipt.correctedByUuid
     const stripped = { ...encoded }; delete stripped.goodsReceipt
     await sync.applyRemoteRow('payments', { uuid: oldUuid, deleted: true, data: stripped })
     const afterStripped = await db.payments.where('uuid').equals(oldUuid).first()
@@ -277,10 +278,30 @@ try {
     const afterDelayed = await db.payments.where('uuid').equals(oldUuid).first()
     const afterDebt = (await db.customers.where('uuid').equals(afterStripped.goodsReceipt.snapshot.customerUuid).first()).balance
     const markers = await db.syncState.filter(row => row.key.startsWith(`goodsReceiptConflict:${oldUuid}:`)).count()
-    return { conflict: afterConflict.status, markerRetained: Boolean(afterStripped.goodsReceipt), markers, predecessorStayedCancelled: afterDelayed.deleted && afterDelayed.goodsReceipt.status === 'cancelled', debtUnchanged: beforeDebt === afterDebt }
-  }, { oldUuid: correction.oldUuid, alternate: '60000000-0000-4000-8000-000000000099' })
+    return { conflict: afterConflict.status, originalWinner, markerRetained: Boolean(afterStripped.goodsReceipt), markers, predecessorStayedCancelled: afterDelayed.deleted && afterDelayed.goodsReceipt.status === 'cancelled', debtUnchanged: beforeDebt === afterDebt }
+  }, { oldUuid: correction.oldUuid, alternate: '00000000-0000-4000-8000-000000000001' })
   assert.equal(conflict.conflict, 'conflict')
+  assert.equal(conflict.originalWinner, true, 'existing linked successor remains the selected row while sibling conflict evidence is retained')
   assert.deepEqual({ markerRetained: conflict.markerRetained, hasEvidence: conflict.markers > 0, predecessorStayedCancelled: conflict.predecessorStayedCancelled, debtUnchanged: conflict.debtUnchanged }, { markerRetained: true, hasEvidence: true, predecessorStayedCancelled: true, debtUnchanged: true })
+  const successorBlocked = await b.evaluate(async receiptUuid => {
+    const { loadCustomerGoodsReceipt } = await import('/src/lib/customerGoodsReceiptState.ts')
+    const { previewCustomerGoodsReceiptCancellation } = await import('/src/lib/customerGoodsReceiptOps.ts')
+    const state = await loadCustomerGoodsReceipt(receiptUuid)
+    const preview = await previewCustomerGoodsReceiptCancellation(receiptUuid)
+    return { status: state.status, allowed: preview.allowed, reasons: preview.writeBlockReasons.length }
+  }, correction.newUuid)
+  assert.deepEqual({ status: successorBlocked.status, allowed: successorBlocked.allowed, blocked: successorBlocked.reasons > 0 }, { status: 'conflict', allowed: false, blocked: true }, 'predecessor conflict blocks the linked active successor')
+  const successorMutationBlocked = await b.evaluate(async receiptUuid => {
+    const { db } = await import('/src/db.ts')
+    const ops = await import('/src/lib/customerGoodsReceiptOps.ts')
+    const before = (await db.payments.where('uuid').equals(receiptUuid).first()).deleted
+    const preview = await ops.previewCustomerGoodsReceiptCancellation(receiptUuid)
+    let rejected = false
+    try { await ops.cancelCustomerGoodsReceipt(receiptUuid, preview.token, 'must not cancel conflicted successor') } catch { rejected = true }
+    const after = (await db.payments.where('uuid').equals(receiptUuid).first()).deleted
+    return { rejected, unchanged: before === after }
+  }, correction.newUuid)
+  assert.deepEqual(successorMutationBlocked, { rejected: true, unchanged: true }, 'conflicted successor cannot be cancelled by direct operation')
 
   const cancelledAudit = await b.evaluate(async ({ receiptUuid, SOURCE_UUID, variantUuid }) => {
     const { db } = await import('/src/db.ts')
@@ -373,6 +394,50 @@ try {
     return { cancelled: cancelled.length, linked, acknowledged: (await db.settings.get('goodsReceiptCompatibilityAcknowledged'))?.value === true }
   }, backup.json)
   assert.deepEqual(imported, { cancelled: backup.cancelledAnchors, linked: true, acknowledged: false }, 'valid import preserves audit/links without transferring device acknowledgement')
+
+  const conflictedBackup = await d.evaluate(async receiptUuid => {
+    const { db } = await import('/src/db.ts')
+    const sync = await import('/src/lib/sync.ts')
+    const ops = await import('/src/lib/ops.ts')
+    const { loadCustomerGoodsReceipt } = await import('/src/lib/customerGoodsReceiptState.ts')
+    const anchor = await db.payments.where('uuid').equals(receiptUuid).first()
+    const encoded = await sync.encodeRefs('payments', anchor)
+    const changed = { ...encoded, goodsReceipt: { ...encoded.goodsReceipt, createdAt: encoded.goodsReceipt.createdAt + 1 } }
+    await sync.applyRemoteRow('payments', { uuid: receiptUuid, deleted: false, data: changed })
+    const before = await loadCustomerGoodsReceipt(receiptUuid)
+    const json = await ops.exportBackup()
+    return { json, status: before.status, evidenceCount: JSON.parse(json).customerGoodsReceiptConflicts?.length ?? 0 }
+  }, warehouse1.input.receiptUuid)
+  assert.deepEqual({ status: conflictedBackup.status, hasEvidence: conflictedBackup.evidenceCount > 0 }, { status: 'conflict', hasEvidence: true }, 'export includes receipt conflict evidence outside synced tables')
+
+  const e = await install(await browser.newContext({ serviceWorkers: 'block' }))
+  const restoredConflict = await e.evaluate(async ({ json, receiptUuid }) => {
+    const { db } = await import('/src/db.ts')
+    const ops = await import('/src/lib/ops.ts')
+    const { loadCustomerGoodsReceipt } = await import('/src/lib/customerGoodsReceiptState.ts')
+    await db.open()
+    await ops.importBackup(json, 'merge')
+    const state = await loadCustomerGoodsReceipt(receiptUuid)
+    const keys = await db.syncState.filter(row => row.key.startsWith(`goodsReceiptConflict:${receiptUuid}:`)).count()
+    return { status: state.status, keys, blocked: state.writeBlockReasons.length > 0 }
+  }, { json: conflictedBackup.json, receiptUuid: warehouse1.input.receiptUuid })
+  assert.deepEqual({ status: restoredConflict.status, hasEvidence: restoredConflict.keys > 0, blocked: restoredConflict.blocked }, { status: 'conflict', hasEvidence: true, blocked: true }, 'backup round-trip cannot unblock a structurally valid conflicted receipt')
+
+  const rejectedEvidence = await c.evaluate(async json => {
+    const { db, SYNC_TABLES } = await import('/src/db.ts')
+    const ops = await import('/src/lib/ops.ts')
+    const parsed = JSON.parse(json)
+    parsed.customerGoodsReceiptConflicts[0].key = 'pull:payments'
+    const snapshot = async () => JSON.stringify({
+      tables: await Promise.all(SYNC_TABLES.map(async table => [table, await db.table(table).orderBy('id').toArray()])),
+      syncState: await db.syncState.orderBy('key').toArray()
+    })
+    const before = await snapshot()
+    let rejected = false
+    try { await ops.importBackup(JSON.stringify(parsed), 'merge') } catch { rejected = true }
+    return { rejected, unchanged: before === await snapshot() }
+  }, conflictedBackup.json)
+  assert.deepEqual(rejectedEvidence, { rejected: true, unchanged: true }, 'malformed receipt conflict evidence rejects import before clearing records or sync state')
 
   const competingSuccessor = await b.evaluate(async ({ oldUuid, successorUuid }) => {
     const { db } = await import('/src/db.ts')

@@ -13,6 +13,26 @@ export interface CustomerGoodsReceiptRows {
   cashMovements: CashMovement[]
 }
 const emptyTotals: CustomerGoodsReceiptTotals = { value: 0, pairs: 0, sale: 0, cost: 0, profit: 0, cash: 0, buyerDebt: 0 }
+function receiptFamily(receiptUuid: string, payments: Payment[]): Set<string> {
+  const links = new Map<string, Set<string>>()
+  const connect = (left: string, right?: string) => {
+    if (!right) return
+    if (!links.has(left)) links.set(left, new Set())
+    if (!links.has(right)) links.set(right, new Set())
+    links.get(left)!.add(right)
+    links.get(right)!.add(left)
+  }
+  for (const payment of payments) if (payment.goodsReceipt && payment.uuid) {
+    connect(payment.uuid, payment.goodsReceipt.correctionOfUuid)
+    connect(payment.uuid, payment.goodsReceipt.correctedByUuid)
+  }
+  const family = new Set<string>([receiptUuid]), pending = [receiptUuid]
+  while (pending.length) for (const neighbor of links.get(pending.pop()!) ?? []) if (!family.has(neighbor)) {
+    family.add(neighbor)
+    pending.push(neighbor)
+  }
+  return family
+}
 /** Pure aggregate validation, shared with import/sync boundaries. Includes tombstones. */
 export function validateCustomerGoodsReceiptRows(receiptUuid: string, rows: CustomerGoodsReceiptRows): Pick<CustomerGoodsReceiptState, 'payment' | 'adjustments' | 'sale' | 'cashMovements' | 'status' | 'issues' | 'totals'> {
   const anchors = rows.payments.filter(p => p.goodsReceipt?.receiptUuid === receiptUuid)
@@ -74,12 +94,37 @@ export async function loadCustomerGoodsReceipt(receiptUuid: string): Promise<Cus
   receiptUuid = receiptUuid.toLowerCase()
   const [payments, adjustments, sales, cashMovements, customers, variants, products, purchases, returns, featureEnabled, syncConflicts] = await Promise.all([
     db.payments.toArray(), db.adjustments.toArray(), db.sales.toArray(), db.cashMovements.toArray(), db.customers.toArray(), db.variants.toArray(), db.products.toArray(), db.purchases.toArray(), db.returns.toArray(), customerGoodsReceiptFeatureEnabled(),
-    db.syncState.filter(row => row.key.startsWith(`goodsReceiptConflict:${receiptUuid}:`)).toArray()
+    db.syncState.filter(row => row.key.startsWith('goodsReceiptConflict:')).toArray()
   ])
   const base = validateCustomerGoodsReceiptRows(receiptUuid, { payments, adjustments, sales, cashMovements })
   const meta = base.payment?.goodsReceipt
   const issues = [...base.issues]
-  if (syncConflicts.length) issues.push('نسخه‌های رقیب دریافت در همگام‌سازی یافت شد؛ نوشتن مسدود است.')
+  const family = receiptFamily(receiptUuid, payments)
+  if (syncConflicts.some(row => [...family].some(uuid => row.key.startsWith(`goodsReceiptConflict:${uuid}:`)))) issues.push('نسخه‌های رقیب دریافت در زنجیرهٔ اصلاح یافت شد؛ نوشتن مسدود است.')
+  const receiptRows = { payments, adjustments, sales, cashMovements }
+  for (const uuid of family) {
+    if (uuid !== receiptUuid && !['ready', 'cancelled'].includes(validateCustomerGoodsReceiptRows(uuid, receiptRows).status)) {
+      issues.push('سند پیوندی دریافت هنوز کامل یا هماهنگ نیست.')
+      break
+    }
+    const linked = payments.find(payment => payment.uuid === uuid)?.goodsReceipt
+    if (uuid === receiptUuid && !linked && base.status === 'incomplete') continue
+    if (!linked) { issues.push('سند پیوندی دریافت هنوز نرسیده است.'); break }
+    const successors = payments.filter(payment => payment.goodsReceipt?.correctionOfUuid === uuid)
+    if (successors.length > 1 || (successors.length && linked.correctedByUuid !== successors[0].uuid) ||
+        (linked.correctedByUuid && !successors.some(payment => payment.uuid === linked.correctedByUuid)) ||
+        (linked.correctionOfUuid && !payments.some(payment => payment.uuid === linked.correctionOfUuid && payment.goodsReceipt?.correctedByUuid === uuid && payment.deleted))) {
+      issues.push('پیوند اصلاح در زنجیرهٔ دریافت کامل یا یکتا نیست.')
+      break
+    }
+    const seen = new Set<string>()
+    let ancestor: string | undefined = uuid
+    while (ancestor && !seen.has(ancestor)) {
+      seen.add(ancestor)
+      ancestor = payments.find(payment => payment.uuid === ancestor)?.goodsReceipt?.correctionOfUuid
+    }
+    if (ancestor) { issues.push('زنجیرهٔ اصلاح دریافت دور دارد.'); break }
+  }
   if (meta) {
     const requireLiveMasters = meta.status === 'active'
     const source = customers.find(c => c.id === base.payment?.partyId)

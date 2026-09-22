@@ -2,7 +2,7 @@ import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost
 import { effectsOf } from './effects'
 import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
-import { validateCustomerGoodsReceiptBackup } from './customerGoodsReceiptBackup'
+import { validateCustomerGoodsReceiptBackup, validateCustomerGoodsReceiptConflictEvidence } from './customerGoodsReceiptBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
@@ -2989,15 +2989,21 @@ const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
 const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled', 'goodsReceiptCompatibilityAcknowledged'])
 
 export async function exportBackup(): Promise<string> {
-  const data: Record<string, unknown[]> = {}
-  for (const t of TABLES) {
-    const rows = await db.table(t).toArray()
-    data[t] =
-      t === 'settings'
-        ? rows.filter((row) => !BACKUP_EXCLUDED_SETTINGS.has(String((row as { key?: unknown }).key)))
-        : rows
-  }
-  return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data })
+  return db.transaction('r', [...TABLES.map(t => db.table(t)), db.syncState], async () => {
+    const data: Record<string, unknown[]> = {}
+    for (const t of TABLES) {
+      const rows = await db.table(t).toArray()
+      data[t] =
+        t === 'settings'
+          ? rows.filter((row) => !BACKUP_EXCLUDED_SETTINGS.has(String((row as { key?: unknown }).key)))
+          : rows
+    }
+    // Document rows and their local conflict evidence must describe one snapshot.
+    const conflicts = await db.syncState.filter(row => row.key.startsWith('goodsReceiptConflict:')).toArray()
+    const receiptConflicts = validateCustomerGoodsReceiptConflictEvidence(data, conflicts)
+    return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data,
+      ...(receiptConflicts.length ? { customerGoodsReceiptConflicts: receiptConflicts } : {}) })
+  })
 }
 
 export type BackupImportMode = 'merge' | 'replace'
@@ -3007,6 +3013,7 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
   validateDirectBackup(parsed.data)
   validateCustomerGoodsReceiptBackup(parsed.data)
+  const receiptConflicts = validateCustomerGoodsReceiptConflictEvidence(parsed.data, parsed.customerGoodsReceiptConflicts)
   const restoreTimestamp = Date.now()
 
   const sync = await import('./sync')
@@ -3032,6 +3039,7 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
       if (currentCloudIdentity.length) await db.settings.bulkPut(currentCloudIdentity)
 
       await db.syncState.clear()
+      if (receiptConflicts.length) await db.syncState.bulkPut(receiptConflicts)
       if (mode === 'merge') {
         await db.syncState.put({ key: 'restorePushMode', value: 'merge' })
       } else {
