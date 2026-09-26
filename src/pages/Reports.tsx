@@ -104,7 +104,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const otherSpending = expenses?.filter((e) => e.type !== 'business').reduce((s, e) => s + e.amount, 0) ?? 0
   const netProfit = grossProfit - businessExpenses
   const collected = ordinaryCustomerCollections(payments ?? [])
-  const goodsSettled = customerGoodsReceiptSettlements(payments ?? [])
+  const goodsSettled = customerGoodsReceiptSettlements(payments ?? [], receiptReview.readyReceiptUuids)
   const returnsTotal = returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.amount, 0) ?? 0
 
   // مصارف به تفکیک کتگوری

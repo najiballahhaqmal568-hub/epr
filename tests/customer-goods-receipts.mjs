@@ -44,6 +44,7 @@ try {
     const uuid = () => crypto.randomUUID()
     const sourceId = await db.customers.add({ uuid: uuid(), name: 'source', type: 'wholesale', balance: 10000 })
     await db.settings.put({ key: 'goodsReceiptCompatibilityAcknowledged', value: true })
+    await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
     const input = { receiptUuid: uuid(), date: 1700000000000, customerId: sourceId, destination: 'warehouse', lines: [{ lineUuid: uuid(), productName: 'Boot', size: '40', color: 'Black', qty: 2, unitCost: 1000 }] }
     const created = await receipt.createCustomerGoodsReceipt(input)
     eq((await db.customers.get(sourceId)).balance, 8000, 'warehouse source debt')
@@ -85,7 +86,26 @@ try {
     eq(sold.totals.profit, 600, 'onward profit')
     const reports = await import('/src/lib/directTradeReports.ts')
     eq(reports.ordinaryCustomerCollections([sold.payment]), 0, 'goods receipt excluded from ordinary cash collections')
-    eq(reports.customerGoodsReceiptSettlements([sold.payment]), 2000, 'goods receipt shown as separate noncash settlement')
+    const incompletePayment = { ...sold.payment, id: undefined, uuid: uuid(), amount: 700, goodsReceipt: { ...sold.payment.goodsReceipt, receiptUuid: uuid() } }
+    const conflictPayment = { ...sold.payment, id: undefined, uuid: uuid(), amount: 900, goodsReceipt: { ...sold.payment.goodsReceipt, receiptUuid: uuid() } }
+    eq(reports.customerGoodsReceiptSettlements([incompletePayment], new Set()), 0, 'incomplete receipt excluded from noncash settlement')
+    eq(reports.customerGoodsReceiptSettlements([conflictPayment], new Set()), 0, 'conflicted receipt excluded from noncash settlement')
+    eq(reports.customerGoodsReceiptSettlements([sold.payment, incompletePayment, conflictPayment], new Set([sold.receiptUuid])), 2000, 'only validated ready receipt shown as noncash settlement')
+    const authState = async () => JSON.stringify({
+      source: (await db.customers.get(sourceId)).balance,
+      payments: await db.payments.count(), adjustments: await db.adjustments.count(), sales: await db.sales.count(), cash: await db.cashMovements.count(),
+      products: await db.products.count(), variants: await db.variants.count()
+    })
+    const beforeRoleLoss = await authState()
+    await db.settings.put({ key: 'cachedProfile', value: { role: 'staff' } })
+    const staffRoleError = await rejection(() => receipt.createCustomerGoodsReceipt({ ...input, receiptUuid: uuid() }), 'staff role loss blocks submit')
+    eq(staffRoleError.includes('مالک'), true, 'staff role rejection explains owner requirement')
+    eq(await authState(), beforeRoleLoss, 'staff role rejection makes no writes')
+    await db.settings.delete('cachedProfile')
+    const unknownRoleError = await rejection(() => receipt.createCustomerGoodsReceipt({ ...input, receiptUuid: uuid() }), 'unknown role loss blocks submit')
+    eq(unknownRoleError.includes('مالک'), true, 'unknown role rejection explains owner requirement')
+    eq(await authState(), beforeRoleLoss, 'unknown role rejection makes no writes')
+    await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
     const { buildCustomerLedger } = await import('/src/lib/ledger.ts')
     const sourceLedger = buildCustomerLedger([], [sold.payment], [])
     eq(sourceLedger[0].label, 'دریافت جنس بابت طلب', 'source ledger uses receipt label')

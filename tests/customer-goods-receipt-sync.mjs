@@ -167,6 +167,7 @@ try {
     const sourceId = await db.customers.add({ uuid: SOURCE_UUID, name: 'Source', type: 'wholesale', balance: 50000 })
     const buyerId = await db.customers.add({ uuid: BUYER_UUID, name: 'Buyer', type: 'wholesale', balance: 0 })
     await db.settings.put({ key: 'goodsReceiptCompatibilityAcknowledged', value: true })
+    await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
     return { sourceId, buyerId }
   }, { padding, SOURCE_UUID, BUYER_UUID })
   const idsA = await seed(a, 0), idsB = await seed(b, 3), idsC = await seed(c, 6)

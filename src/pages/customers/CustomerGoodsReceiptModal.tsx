@@ -40,6 +40,11 @@ export default function CustomerGoodsReceiptModal({ customer, onClose, onSaved, 
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const busy = useRef(false)
+  const access = useLiveQuery(async () => {
+    const profile = (await db.settings.get('cachedProfile'))?.value as { role?: string } | undefined
+    return { role: profile?.role }
+  }, [])
+  const owner = access?.role === 'owner'
   const customers = useLiveQuery(() => db.customers.filter(row => !row.deleted && row.id !== customer.id).toArray(), [customer.id])
   const inventory = useLiveQuery(async () => {
     const [products, variants] = await Promise.all([db.products.filter(row => !row.deleted).toArray(), db.variants.filter(row => !row.deleted && Boolean(row.uuid)).toArray()])
@@ -93,7 +98,7 @@ export default function CustomerGoodsReceiptModal({ customer, onClose, onSaved, 
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)) }
   }
   async function save() {
-    if (!previewed || !confirmed || busy.current || accessFlags.readOnly) return
+    if (!previewed || !confirmed || busy.current || accessFlags.readOnly || !owner) return
     busy.current = true; setSaving(true); setError('')
     try {
       const draft = input()
@@ -110,7 +115,8 @@ export default function CustomerGoodsReceiptModal({ customer, onClose, onSaved, 
   return <Modal title={correction ? 'اصلاح دریافت جنس' : 'دریافت جنس بابت طلب'} onClose={() => { if (!busy.current && confirm('فرم ثبت‌نشده بسته شود؟')) onClose() }}>
     <p className="mb-3 text-sm text-slate-600">مشتری: <strong>{customer.name}</strong> · طلب فعلی: <strong>{fmtMoney(Math.max(0, customer.balance))}</strong></p>
     {correction && <p className="mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">در اصلاح، تاریخ ({fmtDate(snapshot!.date)})، مشتری، مقصد، خریدار و صندوق قفل است. برای تغییر آنها سند را باطل و دوباره ثبت کنید.</p>}
-    <fieldset disabled={saving} className="min-w-0">
+    {access !== undefined && !owner && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">دسترسی مالک برای ثبت این دریافت لازم است.</p>}
+    <fieldset disabled={saving || !owner} className="min-w-0">
       {!correction && <><Field label="تاریخ دریافت *"><input aria-label="تاریخ دریافت" className={inputCls} type="date" value={date} onChange={event => { invalidate(); setDate(event.target.value) }} /></Field>
         <Field label="مقصد جنس *"><select aria-label="مقصد جنس" className={inputCls} value={destination} onChange={event => { invalidate(); setDestination(event.target.value as 'warehouse' | 'onward'); setLines([blankLine()]) }}><option value="warehouse">ورود به گدام</option><option value="onward">فروش مستقیم به مشتری دیگر — بدون گدام</option></select></Field></>}
       {lines.map((line, index) => <CustomerGoodsReceiptLineEditor key={line.lineUuid} line={line} index={index} destination={destination} variants={inventory ?? []} canRemove={lines.length > 1} onChange={next => { invalidate(); setLines(lines.map((row, i) => i === index ? next : row)) }} onRemove={() => { invalidate(); setLines(lines.filter((_, i) => i !== index)) }} />)}
@@ -127,7 +133,7 @@ export default function CustomerGoodsReceiptModal({ customer, onClose, onSaved, 
       {!previewed && <PrimaryBtn disabled={!summary || (correction && !reason.trim())} onClick={() => void preview()}>پیش‌نمایش و بررسی</PrimaryBtn>}
       {previewed && <><div role={previewReasons.length ? 'alert' : 'status'} className={`mb-3 rounded-xl p-3 text-sm ${previewReasons.length ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800'}`}>{previewReasons.length ? previewReasons.map((item, i) => <p key={i}>{item}</p>) : <p>پیش‌نمایش بررسی شد؛ معلومات را یک‌بار دیگر تأیید کنید.</p>}</div>
         {!previewReasons.length && <label className="mb-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> معلومات و اثر حسابی این سند را بررسی کردم</label>}
-        <PrimaryBtn disabled={!confirmed || saving || previewReasons.length > 0} onClick={() => void save()}>{saving ? 'در حال ثبت…' : correction ? 'ثبت اصلاح' : 'ثبت دریافت'}</PrimaryBtn></>}
+        <PrimaryBtn disabled={!confirmed || saving || !owner || previewReasons.length > 0} onClick={() => void save()}>{saving ? 'در حال ثبت…' : correction ? 'ثبت اصلاح' : 'ثبت دریافت'}</PrimaryBtn></>}
       {error && <p role="alert" className="mt-3 whitespace-pre-line text-sm text-red-700">{error}</p>}
     </fieldset>
     {showBuyer && <CustomerModal customer={null} defaultType="wholesale" onClose={() => setShowBuyer(false)} onCreated={created => {

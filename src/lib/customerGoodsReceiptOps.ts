@@ -11,6 +11,8 @@ const tables = () => [...SYNC_TABLES.map(t => db.table(t)), db.settings, db.sync
 const LEGACY_COST_BASIS_ERROR = 'قیمت خرید این جنس از اسناد قبلی به‌طور ثابت بازسازی نمی‌شود؛ ابتدا قیمت خرید قبلی را با سند «اصلاح قیمت خرید» ثبت کنید.'
 async function eligibility(): Promise<void> {
   if (accessFlags.readOnly) throw new Error('حساب شما فقط اجازهٔ مشاهده دارد.')
+  const profile = (await db.settings.get('cachedProfile'))?.value as { role?: string } | undefined
+  if (profile?.role !== 'owner') throw new Error('فقط مالک می‌تواند دریافت جنس بابت طلب را ثبت یا تغییر دهد.')
   if (!await customerGoodsReceiptFeatureEnabled()) throw new Error('ابتدا سازگاری نسخهٔ همهٔ دستگاه‌ها را تأیید کنید.')
 }
 async function requireDeterministicCostBasis(incoming: Adjustment): Promise<void> {

@@ -63,3 +63,34 @@ The unrelated `qa-direct-trade-form.png`, `qa-sync-status-in-app.png` and `qa-sy
 - Vite retains the pre-existing mixed static/dynamic import warnings for `db.ts`/`sync.ts` and the >500 kB chunk-size warning. TypeScript/build output is otherwise successful.
 - Compatibility acknowledgement is deliberately per-device and excluded from backup. Operators must update all active devices first, sync before mutation, and edit a receipt on one device at a time.
 - Row-wise cloud sync is not an atomic server transaction. The implemented incomplete/conflict states prevent unconfirmed onward sales from entering totals and block edits, but they do not claim a server-side version fence.
+
+## Review fix round 1 — 2026-09-26
+
+Read-only review reported three Important findings. Source tracing verified all three before edits:
+
+1. Sales history routed `goodsReceiptChild` rows to receipt detail, while only the ordinary sale detail exposed the existing receipt/invoice renderers. Receipt detail had no buyer print/share action.
+2. `customerGoodsReceiptSettlements` accepted every undeleted customer payment with active receipt metadata; it did not require the aggregate UUID to be in the validated ready set used by report sales.
+3. Owner role was checked when opening the form/detail, but dedicated transaction eligibility checked only read-only mode and compatibility acknowledgement. An already-open form could therefore submit after cached role became staff or disappeared.
+
+TDD RED evidence, all using isolated localhost/Dexie with process-local IPv4-first and D temp:
+
+- Authorization RED: `node tests/customer-goods-receipts.mjs`, exit 1: `staff role loss blocks submit: expected rejection`.
+- Report RED after test-only reorder: same command, exit 1: `incomplete receipt excluded from noncash settlement: expected 0, got 700`.
+- Print-route RED: `node tests/customer-goods-receipt-ui.mjs`, exit 1 after following the actual Sales history row: timed out waiting for `رسید خریدار`.
+
+Fixes:
+
+- Receipt detail now exposes **رسید خریدار** and **فاکتور خریدار** only when the aggregate is ready, onward, and has its linked sale. These actions reuse `ReceiptModal`/`InvoiceModal`, whose commercial-line output contains selling quantities/prices and omits acquisition cost/profit. Warehouse, cancelled, incomplete and conflicted receipts expose no buyer print action.
+- `customerGoodsReceiptSettlements(payments, readyReceiptUuids)` now requires membership in the validated ready UUID set; Reports passes the same receipt review set used for confirmed onward sales.
+- Dedicated create/correct/cancel transaction eligibility now reads `cachedProfile` from the included settings table and requires `role === 'owner'`. The open modal observes cached role, disables its fieldset/save while owner identity is loading or absent, and shows an explicit owner-access alert. Core rejection remains the race-safe boundary.
+
+Final GREEN evidence:
+
+- `node tests/customer-goods-receipts.mjs`: exit 0, `PASS 120 checks`. New checks cover incomplete/conflicted exclusion, ready inclusion, staff and unknown role rejection, owner-specific reason, and complete no-write state comparison.
+- `node tests/customer-goods-receipt-ui.mjs`: exit 0, `PASS 29 checks: compatibility, disabled reason, photo, warehouse, staff privacy, stale-preview rejection, authorization loss, correction, cancellation audit, onward, history printing, double-submit, backup replay, conflict, responsive and read-only UI`. It traverses Sales → History → receipt detail → receipt image and invoice print iframe, asserts buyer output excludes acquisition/profit labels, asserts warehouse/conflict lack print actions, and covers owner→staff plus owner→unknown while the confirmed form is open with no-write checks.
+- `node tests/customer-goods-receipt-sync.mjs`: exit 0, `PASS: receipt UUID refs, replay/effects/conflicts and backup preflight`; synthetic devices now explicitly seed owner profile under the new contract.
+- `npm run build`: exit 0; TypeScript passed, Vite transformed 209 modules and built in 5.29s, PWA generated 15 precache entries. Existing mixed-import and >500 kB warnings remain.
+- `npm test`: exit 0, `✅ همه درست — 1130 بررسی در 111 سناریو`.
+- `git diff --check`: exit 0, with only standard LF→CRLF notices.
+
+No live/cloud two-device script, Supabase/business data, publication, push or merge was used. The three unrelated QA PNGs remain untracked and untouched.

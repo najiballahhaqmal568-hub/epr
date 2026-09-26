@@ -6,6 +6,8 @@ import { fmtDate, fmtMoney, fmtNum } from '../../lib/format'
 import { cancelCustomerGoodsReceipt, loadCustomerGoodsReceipt, previewCustomerGoodsReceiptCancellation } from '../../lib/customerGoodsReceiptOps'
 import { syncNow } from '../../lib/sync'
 import CustomerGoodsReceiptModal from './CustomerGoodsReceiptModal'
+import ReceiptModal from '../sales/Receipt'
+import InvoiceModal from '../sales/InvoiceModal'
 
 export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncBeforeMutation = () => syncNow(true) }: { receiptUuid: string; onClose: () => void; syncBeforeMutation?: () => Promise<void> }) {
   const [correcting, setCorrecting] = useState(false)
@@ -14,6 +16,8 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
   const [cancelReasons, setCancelReasons] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [receiptOpen, setReceiptOpen] = useState(false)
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
   const result = useLiveQuery(async () => {
     try {
       const state = await loadCustomerGoodsReceipt(receiptUuid)
@@ -26,6 +30,7 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
   const state = result?.state
   const snapshot = state?.payment?.goodsReceipt?.snapshot
   const mutable = state?.status === 'ready' && state.featureEnabled && !accessFlags.readOnly && result?.owner === true
+  const buyerPrintReady = state?.status === 'ready' && snapshot?.destination === 'onward' && Boolean(state.sale)
 
   async function prepareCancel() {
     if (!cancelReason.trim()) { setError('دلیل ابطال را بنویسید.'); return }
@@ -59,6 +64,7 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
       {snapshot?.lines.map(line => <article key={line.lineUuid} className="border-b border-slate-100 py-2 text-sm"><p className="font-bold">{line.productName} · {line.size} · {line.color}</p><p>{fmtNum(line.qty)} جوره{!result?.staff && <> × قیمت توافقی {fmtMoney(line.unitCost)}</>}</p>{snapshot.destination === 'onward' && <p>قیمت فروش فی جوره: {fmtMoney(line.unitPrice ?? 0)}</p>}{line.photo && <img src={line.photo} alt={`عکس ${line.productName}`} className="mt-2 h-20 w-20 rounded-xl object-cover" />}</article>)}
       <section className="my-3 rounded-xl bg-teal-50 p-3 text-sm">{!result?.staff && <p>ارزش دریافت: {fmtMoney(state.totals.value)} · {fmtNum(state.totals.pairs)} جوره</p>}{snapshot?.destination === 'warehouse' ? <p>موجودی اضافه‌شده: {fmtNum(state.totals.pairs)} جوره</p> : <><p>خریدار: {result?.buyer?.name ?? state.sale?.customerName}</p><p>فروش: {fmtMoney(state.totals.sale)} · نقد: {fmtMoney(state.totals.cash)}</p><p>قرض خریدار: {fmtMoney(state.totals.buyerDebt)}</p>{!result?.staff && <p>مفاد: {fmtMoney(state.totals.profit)}</p>}</>}</section>
       <p className="mb-1 text-sm">سند منبع: دریافت غیرنقدی از حساب مشتری</p>{state.sale && <p className="mb-1 text-sm">سند پیوندی فروش: {state.sale.uuid}</p>}{state.adjustments.length > 0 && <p className="mb-1 text-sm">اسناد گدام: {state.adjustments.length}</p>}
+      {buyerPrintReady && <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"><button type="button" className="rounded-xl bg-teal-700 p-3 font-bold text-white" onClick={() => setReceiptOpen(true)}>رسید خریدار</button><button type="button" className="rounded-xl bg-slate-100 p-3 font-bold text-slate-700" onClick={() => setInvoiceOpen(true)}>فاکتور خریدار</button></div>}
       {snapshot?.note && <p className="mt-3 text-sm text-slate-600">یادداشت: {snapshot.note}</p>}
       {state.payment?.goodsReceipt?.reason && <p className="mt-2 text-sm text-slate-600">دلیل اصلاح/ابطال: {state.payment.goodsReceipt.reason}</p>}
       {state.writeBlockReasons.length > 0 && <div role="alert" className="my-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{state.writeBlockReasons.map((reason, index) => <p key={index}>{reason}</p>)}</div>}
@@ -68,5 +74,7 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
     </>}
     {error && <p role="alert" className="mt-3 whitespace-pre-line text-sm text-red-700">{error}</p>}
     {correcting && state && result?.source && <CustomerGoodsReceiptModal customer={result.source} correction={state} syncBeforeMutation={syncBeforeMutation} onClose={() => setCorrecting(false)} onSaved={uuid => { setCorrecting(false); onClose(); void uuid }} />}
+    {receiptOpen && state?.sale && <ReceiptModal sale={state.sale} onClose={() => setReceiptOpen(false)} />}
+    {invoiceOpen && state?.sale && <InvoiceModal sale={state.sale} onClose={() => setInvoiceOpen(false)} />}
   </Modal>
 }

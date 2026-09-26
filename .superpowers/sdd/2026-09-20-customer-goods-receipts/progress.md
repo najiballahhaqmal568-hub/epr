@@ -95,3 +95,13 @@ Task 3 implementation and self-review complete; status `DONE_WITH_CONCERNS`. The
 Self-review fixed five gaps before final gates: stale correction submit now uses the displayed preview token and requires renewed confirmation on change; receipt enable/detail mutation controls fail closed unless cached role is owner; staff/viewer detail hides acquisition cost/profit; zero receivable has a visible disabled reason; optional manual-line photos are available for both destinations. Valid UI RED was the missing visible zero-debt reason. Final focused UI GREEN is 20 checks including staff privacy and stale-preview no-write.
 
 Final local evidence with process-local IPv4-first and D temp: receipt core `PASS 112 checks`; receipt UI `PASS 20 checks`; receipt sync/backup PASS; sync-safety PASS with 1001-row pagination/retry/restore guard; `npm test` PASS 1130 checks / 111 scenarios; `npm run build` exit 0 with 209 modules and PWA output. `git diff --check` exit 0 apart from standard LF/CRLF notices. The first build invocation was not counted because permission review timed out; unchanged retry passed. No cloud two-device scripts, live Supabase/data, publish, push or merge. Three unrelated QA PNGs remain untracked and untouched.
+
+## Task 3 review fix round 1 — 2026-09-26
+
+Task 3: fix round 1/5 (3 Important addressed, 0 Important open). Valid REDs: staff role submission unexpectedly succeeded; incomplete receipt settlement returned 700 instead of 0; actual Sales history route lacked `رسید خریدار`. Fixes add transaction-level owner eligibility plus reactive open-form disable, ready-UUID-filtered noncash settlement reporting, and ready-onward-only buyer receipt/invoice actions through existing commercial-line renderers.
+
+Final evidence: receipt core `PASS 120 checks`; receipt UI `PASS 29 checks`; receipt sync/backup PASS; `npm run build` exit 0 with 209 modules/PWA; `npm test` PASS 1130 checks / 111 scenarios; `git diff --check` exit 0 apart from standard LF/CRLF notices. No live/cloud/publish/push/merge action; unrelated QA PNGs untouched.
+
+Task 3: minor (deferred): Invalid totals silently disable preview without a visible field-linked reason.
+
+Task 3: minor (deferred): Source ledger omits warehouse/onward destination.

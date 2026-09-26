@@ -32,13 +32,14 @@ try {
     const { default: ReactDOM } = await import('/node_modules/.vite/deps/react-dom_client.js')
     const { CustomerDetail } = await import('/src/pages/customers/CustomerDetail.tsx')
     const { default: CustomerGoodsReceiptDetail } = await import('/src/pages/customers/CustomerGoodsReceiptDetail.tsx')
+    const { default: Sales } = await import('/src/pages/Sales.tsx')
     await db.open()
     await db.settings.clear()
     await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
     const sourceId = await db.customers.add({ uuid: crypto.randomUUID(), name: 'مشتری منبع', type: 'wholesale', balance: 0 })
     const buyerId = await db.customers.add({ uuid: crypto.randomUUID(), name: 'مشتری خریدار', type: 'wholesale', balance: 0 })
     await ops.addOpeningDebt('customer', sourceId, 'مشتری منبع', 10000, 'قرض قبلی آزمایشی')
-    window.testApp = { db, ops, React, ReactDOM, CustomerDetail, CustomerGoodsReceiptDetail, sourceId, buyerId }
+    window.testApp = { db, ops, React, ReactDOM, CustomerDetail, CustomerGoodsReceiptDetail, Sales, sourceId, buyerId }
     window.root = ReactDOM.createRoot(document.getElementById('root'))
     window.renderCustomer = async id => window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(id), onClose() {} }))
     await window.renderCustomer(sourceId)
@@ -72,6 +73,7 @@ try {
   const saveWarehouse = page.getByRole('button', { name: 'ثبت دریافت' })
   await saveWarehouse.evaluate(button => { button.click(); button.click() })
   await page.getByText('فعال', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'رسید خریدار' }).count(), 0, 'warehouse receipt has no buyer print action')
   const warehouse = await page.evaluate(async () => {
     const { db, sourceId } = window.testApp
     const receipts = (await db.payments.toArray()).filter(row => row.goodsReceipt)
@@ -168,6 +170,83 @@ try {
   }))
   assert.deepEqual(onward, { source: 8000, buyer: 2100, variants: 2, sales: 1, cash: 500 }, 'onward UI posts sale/debt/cash without adding stock variants')
 
+  await page.evaluate(() => {
+    const { React, Sales } = window.testApp
+    window.root.render(React.createElement(Sales, { isStaff: false }))
+  })
+  await page.getByRole('button', { name: 'تاریخچه' }).click()
+  await page.getByRole('button', { name: /جزئیات فروش مشتری خریدار تازه/ }).click()
+  await page.getByRole('button', { name: 'رسید خریدار' }).click()
+  const receiptDialog = page.getByRole('dialog').last()
+  await receiptDialog.getByRole('button', { name: /اشتراک/ }).waitFor()
+  await receiptDialog.getByRole('img', { name: 'رسید' }).waitFor()
+  assert.equal((await receiptDialog.getByRole('img', { name: 'رسید' }).getAttribute('src'))?.startsWith('data:image/png'), true, 'history route renders buyer-safe receipt image')
+  await receiptDialog.getByText('بستن', { exact: true }).click()
+  await page.getByRole('button', { name: 'فاکتور خریدار' }).click()
+  const invoiceDialog = page.getByRole('dialog').last()
+  assert.match(await invoiceDialog.innerText(), /اسکچرز مستقیم[\s\S]*۱٬۳۰۰/)
+  assert.doesNotMatch(await invoiceDialog.innerText(), /قیمت توافقی|مفاد/)
+  await invoiceDialog.getByRole('button', { name: /چاپ/ }).click()
+  assert.equal(await page.locator('iframe').count(), 1, 'history route reaches printable buyer invoice')
+  await invoiceDialog.getByText('بستن', { exact: true }).click()
+
+  await page.evaluate(async () => {
+    const { db, ops, React, CustomerDetail } = window.testApp
+    const authSource = await db.customers.add({ uuid: crypto.randomUUID(), name: 'مشتری بررسی صلاحیت', type: 'wholesale', balance: 0 })
+    await ops.addOpeningDebt('customer', authSource, 'مشتری بررسی صلاحیت', 5000, 'قرض آزمایشی صلاحیت')
+    window.testApp.authSource = authSource
+    window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(authSource), onClose() {} }))
+  })
+  await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).click()
+  await page.getByLabel('نام جنس 1').fill('جنس صلاحیت')
+  await page.getByLabel('سایز 1').fill('40')
+  await page.getByLabel('رنگ 1').fill('سفید')
+  await page.getByLabel('تعداد 1').fill('1')
+  await page.getByLabel('قیمت توافقی 1').fill('500')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
+  const beforeStaffLoss = await page.evaluate(async () => ({
+    balance: (await window.testApp.db.customers.get(window.testApp.authSource)).balance,
+    receipts: (await window.testApp.db.payments.toArray()).filter(row => row.goodsReceipt).length
+  }))
+  await page.evaluate(() => window.testApp.db.settings.put({ key: 'cachedProfile', value: { role: 'staff' } }))
+  await page.getByText('دسترسی مالک برای ثبت این دریافت لازم است.').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'ثبت دریافت' }).isDisabled(), true, 'open form disables after owner becomes staff')
+  assert.deepEqual(await page.evaluate(async () => ({
+    balance: (await window.testApp.db.customers.get(window.testApp.authSource)).balance,
+    receipts: (await window.testApp.db.payments.toArray()).filter(row => row.goodsReceipt).length
+  })), beforeStaffLoss, 'owner-to-staff open form makes no writes')
+  page.once('dialog', dialog => void dialog.accept())
+  await page.getByRole('dialog').last().getByRole('button', { name: 'بستن' }).click()
+
+  await page.evaluate(async () => {
+    const { db, React, CustomerDetail, authSource } = window.testApp
+    await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
+    window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(authSource), onClose() {} }))
+  })
+  await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).click()
+  await page.getByLabel('نام جنس 1').fill('جنس صلاحیت دوم')
+  await page.getByLabel('سایز 1').fill('41')
+  await page.getByLabel('رنگ 1').fill('آبی')
+  await page.getByLabel('تعداد 1').fill('1')
+  await page.getByLabel('قیمت توافقی 1').fill('600')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
+  const beforeUnknownLoss = await page.evaluate(async () => ({
+    balance: (await window.testApp.db.customers.get(window.testApp.authSource)).balance,
+    receipts: (await window.testApp.db.payments.toArray()).filter(row => row.goodsReceipt).length
+  }))
+  await page.evaluate(() => window.testApp.db.settings.delete('cachedProfile'))
+  await page.getByText('دسترسی مالک برای ثبت این دریافت لازم است.').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'ثبت دریافت' }).isDisabled(), true, 'open form disables after owner becomes unknown')
+  assert.deepEqual(await page.evaluate(async () => ({
+    balance: (await window.testApp.db.customers.get(window.testApp.authSource)).balance,
+    receipts: (await window.testApp.db.payments.toArray()).filter(row => row.goodsReceipt).length
+  })), beforeUnknownLoss, 'owner-to-unknown open form makes no writes')
+  page.once('dialog', dialog => void dialog.accept())
+  await page.getByRole('dialog').last().getByRole('button', { name: 'بستن' }).click()
+  await page.evaluate(() => window.testApp.db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } }))
+
   const portable = await page.evaluate(async () => {
     const { db, ops } = window.testApp
     const active = (await db.payments.toArray()).find(row => row.goodsReceipt?.status === 'active')
@@ -195,6 +274,7 @@ try {
   })
   await page.getByText('تعارض همگام‌سازی', { exact: true }).waitFor()
   assert.match(await page.getByRole('dialog').innerText(), /قابل اصلاح یا ابطال نیست/)
+  assert.equal(await page.getByRole('button', { name: 'رسید خریدار' }).count(), 0, 'conflicted receipt has no buyer print action')
 
   await page.setViewportSize({ width: 1100, height: 900 })
   const wide = await page.getByRole('dialog').last().boundingBox()
@@ -206,7 +286,7 @@ try {
   })
   assert.equal(await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).count(), 0, 'read-only account has no receipt write action')
   assert.deepEqual(errors, [], `browser errors: ${errors.join('; ')}`)
-  console.log('PASS 20 checks: compatibility, disabled reason, photo, warehouse, staff privacy, stale-preview rejection, correction, cancellation audit, onward, double-submit, backup replay, conflict, responsive and read-only UI')
+  console.log('PASS 29 checks: compatibility, disabled reason, photo, warehouse, staff privacy, stale-preview rejection, authorization loss, correction, cancellation audit, onward, history printing, double-submit, backup replay, conflict, responsive and read-only UI')
 } finally {
   await browser?.close()
   server.kill()
