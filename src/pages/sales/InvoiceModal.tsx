@@ -1,6 +1,7 @@
 import { type Sale } from '../../db'
 import { fmtMoney, fmtNum, fmtDate } from '../../lib/format'
 import { Modal, PrimaryBtn } from '../../components/ui'
+import { commercialSaleLines } from '../../lib/commercialLines'
 
 /**
  * فاکتور فروش به شکل دفترچهٔ کاغذی عمده: شماره / جنس / جوړه / قیمت واحد / جمع،
@@ -8,7 +9,7 @@ import { Modal, PrimaryBtn } from '../../components/ui'
  */
 export function InvoiceModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
   const remainder = sale.total - sale.paid
-  const rows = sale.lines.map((l, i) => ({
+  const rows = commercialSaleLines(sale).map((l, i) => ({
     n: i + 1,
     name: `${l.productName} ${l.size} ${l.color}`.replace(/\s+/g, ' ').trim(),
     qty: l.qty,

@@ -33,6 +33,24 @@ async function requireDeterministicCostBasis(incoming: Adjustment): Promise<void
   const changedFallback = computeCosts(sales, purchases, withIncoming, returns, new Map([[variantId, Number.MAX_SAFE_INTEGER]])).get(variantId)
   if (reconstructed === undefined || changedFallback === undefined || reconstructed !== changedFallback) throw new Error(LEGACY_COST_BASIS_ERROR)
 }
+async function requireSnapshotDeterministicCostBasis(snapshot: CustomerGoodsReceiptSnapshot): Promise<void> {
+  if (snapshot.destination !== 'warehouse') return
+  for (const line of snapshot.lines) {
+    if (!line.selectedVariantUuid) continue
+    const variant = await db.variants.where('uuid').equals(line.selectedVariantUuid).first()
+    if (!variant || variant.deleted) throw new Error('جنس فعال یافت نشد.')
+    await requireDeterministicCostBasis({
+      date: snapshot.date,
+      variantId: variant.id!,
+      productName: line.productName,
+      size: line.size,
+      color: line.color,
+      qtyChange: line.qty,
+      unitCost: line.unitCost,
+      reason: 'correction'
+    })
+  }
+}
 async function normalized(input: CreateCustomerGoodsReceiptInput): Promise<CustomerGoodsReceiptSnapshot> {
   if (!input || !RECEIPT_UUID.test(input.receiptUuid)) throw new Error('شناسهٔ دریافت معتبر نیست.')
   receiptInteger(input.date, true)
@@ -189,6 +207,7 @@ async function preview(receiptUuid: string, input?: CreateCustomerGoodsReceiptIn
     try {
       const snapshot = await normalized(input)
       stableCorrection(state, snapshot)
+      if (snapshot.lines.some(line => line.selectedVariantUuid)) await requireSnapshotDeterministicCostBasis(snapshot)
       next = receiptTotals(snapshot)
       const customer = await db.customers.get(state.payment.partyId)
       if (!customer || next.value > customer.balance + state.totals.value) throw new Error('ارزش جایگزین از طلب مشتری بیشتر است.')

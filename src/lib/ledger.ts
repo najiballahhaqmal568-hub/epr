@@ -73,6 +73,11 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
         source: { table: 'sales', id: s.id! }, delta: s.total })
       continue
     }
+    if (s.goodsReceiptChild) {
+      events.push({ key: `s${s.id}`, date: s.date, label: 'فروش جنس دریافت‌شده', items: itemsLabel(commercialSaleLines(s)), page: s.bookPage?.trim() || undefined,
+        source: { table: 'sales', id: s.id! }, delta: s.total - s.paid })
+      continue
+    }
     const credit = s.total - s.paid
     if (credit === 0) continue // فروش نقدی بر قرض اثر ندارد
     events.push({
@@ -90,14 +95,16 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
   for (const p of payments) {
     // مبلغ منفی = قرض قبلی یا کسر صندوق که به حساب شخص رفته: قرض را بالا می‌برد
     const correctionNote = p.correctionReason ? `اصلاح: ${p.correctionReason}` : undefined
+    const receiptLines = p.goodsReceipt?.snapshot.lines
     events.push({
       key: `p${p.id}`,
       date: p.date,
-      label: p.directPayment?.route === 'customerToSupplier' ? 'مشتری مستقیم به فروشنده داده — بدون صندوق' : p.directPayment?.route === 'customerCash' ? 'رسید' : p.shipping ? 'کرایهٔ بار' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
+      label: p.goodsReceipt ? 'دریافت جنس بابت طلب' : p.directPayment?.route === 'customerToSupplier' ? 'مشتری مستقیم به فروشنده داده — بدون صندوق' : p.directPayment?.route === 'customerCash' ? 'رسید' : p.shipping ? 'کرایهٔ بار' : p.amount < 0 ? (p.note?.trim() || 'قرض قبلی') : 'دریافت پول',
       note: p.shipping
         ? [`کل ${fmtNum(p.shipping.total)} — سهم مشتری ${fmtNum(p.shipping.customerShare)} — دریافت نقدی ${fmtNum(p.shipping.received)}`, p.note, correctionNote].filter(Boolean).join(' · ')
         : p.amount < 0 ? undefined : [p.note, correctionNote].filter(Boolean).join(' · ') || undefined,
       page: p.bookPage?.trim() || undefined,
+      items: receiptLines ? itemsLabel(receiptLines) : undefined,
       source: { table: 'payments', id: p.id! },
       // دریافت پول قرض را کم می‌کند، قرض قبلی (مبلغ منفی) آن را زیاد
       delta: -p.amount
