@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { db } from './db'
 import { applyFontScale } from './lib/fontScale'
 import { applyDisplayMode } from './lib/displayMode'
@@ -27,6 +28,8 @@ if (restore) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 )

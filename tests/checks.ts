@@ -99,6 +99,8 @@ import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
 import { documentHistory, saleHistory } from '../src/lib/docHistory'
+import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
+import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -279,6 +281,28 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // سند معاملهٔ مستقیم مقایسهٔ دقیق دارد — مهر نمی‌خورد
       const directId = await db.sales.add({ date: 2, saleType: 'retail', lines: [], total: 0, paid: 0, directTrade: { uuid: 'x' } } as unknown as Sale)
       is('معاملهٔ مستقیم بدون مهر', (await db.sales.get(directId))!.by, undefined)
+    }
+  },
+  {
+    name: 'راهنمای روز اول و صفحهٔ خطا',
+    run: async () => {
+      const fresh = firstDaySteps({ cashMoves: 0, products: 0, productsWithPhoto: 0, parties: 0, sales: 0 })
+      is('دکان تازه: هر سه قدم باقی', fresh.map(s => s.done).join(','), 'false,false,false')
+      is('دکانی که کار می‌کند راهنما نمی‌بیند', firstDayDone(firstDaySteps({ cashMoves: 40, products: 12, productsWithPhoto: 0, parties: 0, sales: 30 })), true)
+      is('بعد از شمارش صندوق و جنس، فقط قرض‌ها', firstDaySteps({ cashMoves: 1, products: 3, productsWithPhoto: 1, parties: 0, sales: 0 }).filter(s => !s.done).map(s => s.id).join(','), 'debts')
+      // صفحه‌ای که می‌شکند صفحهٔ سفید نمی‌شود
+      const Broken = () => { throw new Error('آزمایش شکستن') }
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const root = createRoot(host)
+      const quiet = console.error
+      console.error = () => {}
+      try {
+        root.render(createElement(ErrorBoundary, null, createElement(Broken)))
+        await waitUntil(() => host.textContent?.includes('یک صفحه درست باز نشد') === true)
+        is('پیام آرام‌کننده', host.textContent?.includes('هیچ فروش، پول یا قرضی گم نشده') === true, true)
+        is('راه پیش رو', host.querySelector('button')?.textContent, 'دوباره باز کردن')
+      } finally { console.error = quiet; root.unmount(); host.remove() }
     }
   },
   {

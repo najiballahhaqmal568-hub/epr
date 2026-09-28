@@ -266,7 +266,7 @@ export default function Purchases({
       {view === 'suppliers' && (
         <>
           <button onClick={() => setShowNewSupplier('supplier')} className="primary-button mb-3">＋ تأمین‌کنندهٔ جدید</button>
-          {vendors?.length === 0 && <Empty text="تأمین‌کننده‌ای ثبت نشده." />}
+          {vendors?.length === 0 && <Empty text="تأمین‌کننده‌ای ثبت نشده." hint="تأمین‌کننده کسی است که از او جنس می‌خرید؛ با اولین خرید خودش اینجا می‌آید." />}
           {!!vendors?.length && <section className="surface customers-list" aria-label="فهرست تأمین‌کنندگان">
             {vendors.map((s) => (
               <div key={s.id} className="customer-row">

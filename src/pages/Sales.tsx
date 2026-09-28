@@ -104,7 +104,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
       {!accessFlags.readOnly && !isStaff && !(view === 'new' && checkoutStage === 'payment') && <button disabled={pending || directEnabled === undefined} className="sale-secondary-action mb-4" onClick={() => directEnabled ? setNewDirect(true) : setEnableDirect(true)}>فروش مستقیم</button>}
       {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {view === 'stats' && <SalesStats isStaff={isStaff} />}
-      {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." />}
+      {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." hint="اگر مشتری رفت پول بیاورد، سبدش را با «معطل» نگه دارید و مشتری بعدی را راه بیندازید." />}
       {view === 'held' && drafts.length > 0 && (
         <section className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
           <div className="mb-2 flex items-center justify-between">

@@ -172,7 +172,7 @@ export default function Customers({ onBack }: { onBack?: () => void }) {
         <button onClick={() => setShowNew(true)} className="primary-button mt-3">＋ مشتری جدید</button>
       </section>
 
-      {filtered.length === 0 && <Empty text="مشتری‌ای در این دفتر ثبت نشده." />}
+      {filtered.length === 0 && <Empty text={search.trim() ? 'مشتری‌ای با این جستجو پیدا نشد.' : 'مشتری‌ای در این دفتر ثبت نشده.'} hint={search.trim() ? 'نام را کوتاه‌تر بنویسید یا با شمارهٔ تلفن جستجو کنید.' : 'مشتری قرضی را اینجا بسازید تا قرضش با صفحهٔ دفتر نگه داشته شود.'} action={search.trim() ? undefined : { label: '＋ مشتری جدید', onClick: () => setShowNew(true) }} />}
       {sortedRows.length > 0 && <section ref={listRef} className="surface customers-list" aria-label="فهرست مشتریان">
         {sortedRows.map((r) =>
           r.kind === 'single' ? (

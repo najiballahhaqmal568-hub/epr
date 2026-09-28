@@ -124,8 +124,16 @@ export function Skeleton({ rows = 3, label = 'در حال خواندن…' }: { 
   )
 }
 
-export function Empty({ text }: { text: string }) {
-  return <p className="empty-state">{text}</p>
+/** An empty screen that says what to do next, not just that nothing is here. */
+export function Empty({ text, hint, action }: { text: string; hint?: string; action?: { label: string; onClick: () => void } }) {
+  if (!hint && !action) return <p className="empty-state">{text}</p>
+  return (
+    <div className="empty-state">
+      <p className="font-bold text-slate-700">{text}</p>
+      {hint && <p className="mt-1 text-sm">{hint}</p>}
+      {action && !accessFlags.readOnly && <button className="primary-button primary-button-inline mt-4" onClick={action.onClick}>{action.label}</button>}
+    </div>
+  )
 }
 
 export function Card({ children, onClick }: { children: ReactNode; onClick?: () => void }) {

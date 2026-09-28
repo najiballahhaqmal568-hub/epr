@@ -169,7 +169,7 @@ export function ExpenseList({
           </button>
         )}
       </div>
-      {filtered.length === 0 && <Empty text="مصرفی ثبت نشده." />}
+      {filtered.length === 0 && <Empty text="مصرفی ثبت نشده." hint="نان، کرایه، برق — هر پولی که برای دکان خرج شد اینجا بنویسید تا مفاد درست حساب شود." />}
       {visibleRows.map((e) => (
         <div key={e.id} className="mb-2 rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between">

@@ -44,7 +44,7 @@ try {
   await page.waitForTimeout(2600)
   const scale = await page.locator('.undo-progress').evaluate(el => new DOMMatrix(getComputedStyle(el).transform).a)
   assert.ok(scale > 0.55 && scale < 0.85, `about 7 of 10 seconds left, got ${scale}`)
-  await page.getByRole('button', { name: 'بستن' }).first().click()
+  await page.locator('.undo-toast').getByRole('button', { name: 'بستن', exact: true }).click()
 
   // 3) Sheet: a short slow pull springs back, a long pull closes it.
   await card.click()

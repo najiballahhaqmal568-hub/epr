@@ -12,7 +12,7 @@ export function RollingNumber({ value, format = fmtMoney }: { value: number; for
   const last = useRef<{ value: number; text: string } | null>(null)
   const wrap = useRef<HTMLSpanElement>(null)
   const before = last.current
-  const dir = before && before.value !== value ? (value > before.value ? 'up' : 'down') : null
+  const dir = before && before.value !== value && !reducedMotion() ? (value > before.value ? 'up' : 'down') : null
   // Compare from the end: the units digit is always the last digit, whatever the length.
   const chars = [...text]
   const old = before ? [...before.text] : chars

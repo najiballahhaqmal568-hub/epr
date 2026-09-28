@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer, type Supplier } from '../db'
 import { fmtMoney } from '../lib/format'
-import { inputCls } from '../components/ui'
+import { Empty, inputCls } from '../components/ui'
 import { CustomerDetail } from './customers/CustomerDetail'
 import { SupplierDetailModal } from './purchases/SupplierDetailModal'
 import { LenderDetailModal } from './purchases/LendersView'
@@ -38,7 +38,8 @@ export default function Accounts({ openCustomers, openPurchases, openExpenses }:
     </dl>
     <section className="surface" aria-label="فهرست حساب‌ها">
       {!accounts && <p className="p-6 text-center text-slate-500">در حال خواندن حساب‌ها…</p>}
-      {visible?.length === 0 && <p className="p-6 text-center text-slate-500">حسابی پیدا نشد.</p>}
+      {visible?.length === 0 && (accounts?.length ?? 0) > 0 && <p className="p-6 text-center text-slate-500">حسابی پیدا نشد.</p>}
+      {accounts?.length === 0 && <Empty text="هنوز هیچ حسابی نیست." hint="قرض قبلی مشتریان را از «مشتریان» بنویسید؛ قرض ما به دیگران را از «تأمین‌کنندگان»." action={{ label: 'مشتریان', onClick: openCustomers }} />}
       {visible?.map(a => <button className="account-row" key={a.key} onClick={() => setSelected(a.key)}>
         <span className="min-w-0 flex-1"><strong className="break-words">{a.person.name}</strong><small>{labels[a.kind]}{a.person.phone ? ' · ' + a.person.phone : ''}</small></span>
         <span className="shrink-0 text-sm"><strong>{fmtMoney(a.receivable || a.payable)}</strong><small>{a.receivable > 0 ? 'طلب ما' : a.payable > 0 ? 'قرض ما' : 'تصفیه'}</small></span>

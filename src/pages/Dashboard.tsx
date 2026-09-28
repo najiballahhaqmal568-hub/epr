@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, saleCashPaid, type Sale, type Variant } from '../db'
+import { accessFlags, db, saleCashPaid, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
 import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
 import { daysLeftInMonth, expenseAlert, profitSummary } from '../lib/profit'
@@ -17,6 +17,7 @@ import { celebrate } from '../lib/motion'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import ExplainModal, { type ExplainKind } from './dashboard/ExplainModal'
 import TodaySalesModal from './dashboard/TodaySalesModal'
+import FirstDayGuide from './dashboard/FirstDayGuide'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -160,6 +161,7 @@ export default function Dashboard({
         <div><h1>خانه</h1><p>خلاصهٔ امروز دکان</p></div>
         <SyncChip />
       </div>
+      {!isStaff && !accessFlags.readOnly && <FirstDayGuide goTo={goTo} />}
       <DirectTradeWarning review={directReview} />
       <CustomerGoodsReceiptWarning review={receiptReview} />
 
