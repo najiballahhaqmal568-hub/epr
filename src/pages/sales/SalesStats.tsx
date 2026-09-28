@@ -14,10 +14,12 @@ import {
 import SoldListCard from '../../components/SoldListCard'
 import DirectTradeWarning, { useDirectTradeReview } from '../../components/DirectTradeWarning'
 import { commercialSaleLines } from '../../lib/commercialLines'
+import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../../components/CustomerGoodsReceiptWarning'
 
 /** آمار فروش: مجموع دوره + پرفروش‌ترین اجناس + بهترین مشتریان */
 export function SalesStats({ isStaff }: { isStaff?: boolean }) {
   const directReview = useDirectTradeReview()
+  const receiptReview = useCustomerGoodsReceiptReview()
   const [period, setPeriod] = useState<StatsPeriod>('today')
 
   const { from, to } = periodBounds(period)
@@ -36,7 +38,7 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
     [from, to]
   )
 
-  const confirmedSales = sales?.filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))
+  const confirmedSales = sales?.filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))
   const total = confirmedSales?.reduce((s, x) => s + x.total, 0) ?? 0
   const cash = confirmedSales?.filter(s => !s.directTrade).reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
   const directTotal = confirmedSales?.filter(s => Boolean(s.directTrade)).reduce((s, x) => s + x.total, 0) ?? 0
@@ -63,6 +65,7 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
   return (
     <>
       <DirectTradeWarning review={directReview} />
+      <CustomerGoodsReceiptWarning review={receiptReview} />
       <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
         {STATS_PERIODS.map((p) => (
           <button
@@ -119,7 +122,7 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
       {/* نمودارها — ارقام مفاد فقط برای مالک */}
       {!isStaff && (
         <>
-          <PeriodCompareCard label="دورهٔ گذشته" now={confirmedSales ?? []} before={(prev ?? []).filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))} returnsNow={returns ?? []} />
+          <PeriodCompareCard label="دورهٔ گذشته" now={confirmedSales ?? []} before={(prev ?? []).filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))} returnsNow={returns ?? []} />
           <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
           <ModelsCard sales={confirmedSales ?? []} />
           <CustomersCard sales={confirmedSales ?? []} />

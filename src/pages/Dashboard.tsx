@@ -7,6 +7,7 @@ import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
+import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -52,6 +53,7 @@ export default function Dashboard({
 }) {
   const dayStart = startOfDay()
   const directReview = useDirectTradeReview()
+  const receiptReview = useCustomerGoodsReceiptReview()
   const sales = useLiveQuery(
     () => db.sales.where('date').aboveOrEqual(dayStart).filter((row) => !row.deleted).toArray(),
     [dayStart]
@@ -81,7 +83,7 @@ export default function Dashboard({
     0
   )
 
-  const todaySales = (sales ?? []).filter(sale => !sale.directTrade || directReview.readyTradeUuids.has(sale.directTrade.uuid))
+  const todaySales = (sales ?? []).filter(sale => (!sale.directTrade || directReview.readyTradeUuids.has(sale.directTrade.uuid)) && (!sale.goodsReceiptChild || receiptReview.readyReceiptUuids.has(sale.goodsReceiptChild.receiptUuid)))
   const todayTotal = todaySales.reduce((sum, row) => sum + row.total, 0)
   const todayCash = todaySales.filter(row => !row.directTrade).reduce((sum, row) => sum + saleCashPaid(row), 0)
   const todayDirectReceipts = payments?.filter(row => row.directPayment?.route === 'customerCash').reduce((sum, row) => sum + row.amount, 0) ?? 0
@@ -99,6 +101,7 @@ export default function Dashboard({
         <SyncChip />
       </div>
       <DirectTradeWarning review={directReview} />
+      <CustomerGoodsReceiptWarning review={receiptReview} />
 
       {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
         <div className="mb-3 rounded-2xl border-2 border-dashed border-teal-300 bg-teal-50 p-4 text-sm text-slate-700">

@@ -4,6 +4,8 @@ import { applyRebuiltCosts } from './costing'
 import { effectsOf, type DocTable } from './effects'
 import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Purchase } from '../db'
 import { getSupa, getProfile } from './supa'
+import { receiptReplayDecision } from './customerGoodsReceiptSync'
+import { RECEIPT_UUID } from './customerGoodsReceiptTypes'
 
 /** نام جدول‌ها در سرور (snake_case) */
 const REMOTE: Record<SyncTable, string> = {
@@ -163,11 +165,41 @@ export async function encodeRefs(table: SyncTable, rec: Record<string, unknown>)
       if (typeof out.partyUuid !== 'string') throw new RecoverableSyncReferenceError('حساب طرف معامله هنوز همگام نشده است؛ دوباره همگام کنید.')
       delete out.partyId
     }
+    const receipt = out.goodsReceipt as { status?: unknown; snapshot?: { customerUuid?: unknown } } | undefined
+    if (receipt) {
+      const partyId = out.partyId
+      const customer = typeof partyId === 'number' ? await db.customers.get(partyId) : undefined
+      const allowDeletedAudit = receipt.status === 'cancelled'
+      if (!customer || (!allowDeletedAudit && customer.deleted) || !customer.uuid || !RECEIPT_UUID.test(customer.uuid) || out.partyUuid !== customer.uuid || receipt.snapshot?.customerUuid !== customer.uuid) {
+        throw new RecoverableSyncReferenceError('حساب مشتری دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+      }
+      delete out.partyId
+    }
   }
   if (table === 'sales' && out.directTrade) {
     if (typeof out.customerUuid !== 'string') throw new RecoverableSyncReferenceError('حساب مشتری هنوز همگام نشده است؛ دوباره همگام کنید.')
     delete out.customerId
   }
+  if (table === 'sales' && out.goodsReceiptChild) {
+    const child = out.goodsReceiptChild as { status?: unknown }
+    const customerId = out.customerId
+    const customer = typeof customerId === 'number' ? await db.customers.get(customerId) : undefined
+    if (!customer || (child.status !== 'cancelled' && customer.deleted) || !customer.uuid || !RECEIPT_UUID.test(customer.uuid) || out.customerUuid !== customer.uuid) {
+      throw new RecoverableSyncReferenceError('حساب خریدار دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+    }
+    delete out.customerId
+  }
+  if (table === 'adjustments' && out.goodsReceiptChild) {
+    const child = out.goodsReceiptChild as { status?: unknown }
+    const variantId = out.variantId
+    const variant = typeof variantId === 'number' ? await db.variants.get(variantId) : undefined
+    const product = variant ? await db.products.get(variant.productId) : undefined
+    if (!variant || !product || (child.status !== 'cancelled' && (variant.deleted || product.deleted)) || !variant.uuid || !RECEIPT_UUID.test(variant.uuid) || !product.uuid || !RECEIPT_UUID.test(product.uuid) || out.variantUuid !== variant.uuid) {
+      throw new RecoverableSyncReferenceError('جنس دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+    }
+    delete out.variantId
+  }
+  if (table === 'cashMovements' && out.goodsReceiptChild) delete out.refId
   if (table === 'purchases' && out.directTrade) {
     if (typeof out.supplierUuid !== 'string') throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')
     delete out.supplierId
@@ -237,6 +269,15 @@ export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>)
         out.sarrafId = await required(out.sarrafUuid, 'suppliers', 'حساب صراف هنوز همگام نشده است؛ دوباره همگام کنید.')
       }
     }
+    const receipt = out.goodsReceipt as { status?: unknown; snapshot?: { customerUuid?: unknown } } | undefined
+    if (receipt) {
+      if (typeof out.partyUuid !== 'string' || !RECEIPT_UUID.test(out.partyUuid) || receipt.snapshot?.customerUuid !== out.partyUuid) throw new RecoverableSyncReferenceError('حساب مشتری دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+      const customer = await db.customers.where('uuid').equals(out.partyUuid).first()
+      if (!customer || (receipt.status !== 'cancelled' && customer.deleted)) {
+        throw new RecoverableSyncReferenceError('حساب مشتری دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+      }
+      out.partyId = customer.id
+    }
   }
   if (table === 'sales' && out.directTrade) {
     if (typeof out.customerUuid !== 'string') throw new RecoverableSyncReferenceError('حساب مشتری هنوز همگام نشده است؛ دوباره همگام کنید.')
@@ -244,6 +285,24 @@ export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>)
     if (!customer || customer.deleted) throw new RecoverableSyncReferenceError('حساب مشتری هنوز همگام نشده است؛ دوباره همگام کنید.')
     out.customerId = customer.id
   }
+  if (table === 'sales' && out.goodsReceiptChild) {
+    const child = out.goodsReceiptChild as { status?: unknown }
+    if (typeof out.customerUuid !== 'string' || !RECEIPT_UUID.test(out.customerUuid)) throw new RecoverableSyncReferenceError('حساب خریدار دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+    const customer = await db.customers.where('uuid').equals(out.customerUuid).first()
+    if (!customer || (child.status !== 'cancelled' && customer.deleted)) throw new RecoverableSyncReferenceError('حساب خریدار دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+    out.customerId = customer.id
+  }
+  if (table === 'adjustments' && out.goodsReceiptChild) {
+    const child = out.goodsReceiptChild as { status?: unknown }
+    if (typeof out.variantUuid !== 'string' || !RECEIPT_UUID.test(out.variantUuid)) throw new RecoverableSyncReferenceError('جنس دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+    const variant = await db.variants.where('uuid').equals(out.variantUuid).first()
+    const product = variant ? await db.products.get(variant.productId) : undefined
+    if (!variant || !product || !product.uuid || !RECEIPT_UUID.test(product.uuid) || (child.status !== 'cancelled' && (variant.deleted || product.deleted))) {
+      throw new RecoverableSyncReferenceError('جنس دریافت هنوز همگام نشده است؛ دوباره همگام کنید.')
+    }
+    out.variantId = variant.id
+  }
+  if (table === 'cashMovements' && out.goodsReceiptChild) delete out.refId
   if (table === 'purchases' && out.directTrade) {
     if (typeof out.supplierUuid !== 'string') throw new RecoverableSyncReferenceError('حساب فروشنده هنوز همگام نشده است؛ دوباره همگام کنید.')
     const supplier = await db.suppliers.where('uuid').equals(out.supplierUuid).first()
@@ -277,6 +336,20 @@ export async function applyDocEffects(table: SyncTable, rec: Record<string, unkn
     const row = await db.table(e.table).get(e.id!)
     if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) + e.delta * sign })
   }
+}
+
+async function rebuildReceiptAdjustmentCosts(receiptUuid: string): Promise<void> {
+  const anchor = await db.payments.where('uuid').equals(receiptUuid).first()
+  const meta = anchor?.goodsReceipt
+  if (meta?.status === 'cancelled') {
+    for (const member of meta.members.filter(member => member.table === 'adjustments')) {
+      const adjustment = await db.adjustments.where('uuid').equals(member.uuid).first()
+      if (adjustment && typeof member.priorUnitCost === 'number') {
+        await db.variants.update(adjustment.variantId, { purchasePrice: member.priorUnitCost })
+      }
+    }
+  }
+  await applyRebuiltCosts()
 }
 
 async function pushTable(
@@ -376,6 +449,14 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
         // while the retained marker keeps the trade blocked for human review.
         if ((oldMeta.revision ?? '') > (newMeta.revision ?? '')) return
       }
+      const receiptDecision = receiptReplayDecision(table, existing as Record<string, unknown> | undefined, rec)
+      if (receiptDecision.conflict) {
+        await db.syncState.put({
+          key: `goodsReceiptConflict:${receiptDecision.conflict.receiptUuid}:${table}:${row.uuid}`,
+          value: receiptDecision.conflict.evidence
+        })
+      }
+      if (receiptDecision.keepExisting) return
       if (MASTERS.includes(table)) {
         if (existing) {
           // فیلدهای مشتقی (موجودی/قرض) محلی را نگه می‌داریم — اسناد آن‌ها را اصلاح می‌کنند
@@ -395,6 +476,12 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
           const wasDeleted = Boolean(rec.deleted)
           await db.table(table).add(rec)
           if (!wasDeleted) await applyDocEffects(table, rec, false)
+          if (table === 'adjustments' && rec.goodsReceiptChild) {
+            await rebuildReceiptAdjustmentCosts((rec.goodsReceiptChild as { receiptUuid: string }).receiptUuid)
+          }
+          if (table === 'payments' && rec.goodsReceipt) {
+            await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
+          }
         } else if (table === 'purchases') {
           const inc = rec as unknown as Purchase
           const merged = { ...(existing as Purchase), ...inc, id: existing.id, uuid: existing.uuid }
@@ -422,6 +509,14 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
           if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
           await db.table(table).update(existing.id, merged)
           if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          if (rec.goodsReceipt) await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
+        } else if (table === 'adjustments' && (existing.goodsReceiptChild || rec.goodsReceiptChild)) {
+          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
+          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
+          await db.table(table).update(existing.id, merged)
+          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          const child = (rec.goodsReceiptChild ?? existing.goodsReceiptChild) as { receiptUuid: string }
+          await rebuildReceiptAdjustmentCosts(child.receiptUuid)
         } else if (table === 'expenses' && (existing.shippingPaymentUuid || rec.shippingPaymentUuid)) {
           // Concurrent freight corrections share deterministic child UUIDs. The
           // winning shop share must replace the old value, including a zero share.

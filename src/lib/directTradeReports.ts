@@ -29,7 +29,11 @@ export interface DirectPeriodSummary {
 
 /** Ordinary debt receipts only; direct routes are reported separately and D never enters cash. */
 export function ordinaryCustomerCollections(payments: Payment[]): number {
-  return payments.filter(payment => payment.partyType === 'customer' && !payment.directPayment).reduce((sum, payment) => sum + payment.amount, 0)
+  return payments.filter(payment => payment.partyType === 'customer' && !payment.directPayment && !payment.goodsReceipt).reduce((sum, payment) => sum + payment.amount, 0)
+}
+
+export function customerGoodsReceiptSettlements(payments: Payment[], readyReceiptUuids: ReadonlySet<string>): number {
+  return payments.filter(payment => !payment.deleted && payment.partyType === 'customer' && payment.goodsReceipt?.status === 'active' && readyReceiptUuids.has(payment.goodsReceipt.receiptUuid)).reduce((sum, payment) => sum + payment.amount, 0)
 }
 
 export function directPeriodSummary(states: DirectTradeState[], from: number, to: number): DirectPeriodSummary {

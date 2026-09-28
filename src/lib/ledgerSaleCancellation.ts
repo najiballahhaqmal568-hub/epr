@@ -1,11 +1,13 @@
 import { accessFlags, db, saleCreditAmount } from '../db'
 import { deleteSale, deleteSaleImpact } from './ops'
+import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 
 // This shortcut must not cascade into other documents. Complex sales stay in
 // their existing management flow; the transaction rechecks after the preview.
 export async function ledgerSaleCancellationPreview(saleId: number, customerId: number) {
   const sale = await db.sales.get(saleId)
   if (!sale || sale.deleted || sale.customerId !== customerId) throw new Error('این فروش دیگر در حساب این مشتری موجود نیست.')
+  if (sale.goodsReceiptChild || sale.goodsReceiptLines) throw new Error(GOODS_RECEIPT_ERROR)
   if (sale.directTrade) throw new Error('این سند فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.')
   if (sale.groupUuid || sale.lenderAction || sale.expenseCreditorId || sale.cashPaid !== undefined) throw new Error('این فروش به تسویه یا تبادله مربوط است؛ از جزئیات فروش بررسی کنید.')
   const impact = await deleteSaleImpact(saleId)

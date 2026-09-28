@@ -9,10 +9,16 @@ import CustomerModal from './CustomerModal'
 import CorrectCustomerPaymentModal from './CorrectCustomerPaymentModal'
 import CancelLedgerSaleModal from './CancelLedgerSaleModal'
 import DirectTradeDetail from '../sales/direct/DirectTradeDetail'
+import CustomerGoodsReceiptEnable from './CustomerGoodsReceiptEnable'
+import CustomerGoodsReceiptModal from './CustomerGoodsReceiptModal'
+import CustomerGoodsReceiptDetail from './CustomerGoodsReceiptDetail'
 
 export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [showPay, setShowPay] = useState(false)
   const [directUuid, setDirectUuid] = useState<string | null>(null)
+  const [receiptUuid, setReceiptUuid] = useState<string | null>(null)
+  const [receiptEntry, setReceiptEntry] = useState(false)
+  const [receiptEnable, setReceiptEnable] = useState(false)
   const [cancelSaleId, setCancelSaleId] = useState<number | null>(null)
   const [showEdit, setShowEdit] = useState(false)
   const [showDebt, setShowDebt] = useState(false)
@@ -32,11 +38,14 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   const [cancelReason, setCancelReason] = useState('')
 
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
+  const role = useLiveQuery(async () => ((await db.settings.get('cachedProfile'))?.value as { role?: string } | undefined)?.role, [])
+  const receiptEnabled = useLiveQuery(async () => (await db.settings.get('goodsReceiptCompatibilityAcknowledged'))?.value === true, [])
   const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
   const payments = useLiveQuery(
     () => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).filter((p) => !p.deleted).reverse().sortBy('date'),
     [customer.id]
   )
+  const receiptAudit = useLiveQuery(() => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).filter(p => Boolean(p.goodsReceipt)).toArray(), [customer.id])
   const returns = useLiveQuery(
     () => db.returns.filter((r) => !r.deleted && r.kind === 'customer' && r.partyId === customer.id).toArray(),
     [customer.id]
@@ -90,7 +99,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         </details>
       )}
 
-      <div className="mb-4 grid grid-cols-3 gap-2">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <button className="rounded-xl bg-teal-50 px-2 py-3 font-bold text-teal-800" onClick={() => setShowPay(true)}>
           <span className="text-xs">دریافت پول</span>
         </button>
@@ -100,7 +109,9 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         <button className="rounded-xl bg-slate-100 px-2 py-3 font-bold text-slate-700" onClick={() => setShowEdit(true)}>
           <span className="text-xs">ویرایش حساب</span>
         </button>
+        {!accessFlags.readOnly && role === 'owner' && <button className="rounded-xl bg-teal-50 px-2 py-3 text-xs font-bold text-teal-800" disabled={c.balance <= 0} aria-describedby={c.balance <= 0 ? 'goods-receipt-disabled-reason' : undefined} onClick={() => receiptEnabled ? setReceiptEntry(true) : setReceiptEnable(true)}>دریافت جنس بابت طلب</button>}
       </div>
+      {!accessFlags.readOnly && role === 'owner' && c.balance <= 0 && <p id="goods-receipt-disabled-reason" className="mb-3 text-xs text-slate-500">برای دریافت جنس، طلب فعلی مشتری باید مثبت باشد.</p>}
 
       {showDebt && (
         <div className="mb-4 rounded-xl border border-amber-200 p-3">
@@ -198,7 +209,8 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
               </p>
               <p className="text-xs text-slate-500">مانده: {fmtMoney(r.balance)}</p>
               {r.source?.table === 'sales' && sales?.find(s => s.id === r.source?.id)?.directTrade && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(sales.find(s => s.id === r.source?.id)!.directTrade!.uuid)}>جزئیات فروش مستقیم</button>}
-              {r.source?.table === 'sales' && !sales?.find(s => s.id === r.source?.id)?.directTrade && !accessFlags.readOnly && <button
+              {r.source?.table === 'sales' && sales?.find(s => s.id === r.source?.id)?.goodsReceiptChild && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setReceiptUuid(sales.find(s => s.id === r.source?.id)!.goodsReceiptChild!.receiptUuid)}>جزئیات فروش دریافت جنس</button>}
+              {r.source?.table === 'sales' && !sales?.find(s => s.id === r.source?.id)?.directTrade && !sales?.find(s => s.id === r.source?.id)?.goodsReceiptChild && !accessFlags.readOnly && <button
                 className="mt-2 rounded-lg bg-red-50 px-2 py-2 text-xs font-bold text-red-700"
                 onClick={() => setCancelSaleId(r.source!.id)}
               >ابطال همین فروش</button>}
@@ -207,6 +219,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
                 (() => {
                   const p = (payments ?? []).find((x) => x.id === r.source!.id)
                   if (p?.directPayment) return <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(p.directPayment!.tradeUuid)}>جزئیات فروش مستقیم</button>
+                  if (p?.goodsReceipt) return <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setReceiptUuid(p.goodsReceipt!.receiptUuid)}>جزئیات دریافت جنس</button>
                   if (p?.shipping) return <p className="mt-1 text-xs text-slate-500">مدیریت کرایه از جزئیات فروش</p>
                   const correctable = !!p && p.amount > 0 && !p.groupUuid && !p.lenderAction && !accessFlags.readOnly
                   return (
@@ -251,6 +264,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
         </div>
       ))}
       {ledger.length === 0 && <p className="text-sm text-slate-400">هنوز سندی نیست.</p>}
+      {receiptAudit?.some(p => p.deleted) && <details className="mb-3 rounded-xl border border-slate-200 p-3 text-sm"><summary className="cursor-pointer font-bold">رد حساب دریافت‌های اصلاح یا باطل‌شده</summary>{receiptAudit.filter(p => p.deleted).map(p => <button key={p.uuid} className="mt-2 block text-right font-bold text-teal-700" onClick={() => setReceiptUuid(p.goodsReceipt!.receiptUuid)}>{fmtDate(p.date)} · {fmtMoney(p.amount)} · جزئیات سند باطل‌شده</button>)}</details>}
 
       {toDelete && (
         <Modal title="پاک کردن سند اشتباهی" onClose={() => setToDelete(null)}>
@@ -292,6 +306,9 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
 
       {toCorrect && <CorrectCustomerPaymentModal payment={toCorrect} onClose={() => setToCorrect(null)} />}
       {directUuid && <DirectTradeDetail tradeUuid={directUuid} onClose={() => setDirectUuid(null)} />}
+      {receiptEnable && <CustomerGoodsReceiptEnable onClose={() => setReceiptEnable(false)} onEnabled={() => { setReceiptEnable(false); setReceiptEntry(true) }} />}
+      {receiptEntry && <CustomerGoodsReceiptModal customer={c} onClose={() => setReceiptEntry(false)} onSaved={uuid => { setReceiptEntry(false); setReceiptUuid(uuid) }} />}
+      {receiptUuid && <CustomerGoodsReceiptDetail receiptUuid={receiptUuid} onClose={() => setReceiptUuid(null)} />}
       {cancelSaleId !== null && <CancelLedgerSaleModal saleId={cancelSaleId} customerId={c.id!} onClose={() => setCancelSaleId(null)} />}
 
       {toCancel && (

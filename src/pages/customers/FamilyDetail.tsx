@@ -3,6 +3,7 @@ import { itemsLabel } from '../../lib/ledger'
 import { db, type Customer } from '../../db'
 import { fmtMoney, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
+import { commercialSaleLines } from '../../lib/commercialLines'
 
 /** دفتر خانواده: قرض مجموعی + تاریخچهٔ همهٔ اعضا با جزئیات کامل */
 export function FamilyDetail({
@@ -35,7 +36,7 @@ export function FamilyDetail({
     events.push({
       date: s.date,
       who: nameOf.get(s.customerId!) ?? '',
-      label: itemsLabel(s.lines),
+      label: itemsLabel(commercialSaleLines(s)),
       sub: `مجموع ${fmtMoney(s.total)} · نقد ${fmtMoney(s.paid)}`,
       amount: rem,
       red: rem > 0
@@ -45,7 +46,7 @@ export function FamilyDetail({
     if (p.amount < 0) {
       events.push({ date: p.date, who: nameOf.get(p.partyId) ?? '', label: p.note ?? 'قرض قبلی', amount: -p.amount, red: true })
     } else {
-      events.push({ date: p.date, who: nameOf.get(p.partyId) ?? '', label: 'دریافت پول', amount: p.amount, red: false })
+      events.push({ date: p.date, who: nameOf.get(p.partyId) ?? '', label: p.goodsReceipt ? `دریافت جنس بابت طلب — ${itemsLabel(p.goodsReceipt.snapshot.lines)}` : 'دریافت پول', amount: p.amount, red: false })
     }
   })
   events.sort((a, b) => b.date - a.date)

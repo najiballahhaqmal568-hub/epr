@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { type Sale } from '../../db'
 import { fmtNum, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
+import { commercialSaleLines } from '../../lib/commercialLines'
 
 /** رسید تصویری فروش — برای ارسال در واتساپ/تلگرام */
 export function ReceiptModal({ sale, onClose, onNext }: { sale: Sale; onClose: () => void; onNext?: () => void }) {
@@ -62,12 +63,13 @@ export function ReceiptModal({ sale, onClose, onNext }: { sale: Sale; onClose: (
 }
 
 function drawReceipt(sale: Sale): string {
+  const lines = commercialSaleLines(sale)
   const W = 640
   const remainder = sale.total - sale.paid
   const discount = sale.discount ?? 0
   const subtotal = sale.total + discount
   const extraRows = (discount > 0 ? 1 : 0) + (remainder > 0 ? 1 : 0)
-  const H = 330 + sale.lines.length * 44 + extraRows * 40 + 120
+  const H = 330 + lines.length * 44 + extraRows * 40 + 120
   const c = document.createElement('canvas')
   c.width = W
   c.height = H
@@ -101,7 +103,7 @@ function drawReceipt(sale: Sale): string {
   x.beginPath(); x.moveTo(30, y); x.lineTo(W - 30, y); x.stroke()
   y += 36
 
-  for (const l of sale.lines) {
+  for (const l of lines) {
     x.fillStyle = '#0f172a'
     x.textAlign = 'right'
     x.font = '24px Vazirmatn, sans-serif'

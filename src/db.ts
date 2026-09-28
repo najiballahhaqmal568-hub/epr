@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
+import type { CustomerGoodsReceiptMeta, CustomerGoodsReceiptChild, CustomerGoodsReceiptSaleLine } from './lib/customerGoodsReceiptTypes'
 import type { DirectLine, DirectPaymentRef, DirectTradeMeta } from './lib/directTradeTypes'
 
 interface Synced {
@@ -112,6 +113,8 @@ export type HistoricalGoodsLine = Omit<SaleLine, 'variantId'> & { variantId?: nu
 export type LenderAction = 'cashRepayment' | 'cashLoan' | 'goodsSettlement' | 'goodsCredit'
 
 export interface Sale extends Synced {
+  goodsReceiptChild?: CustomerGoodsReceiptChild
+  goodsReceiptLines?: CustomerGoodsReceiptSaleLine[]
   cancelledReason?: string
   cancelledAt?: number
   id?: number
@@ -223,6 +226,7 @@ export function landingUnpaidOf(p: Purchase): number {
 }
 
 export interface Payment extends Synced {
+  goodsReceipt?: CustomerGoodsReceiptMeta
   /** Freight receipt: amount = −unpaid customer share; stable sale link, no local IDs. */
   shipping?: { saleUuid: string; total: number; customerShare: number; received: number }
   cancelledReason?: string
@@ -363,6 +367,7 @@ export type CashMovementType =
   | 'transfer'
 
 export interface CashMovement extends Synced {
+  goodsReceiptChild?: CustomerGoodsReceiptChild
   /** Stable direct-payment link; refId alone is device-local. */
   directPaymentUuid?: string
   /** Stable freight link; refId alone is device-local and not sufficient. */
@@ -400,6 +405,7 @@ export interface Reconciliation extends Synced {
 export type AdjustReason = 'damaged' | 'lost' | 'correction' | 'returnDamaged' | 'purchaseReceived'
 
 export interface Adjustment extends Synced {
+  goodsReceiptChild?: CustomerGoodsReceiptChild
   id?: number
   /** سند خرید مربوط، برای رسیدنِ خرید در راه و اصلاح/ابطال امن آن */
   refId?: number
