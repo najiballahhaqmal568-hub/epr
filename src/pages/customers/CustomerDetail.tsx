@@ -61,21 +61,21 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
 
   return (
     <Modal title={`حساب ${c.name}`} onClose={onClose}>
-      <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white shadow-sm">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-sm text-teal-100">{c.balance > 0 ? 'قرض مشتری به دکان' : c.balance < 0 ? 'طلب مشتری از دکان' : 'حساب تصفیه است'}</p>
-            <p className="mt-1 text-2xl font-bold">{fmtMoney(Math.abs(c.balance))}</p>
+      <div className="surface party-balance mb-3">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-slate-500">{c.balance > 0 ? 'قرض مشتری به دکان' : c.balance < 0 ? 'طلب مشتری از دکان' : 'حساب تصفیه است'}</p>
+            <p className={`party-balance-amount inventory-money ${c.balance > 0 ? 'text-red-700' : c.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(c.balance))}</p>
           </div>
           {c.promiseDate && c.balance > 0 && (
-            <div className="rounded-xl bg-white/15 px-3 py-2 text-left">
-              <p className="text-[11px] text-teal-100">وعدهٔ پرداخت</p>
+            <div className={`party-promise ${c.promiseDate < Date.now() ? 'is-overdue' : ''}`}>
+              <p className="text-[11px]">وعدهٔ پرداخت</p>
               <p className="text-sm font-bold">{fmtDateShort(c.promiseDate)}</p>
             </div>
           )}
         </div>
         {c.bookPage?.trim() && (
-          <p className="mt-2 text-xs font-bold text-teal-100">
+          <p className="mt-2 text-xs font-bold text-slate-500">
             📖 دفتر {(c.type ?? 'retail') === 'retail' ? 'پرچون' : 'عمده'} — آخرین صفحه: {c.bookPage.trim()}
           </p>
         )}
@@ -100,16 +100,16 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
       )}
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <button className="rounded-xl bg-teal-50 px-2 py-3 font-bold text-teal-800" onClick={() => setShowPay(true)}>
-          <span className="text-xs">دریافت پول</span>
+        <button className="primary-button text-sm" onClick={() => setShowPay(true)}>
+          دریافت پول
         </button>
-        <button className="rounded-xl bg-amber-50 px-2 py-3 font-bold text-amber-800" onClick={() => setShowDebt(true)}>
-          <span className="text-xs">قرض قبلی</span>
+        <button className="party-action" onClick={() => setShowDebt(true)}>
+          قرض قبلی
         </button>
-        <button className="rounded-xl bg-slate-100 px-2 py-3 font-bold text-slate-700" onClick={() => setShowEdit(true)}>
-          <span className="text-xs">ویرایش حساب</span>
+        <button className="party-action" onClick={() => setShowEdit(true)}>
+          ویرایش حساب
         </button>
-        {!accessFlags.readOnly && role === 'owner' && <button className="rounded-xl bg-teal-50 px-2 py-3 text-xs font-bold text-teal-800" disabled={c.balance <= 0} aria-describedby={c.balance <= 0 ? 'goods-receipt-disabled-reason' : undefined} onClick={() => receiptEnabled ? setReceiptEntry(true) : setReceiptEnable(true)}>دریافت جنس بابت طلب</button>}
+        {!accessFlags.readOnly && role === 'owner' && <button className="party-action" disabled={c.balance <= 0} aria-describedby={c.balance <= 0 ? 'goods-receipt-disabled-reason' : undefined} onClick={() => receiptEnabled ? setReceiptEntry(true) : setReceiptEnable(true)}>دریافت جنس بابت طلب</button>}
       </div>
       {!accessFlags.readOnly && role === 'owner' && c.balance <= 0 && <p id="goods-receipt-disabled-reason" className="mb-3 text-xs text-slate-500">برای دریافت جنس، طلب فعلی مشتری باید مثبت باشد.</p>}
 

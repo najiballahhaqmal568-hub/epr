@@ -381,3 +381,11 @@ input[type='number'] {
 .customer-row-phone { text-align: end; }
 .customer-row-amount { flex: 0 1 auto; min-width: 0; text-align: end; }
 .customer-row-amount strong { font-size: 1.05rem; }
+
+/* Party account header and actions (customer, family) */
+.party-balance { padding: 1.25rem; }
+.party-balance-amount { margin-top: 0.25rem; font-size: clamp(1.5rem, 7vw, 2rem); font-weight: 700; }
+.party-promise { border-radius: var(--radius-control); background: var(--surface-grouped); padding: 0.5rem 0.75rem; color: var(--text-secondary); text-align: end; }
+.party-promise.is-overdue { background: #FEE2E2; color: var(--danger); }
+.party-action { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); padding: 0.75rem 0.5rem; color: var(--text-primary); font-size: 0.875rem; font-weight: 700; }
+.party-action:disabled { color: var(--text-secondary); background: var(--surface-grouped); }
