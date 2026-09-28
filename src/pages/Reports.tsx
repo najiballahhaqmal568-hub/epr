@@ -190,28 +190,25 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1.5 text-sm text-slate-600">برگشت</button>
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">راپورها</h1>
-          <p className="text-xs text-slate-500">نتیجه‌های مهم تجارت در یک نگاه</p>
-        </div>
+      <div className="page-heading">
+        <div><h1>راپورها</h1><p>نتیجه‌های مهم تجارت در یک نگاه</p></div>
+        <button onClick={onBack} className="customers-back" aria-label="برگشت">برگشت</button>
       </div>
       <DirectTradeWarning review={directReview} />
       <CustomerGoodsReceiptWarning review={receiptReview} />
 
-      <div className="mb-3 grid grid-cols-4 gap-1 rounded-2xl bg-white p-1 shadow-sm">
+      <div className="segmented mb-2" role="group" aria-label="دورهٔ راپور">
         {PERIODS.filter((item) => item.id !== 'custom').map((item) => (
           <button
             key={item.id}
             onClick={() => setPeriod(item.id)}
-            className={`rounded-xl px-1 py-2 text-xs font-bold ${period === item.id ? 'bg-teal-100 text-teal-800' : 'text-slate-500'}`}
+            aria-pressed={period === item.id}
           >
             {item.label}
           </button>
         ))}
       </div>
-      <button onClick={() => setPeriod('custom')} className={`mb-3 text-xs font-bold ${period === 'custom' ? 'text-teal-800' : 'text-slate-500'}`}>
+      <button onClick={() => setPeriod('custom')} aria-pressed={period === 'custom'} className={`mb-3 text-sm font-bold ${period === 'custom' ? 'text-[var(--action)]' : 'text-slate-500'}`}>
         انتخاب تاریخ دلخواه
       </button>
       {period === 'custom' && (

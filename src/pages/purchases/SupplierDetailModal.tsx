@@ -139,7 +139,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   const bal = live?.balance ?? supplier.balance
   return (
     <Modal title={supplier.name} onClose={onClose}>
-      {!accessFlags.readOnly && <button className="mb-4 w-full rounded-xl bg-teal-700 p-3 font-bold text-white" onClick={() => setShowPay(true)}>ثبت پرداخت</button>}
+      {!accessFlags.readOnly && <button className="mb-4 w-full rounded-xl bg-[var(--action)] p-3 font-bold text-white" onClick={() => setShowPay(true)}>ثبت پرداخت</button>}
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
         <p className="text-sm text-slate-500">{bal > 0 ? 'قرض ما' : bal < 0 ? 'طلب ما (پیشکی)' : 'حساب تصفیه است'}</p>
         <p className={`text-2xl font-bold ${bal > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(bal))}</p>

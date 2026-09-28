@@ -85,8 +85,8 @@ export function ExpenseList({
   return (
     <>
       {!accessFlags.readOnly && (
-        <button onClick={() => setShowNew(true)} className="mb-3 w-full rounded-2xl bg-teal-700 py-3.5 text-base font-bold text-white shadow-sm active:bg-teal-800">
-          ثبت مصرف جدید
+        <button onClick={() => setShowNew(true)} className="primary-button mb-3 py-3.5 text-base">
+          ＋ ثبت مصرف جدید
         </button>
       )}
 
@@ -107,17 +107,11 @@ export function ExpenseList({
       <ExpenseCreditors />
 
       {/* سوییچ تقویم | فهرست — تقویم ۳۰ روزهٔ مصارف */}
-      <div className="mb-2 flex gap-2">
-        <button
-          onClick={() => setView('calendar')}
-          className={`flex-1 rounded-xl py-2 text-sm font-bold ${viewMode === 'calendar' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
-        >
+      <div className="segmented mb-2" role="group" aria-label="نمایش مصارف">
+        <button onClick={() => setView('calendar')} aria-pressed={viewMode === 'calendar'}>
           تقویم
         </button>
-        <button
-          onClick={() => setView('list')}
-          className={`flex-1 rounded-xl py-2 text-sm font-bold ${viewMode === 'list' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
-        >
+        <button onClick={() => setView('list')} aria-pressed={viewMode === 'list'}>
           فهرست
         </button>
       </div>
@@ -230,7 +224,7 @@ function FilterChip({ active, onClick, label }: { active: boolean; onClick: () =
   return (
     <button
       onClick={onClick}
-      className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${active ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`}
+      className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${active ? 'bg-[var(--action)] text-white' : 'bg-white text-slate-600'}`}
     >
       {label}
     </button>

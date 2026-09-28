@@ -49,7 +49,7 @@ export function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout
           خروج از حساب
         </button>
         {profile.role === 'owner' && !isStaff && (
-          <button onClick={() => setShowStaff(!showStaff)} className="rounded-xl bg-teal-700 px-5 py-2 font-bold text-white">
+          <button onClick={() => setShowStaff(!showStaff)} className="rounded-xl bg-[var(--action)] px-5 py-2 font-bold text-white">
             ＋ حساب جدید (کارمند / شریک)
           </button>
         )}
@@ -60,7 +60,7 @@ export function AccountCard({ isStaff, onLogout }: { isStaff?: boolean; onLogout
             <div className="flex gap-2">
               <button
                 onClick={() => setSRole('staff')}
-                className={`flex-1 rounded-xl py-2 text-sm font-bold ${sRole === 'staff' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+                className={`flex-1 rounded-xl py-2 text-sm font-bold ${sRole === 'staff' ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
               >
                 کارمند (فروش/خرید)
               </button>

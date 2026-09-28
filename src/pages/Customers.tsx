@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, toLatinDigits, pageOrder, familyPages } from '../lib/format'
-import { inputCls, Fab, Empty, Card } from '../components/ui'
+import { inputCls, Empty } from '../components/ui'
 import FamilyDetail from './customers/FamilyDetail'
 import CustomerModal from './customers/CustomerModal'
 import CustomerDetail from './customers/CustomerDetail'
@@ -117,107 +117,82 @@ export default function Customers({ onBack }: { onBack?: () => void }) {
     return tie
   })
 
-  const tabCls = (v: string) =>
-    `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
-
   const customerRow = (c: Customer) => {
     const overdue = c.balance > 0 && c.promiseDate && c.promiseDate < startOfDay()
     return (
-      <Card key={c.id} onClick={() => setSelected(c)}>
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="font-bold text-slate-800">
-              {c.flag === 'good' && '⭐ '}
-              {c.flag === 'bad' && '⚠️ '}
-              {c.name}
-              {c.family?.trim() && <span className="mr-1 text-xs font-normal text-slate-400">({c.family.trim()})</span>}
-            </p>
-            {c.bookPage?.trim() && <p className="text-xs font-bold text-slate-500">📖 صفحهٔ {c.bookPage.trim()}</p>}
-            {c.phone && <p className="text-sm text-slate-500" dir="ltr">{c.phone}</p>}
-            {overdue && <p className="text-xs font-bold text-red-600">وعده گذشته: {fmtDateShort(c.promiseDate!)}</p>}
-            {!overdue && c.balance > 0 && c.promiseDate && (
-              <p className="text-xs text-slate-500">وعده: {fmtDateShort(c.promiseDate)}</p>
-            )}
-          </div>
-          <div className="text-left">
-            <p className={`font-bold ${c.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(c.balance))}</p>
-            <p className="text-xs text-slate-400">{c.balance > 0 ? 'قرضدار' : c.balance < 0 ? 'بستانکار' : 'تصفیه'}</p>
-          </div>
-        </div>
-      </Card>
+      <button key={c.id} onClick={() => setSelected(c)} className="customer-row">
+        <span className="customer-row-main">
+          <span className="customer-row-name">
+            {c.flag === 'good' && '⭐ '}
+            {c.flag === 'bad' && '⚠️ '}
+            {c.name}
+            {c.family?.trim() && <span className="customer-row-family"> ({c.family.trim()})</span>}
+          </span>
+          {c.bookPage?.trim() && <small className="font-bold">📖 صفحهٔ {c.bookPage.trim()}</small>}
+          {c.phone && <small dir="ltr" className="customer-row-phone">{c.phone}</small>}
+          {overdue && <small className="font-bold text-red-700">وعده گذشته: {fmtDateShort(c.promiseDate!)}</small>}
+          {!overdue && c.balance > 0 && c.promiseDate && <small>وعده: {fmtDateShort(c.promiseDate)}</small>}
+        </span>
+        <span className="customer-row-amount">
+          <strong className={`inventory-money ${c.balance > 0 ? 'text-red-700' : c.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(c.balance))}</strong>
+          <small>{c.balance > 0 ? 'قرضدار' : c.balance < 0 ? 'بستانکار' : 'تصفیه'}</small>
+        </span>
+      </button>
     )
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-3 flex items-center gap-2">
-        {onBack && (
-          <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600" aria-label="برگشت">
-            برگشت
-          </button>
-        )}
-        <h1 className="text-xl font-bold text-slate-800">مشتریان</h1>
+    <div className="p-4 customers-directory">
+      <div className="page-heading">
+        <div><h1>مشتریان</h1><p>دفتر پرچون و عمده، خانواده‌ها و صفحهٔ دفتر</p></div>
+        {onBack && <button onClick={onBack} className="customers-back" aria-label="برگشت">برگشت</button>}
       </div>
-      <div className="mb-3 flex gap-2">
-        <button onClick={() => setView('retail')} className={tabCls('retail')}>
-          دفتر پرچون
-        </button>
-        <button onClick={() => setView('wholesale')} className={tabCls('wholesale')}>
-          دفتر عمده
-        </button>
+      <div className="segmented mb-4" role="group" aria-label="دفتر مشتریان">
+        <button onClick={() => setView('retail')} aria-pressed={view === 'retail'}>دفتر پرچون</button>
+        <button onClick={() => setView('wholesale')} aria-pressed={view === 'wholesale'}>دفتر عمده</button>
       </div>
-      <div className="mb-3 rounded-xl bg-white p-3 shadow-sm">
-        <div className="flex justify-between">
-          <span className="text-sm text-slate-500">مجموع قرض {view === 'retail' ? 'پرچون' : 'عمده'}</span>
-          <span className="font-bold text-red-600">{fmtMoney(viewDebt)}</span>
+      <dl className="surface customers-summary">
+        <div><dt>مجموع قرض {view === 'retail' ? 'پرچون' : 'عمده'}</dt><dd className="inventory-money text-red-700">{fmtMoney(viewDebt)}</dd></div>
+        <div><dt>مشتری در این دفتر</dt><dd>{fmtNum(inView.length)}</dd></div>
+      </dl>
+      <section className="inventory-management" aria-label="جستجو و چیدمان مشتریان">
+        <input className={inputCls} type="search" aria-label="جستجوی مشتری" placeholder="جستجو نام، تلفن، خانواده یا صفحهٔ دفتر..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <p className="inventory-section-label mt-3">چیدمان:</p>
+        <div className="inventory-sorts" role="group" aria-label="چیدمان مشتریان">
+          {SORTS.map((o) => (
+            <button key={o.id} onClick={() => chooseSort(o.id)} aria-pressed={sort === o.id} className={sort === o.id ? 'is-selected' : ''}>
+              {o.label}
+            </button>
+          ))}
         </div>
-      </div>
-      <input className={inputCls} placeholder="جستجو نام، تلفن، خانواده یا صفحهٔ دفتر..." value={search} onChange={(e) => setSearch(e.target.value)} />
-      <div className="mt-2 flex gap-1 overflow-x-auto pb-1">
-        <span className="shrink-0 self-center text-xs text-slate-400">چیدمان:</span>
-        {SORTS.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => chooseSort(o.id)}
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
-              sort === o.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+        <button onClick={() => setShowNew(true)} className="primary-button mt-3">＋ مشتری جدید</button>
+      </section>
 
-      <div className="mt-3">
-        {filtered.length === 0 && <Empty text="مشتری‌ای در این دفتر ثبت نشده." />}
+      {filtered.length === 0 && <Empty text="مشتری‌ای در این دفتر ثبت نشده." />}
+      {sortedRows.length > 0 && <section className="surface customers-list" aria-label="فهرست مشتریان">
         {sortedRows.map((r) =>
           r.kind === 'single' ? (
             customerRow(r.c)
           ) : (
-            <Card key={r.key} onClick={() => setFamilySel(r.fam)}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-slate-800">👨‍👩‍👦 خانوادهٔ {r.fam}</p>
-                  {(() => {
-                    // بعضی اعضا صفحه دارند و بعضی نه — هر دو باید دیده شوند
-                    const { pages } = familyPages(r.members)
-                    if (!pages.length) return null
-                    return <p className="text-xs font-bold text-slate-500">📖 صفحهٔ {pages.join('، ')}</p>
-                  })()}
-                  <p className="text-xs text-slate-500">{r.members.map((m) => m.name).join('، ')}</p>
-                </div>
-                <div className="text-left">
-                  <p className={`font-bold ${famDebtOf(r.members) > 0 ? 'text-red-600' : 'text-teal-700'}`}>
-                    {fmtMoney(famDebtOf(r.members))}
-                  </p>
-                  <p className="text-xs text-slate-400">قرض خانواده · {fmtNum(r.members.length)} نفر</p>
-                </div>
-              </div>
-            </Card>
+            <button key={r.key} onClick={() => setFamilySel(r.fam)} className="customer-row">
+              <span className="customer-row-main">
+                <span className="customer-row-name">خانوادهٔ {r.fam}</span>
+                {(() => {
+                  // بعضی اعضا صفحه دارند و بعضی نه — هر دو باید دیده شوند
+                  const { pages } = familyPages(r.members)
+                  if (!pages.length) return null
+                  return <small className="font-bold">📖 صفحهٔ {pages.join('، ')}</small>
+                })()}
+                <small>{r.members.map((m) => m.name).join('، ')}</small>
+              </span>
+              <span className="customer-row-amount">
+                <strong className={`inventory-money ${famDebtOf(r.members) > 0 ? 'text-red-700' : ''}`}>{fmtMoney(famDebtOf(r.members))}</strong>
+                <small>قرض خانواده · {fmtNum(r.members.length)} نفر</small>
+              </span>
+            </button>
           )
         )}
-      </div>
-      <Fab onClick={() => setShowNew(true)} label="مشتری جدید" />
+      </section>}
       {showNew && (
         <CustomerModal
           customer={null}

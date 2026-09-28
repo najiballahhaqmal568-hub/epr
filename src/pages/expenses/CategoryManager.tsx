@@ -21,7 +21,7 @@ export function CategoryManager({ onClose }: { onClose: () => void }) {
       <div className="mb-4 flex gap-2">
         <input className={inputCls} value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="کتگوری جدید..." />
         <button
-          className="whitespace-nowrap rounded-xl bg-teal-700 px-4 font-bold text-white disabled:opacity-40"
+          className="whitespace-nowrap rounded-xl bg-[var(--action)] px-4 font-bold text-white disabled:opacity-40"
           disabled={!newCat.trim()}
           onClick={async () => {
             await db.expenseCategories.add({ name: newCat.trim() })
@@ -39,7 +39,7 @@ export function CategoryManager({ onClose }: { onClose: () => void }) {
             <>
               <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} />
               <button
-                className="whitespace-nowrap rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-bold text-white"
+                className="whitespace-nowrap rounded-lg bg-[var(--action)] px-3 py-1.5 text-sm font-bold text-white"
                 onClick={async () => {
                   if (editName.trim()) await renameCategory(c.id!, editName.trim())
                   setEditingId(null)
@@ -100,11 +100,11 @@ export function CategoryManager({ onClose }: { onClose: () => void }) {
               <input className={inputCls} inputMode="numeric" value={dailyAmount} onChange={(e) => setDailyAmount(e.target.value)} />
               <div className="my-2 grid grid-cols-3 gap-1">
                 {([['cash', 'نقدی'], ['credit', 'قرضی'], ['mixed', 'نقد و قرض']] as const).map(([value, label]) => (
-                  <button key={value} className={`rounded-lg py-1.5 text-xs font-bold ${dailyPayment === value ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`} onClick={() => setDailyPayment(value)}>{label}</button>
+                  <button key={value} className={`rounded-lg py-1.5 text-xs font-bold ${dailyPayment === value ? 'bg-[var(--action)] text-white' : 'bg-white text-slate-600'}`} onClick={() => setDailyPayment(value)}>{label}</button>
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button className="rounded-lg bg-teal-700 py-2 text-sm font-bold text-white" onClick={async () => {
+                <button className="rounded-lg bg-[var(--action)] py-2 text-sm font-bold text-white" onClick={async () => {
                   await configureDailyCategory(c.id!, true, parseNum(dailyAmount), dailyPayment)
                   setDailyId(null)
                 }}>فعال و ذخیره</button>

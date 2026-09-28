@@ -25,15 +25,14 @@ import { Icon } from './components/Icon'
 import { SyncIndicator } from './components/SyncIndicator'
 
 const tabs = [
+  { id: 'dashboard', label: 'خانه', icon: 'chart' },
   { id: 'sales', label: 'فروش', icon: 'sale' },
-  { id: 'inventory', label: 'گدام و خرید', icon: 'stock' },
   { id: 'accounts', label: 'حساب‌ها', icon: 'accounts' },
-  { id: 'expenses', label: 'پول و مصارف', icon: 'wallet' },
-  { id: 'more', label: 'مدیریت', icon: 'settings' }
+  { id: 'more', label: 'بیشتر', icon: 'settings' }
 ] as const
 
 type NavTabId = (typeof tabs)[number]['id']
-type TabId = NavTabId | 'dashboard' | 'purchases' | 'customers' | 'settings' | 'reports'
+type TabId = NavTabId | 'inventory' | 'expenses' | 'purchases' | 'customers' | 'settings' | 'reports'
 
 export default function App() {
   // VITE_UI_PREVIEW فقط برای build آزمایشی روی همین کمپیوتر است؛ حتی اگر اشتباهی
@@ -41,7 +40,7 @@ export default function App() {
   const previewRequested = new URLSearchParams(window.location.search).has('ui-preview')
   const localPreviewHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   const uiPreview = previewRequested && (import.meta.env.DEV || (localPreviewHost && import.meta.env.VITE_UI_PREVIEW === '1'))
-  const [tab, setTab] = useState<TabId>('sales')
+  const [tab, setTab] = useState<TabId>('dashboard')
   const [salePending, setSalePending] = useState(false)
   const salePendingRef = useRef(false)
   salePendingRef.current = salePending
@@ -111,11 +110,9 @@ export default function App() {
     tab === 'customers' ||
     (tab === 'purchases' && purchaseBack === 'accounts')
       ? 'accounts'
-      : tab === 'dashboard' || tab === 'settings' || tab === 'reports'
+      : tab === 'inventory' || tab === 'expenses' || tab === 'settings' || tab === 'reports' || tab === 'purchases'
         ? 'more'
-        : tab === 'purchases'
-          ? 'inventory'
-          : tab
+        : tab
 
   const serverCfg = useLiveQuery(async () => Boolean(await getServerConfig()), [])
 
@@ -231,7 +228,7 @@ export default function App() {
   if (pinHash === undefined || auth === 'loading') {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 text-slate-500">
-        <span className="text-4xl">👞</span>
+        <Icon name="sale" width="40" height="40" />
         <p className="font-bold">فروشگاه اتل</p>
         <p className="animate-pulse text-sm">در حال باز شدن...</p>
       </div>
@@ -251,7 +248,7 @@ export default function App() {
             : undefined
         }
         onDone={async () => {
-          setTab('sales')
+          setTab('dashboard')
           const profile = await getProfile().catch(() => null)
           if (profile) await db.settings.put({ key: 'cachedProfile', value: profile })
           setAuth(profile ?? 'anon')
@@ -296,7 +293,7 @@ export default function App() {
       {relogin && (
         <div className="flex items-center gap-2 bg-amber-500 p-2.5 text-white">
           <span className="flex-1 text-sm font-bold">
-            🔄 همگام‌سازی متوقف است — کار شما ثبت می‌شود، ولی به موبایل دیگر نمی‌رود.
+            همگام‌سازی متوقف است — کار شما ثبت می‌شود، ولی به موبایل دیگر نمی‌رود.
           </span>
           <button
             className="rounded-lg bg-white/25 px-3 py-1 text-sm font-bold"
@@ -326,8 +323,8 @@ export default function App() {
               >
                 دیدن
               </button>
-              <button className="px-1" onClick={() => integrity.dismiss()}>
-                ✕
+              <button className="px-1" aria-label="بستن یادآوری کنترل حساب‌ها" onClick={() => integrity.dismiss()}>
+                <Icon name="close" />
               </button>
             </div>
           )}
@@ -345,8 +342,8 @@ export default function App() {
               >
                 قرضداران
               </button>
-              <button className="px-1" onClick={() => void debtReminder.dismissToday()}>
-                ✕
+              <button className="px-1" aria-label="بستن یادآوری قرضداران" onClick={() => void debtReminder.dismissToday()}>
+                <Icon name="close" />
               </button>
             </div>
           )}
@@ -362,15 +359,15 @@ export default function App() {
               >
                 دیدن فهرست
               </button>
-              <button className="px-1" onClick={() => reminder.dismissToday()}>
-                ✕
+              <button className="px-1" aria-label="بستن یادآوری مصارف" onClick={() => reminder.dismissToday()}>
+                <Icon name="close" />
               </button>
             </div>
           )}
         </div>
       )}
       {readOnly && (
-        <div className="bg-purple-600 px-4 py-1.5 text-center text-xs font-bold text-white">👁️ حالت فقط مشاهده (شریک) — تغییر ارقام ممکن نیست</div>
+        <div className="bg-slate-700 px-4 py-1.5 text-center text-xs font-bold text-white">حالت فقط مشاهده (شریک) — تغییر ارقام ممکن نیست</div>
       )}
       {tab === 'dashboard' && (
         <Dashboard
@@ -406,6 +403,8 @@ export default function App() {
           pendingExpenseCount={reminder.show ? reminder.count : 0}
           goTo={(target) => {
             if (target === 'dashboard') { setTab('dashboard'); return }
+            if (target === 'inventory') { setTab('inventory'); return }
+            if (target === 'purchases') { openPurchases('history', 'inventory'); return }
             if (target === 'expenses') {
               setExpensesBack('more')
               setOpenNewExpense(false)
@@ -447,7 +446,6 @@ export default function App() {
             aria-current={activeNav === t.id ? 'page' : undefined}
             onClick={() => {
               if (t.id === 'sales') setOpenNewSale(false)
-              if (t.id === 'expenses') { setOpenNewExpense(false); setExpensesBack('more') }
               setTab(t.id)
             }}
             onPointerUp={(event) => event.currentTarget.blur()}

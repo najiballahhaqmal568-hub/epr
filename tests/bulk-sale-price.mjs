@@ -7,7 +7,7 @@ const server = spawn(process.execPath,['node_modules/vite/bin/vite.js','--port',
 let browser
 try {
   for(let i=0;i<60;i++){try{if((await fetch(url)).ok)break}catch{}await new Promise(r=>setTimeout(r,500))}
-  browser = await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'})
+  browser = await chromium.launch({executablePath:process.env.CHROMIUM_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe'})
   const page = await browser.newPage({viewport:{width:390,height:844}})
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
@@ -58,6 +58,7 @@ try {
   const draft=await page.evaluate(async()=> (await import('/src/lib/saleDrafts.ts')).readWorkingSale())
   assert.deepEqual(draft.lines.map(l=>l.unitPrice),[750,760,900])
   assert.equal(draft.discountStr,'100')
+  await page.getByRole('button',{name:'ادامه به پرداخت',exact:true}).click()
   await page.getByRole('button',{name:'ثبت فروش',exact:true}).click()
   await page.waitForFunction(()=>!!window.saved)
   assert.equal(await page.evaluate(()=>window.saved.total),3060)

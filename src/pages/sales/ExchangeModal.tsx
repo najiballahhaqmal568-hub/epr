@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
 import { addExchange } from '../../lib/ops'
@@ -14,6 +14,8 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
   const [cashStr, setCashStr] = useState('')
   const [cashTouched, setCashTouched] = useState(false)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
 
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
@@ -52,12 +54,16 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
   }
 
   async function save() {
+    if (savingRef.current) return
     const retLines = sale.lines
       .map((l, i) => ({ ...l, qty: qtys[i] ?? 0, restock }))
       .filter((l) => l.qty > 0)
     if (!retLines.length) return setError('جنس برگشتی را انتخاب کنید')
     if (!newLines.length) return setError('جنس جدید را انتخاب کنید')
     if (remainder > 0 && !sale.customerId) return setError('این فروش مشتری ندارد — تفاوت باید نقد گرفته شود')
+    savingRef.current = true
+    setSaving(true)
+    setError('')
     try {
       await addExchange(
         {
@@ -66,7 +72,7 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
           partyId: sale.customerId,
           partyName: sale.customerName ?? 'مشتری نقدی',
           refId: sale.id,
-        saleType: sale.saleType,
+          saleType: sale.saleType,
           lines: retLines,
           reason: 'تبادله',
           settlement: 'cashRefund',
@@ -85,141 +91,157 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
   return (
-    <Modal title="تبادلهٔ جنس" onClose={onClose}>
-      <p className="mb-2 text-sm text-slate-600">
-        {sale.customerName || 'مشتری نقدی'} — {fmtDate(sale.date)}
-      </p>
-
-      <p className="mb-1 text-sm font-bold text-slate-700">۱) جنس برگشتی</p>
-      {sale.lines.map((l, i) => (
-        <div key={i} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 p-2">
-          <div className="text-sm">
-            <p className="font-bold">
-              {l.productName} {l.size} {l.color}
-            </p>
-            <p className="text-slate-500">
-              فروخته: {fmtNum(l.qty)} × {fmtMoney(l.unitPrice)}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
-              −
-            </button>
-            <input
-              className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
-              inputMode="numeric"
-              value={qtys[i] ?? 0}
-              onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
-            />
-            <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
-              ＋
-            </button>
-          </div>
-        </div>
-      ))}
-      <label className="mb-3 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} className="h-4 w-4" />
-        جنس برگشتی سالم است — به گدام برگردد
-      </label>
-
-      <p className="mb-1 text-sm font-bold text-slate-700">۲) جنس جدید</p>
-      <Field label="جستجوی جنس">
-        <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز یا رنگ..." />
-      </Field>
-      {matches.length > 0 && (
-        <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
-          {matches.map((v) => {
-            const p = productMap.get(v.productId)!
-            return (
-              <button
-                key={v.id}
-                onClick={() => addLine(v)}
-                disabled={v.stockQty <= 0 && !sale.lines.some((l) => l.variantId === v.id)}
-                className="flex w-full items-center justify-between border-b border-slate-100 bg-white px-3 py-2 text-right last:border-0 active:bg-teal-50 disabled:opacity-40"
-              >
-                <span>
-                  {p.name} — {v.size} {v.color}
-                </span>
-                <span className="text-sm text-slate-500">
-                  {fmtNum(v.stockQty)} عدد · {fmtMoney(sale.saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-      {newLines.map((l, i) => (
-        <div key={l.variantId} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2">
-          <div className="flex-1">
-            <p className="text-sm font-bold">
-              {l.productName} {l.size} {l.color}
-            </p>
-            <input
-              className="mt-1 w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm"
-              inputMode="numeric"
-              value={l.unitPrice}
-              onChange={(e) => setNewLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(e.target.value) } : x)))}
-            />
-            <span className="mr-1 text-xs text-slate-500">قیمت فی جوړه</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
-              inputMode="numeric"
-              value={l.qty}
-              onChange={(e) => setNewLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
-            />
-            <button className="mr-1 text-red-500" onClick={() => setNewLines((ls) => ls.filter((_, j) => j !== i))}>
-              ✕
-            </button>
-          </div>
-        </div>
-      ))}
-
-      <div className="mt-3 rounded-xl bg-amber-50 p-3">
-        <div className="flex justify-between text-slate-600">
-          <span>ارزش جنس برگشتی</span>
-          <span>{fmtMoney(returnAmount)}</span>
-        </div>
-        <div className="flex justify-between text-slate-600">
-          <span>ارزش جنس جدید</span>
-          <span>{fmtMoney(newTotal)}</span>
-        </div>
-        {diff > 0 && (
-          <>
-            <div className="flex justify-between font-bold text-slate-800">
-              <span>تفاوت — از مشتری بگیرید</span>
-              <span>{fmtMoney(diff)}</span>
-            </div>
-            <Field label="دریافتی نقدی">
-              <input
-                className={inputCls}
-                inputMode="numeric"
-                value={cashTouched ? cashStr : String(diff)}
-                onFocus={() => {
-                  if (!cashTouched) {
-                    setCashTouched(true)
-                    setCashStr(String(diff))
-                  }
-                }}
-                onChange={(e) => setCashStr(e.target.value)}
-              />
-            </Field>
-            {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض مشتری): {fmtMoney(remainder)}</p>}
-          </>
-        )}
-        {diff < 0 && <p className="font-bold text-amber-700">بازگشت نقدی به مشتری: {fmtMoney(-diff)}</p>}
-        {diff === 0 && newTotal > 0 && <p className="font-bold text-teal-700">برابر — بدون پرداخت ✓</p>}
+    <Modal title="تبادلهٔ جنس" onClose={() => { if (!savingRef.current) onClose() }}>
+      <div className="sale-document-heading">
+        <strong>{sale.customerName || 'مشتری نقدی'}</strong>
+        <p>فروش {sale.id ? `#${fmtNum(sale.id)} · ` : ''}{fmtDate(sale.date)}</p>
       </div>
-
-      {error && <p className="my-2 text-sm text-red-600">{error}</p>}
+      <fieldset disabled={saving} className="sale-correction-fields" aria-busy={saving}>
+        <section className="sale-correction-group" aria-label="جنس برگشتی">
+          <h3>۱) جنس برگشتی</h3>
+          <p className="sale-correction-help">تعداد برگشتی را از فروش اصلی انتخاب کنید.</p>
+          {sale.lines.map((l, i) => (
+            <div key={i} className="sale-cart-line">
+              <div className="text-sm">
+                <p className="font-bold">
+                  {l.productName} {l.size} {l.color}
+                </p>
+                <p className="text-slate-500">
+                  فروخته: {fmtNum(l.qty)} × {fmtMoney(l.unitPrice)}
+                </p>
+              </div>
+              <div className="sale-quantity-actions">
+                <button className="quantity-step" aria-label={`کم کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={(qtys[i] ?? 0) <= 0} onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
+                  −
+                </button>
+                <input
+                  className="quantity-value"
+                  aria-label={`تعداد برگشتی ${l.productName} ${l.size} ${l.color}`}
+                  inputMode="numeric"
+                  value={qtys[i] ?? 0}
+                  onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
+                />
+                <button className="quantity-step" aria-label={`زیاد کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={(qtys[i] ?? 0) >= l.qty} onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
+                  ＋
+                </button>
+              </div>
+            </div>
+          ))}
+          <label className="sale-correction-check">
+            <input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} />
+            جنس برگشتی سالم است — به گدام برگردد
+          </label>
+          <p className="sale-correction-help">{restock ? 'تعداد برگشتی به موجودی گدام اضافه می‌شود.' : 'جنس داغمه ثبت می‌شود؛ موجودی گدام زیاد نمی‌شود.'}</p>
+        </section>
+        <section className="sale-correction-group" aria-label="جنس جدید">
+          <h3>۲) جنس جدید</h3>
+          <Field label="جستجوی جنس">
+            <input className={inputCls} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="نام، سایز یا رنگ..." />
+          </Field>
+          {matches.length > 0 && (
+            <div className="mb-3 overflow-hidden rounded-xl border border-slate-200">
+              {matches.map((v) => {
+                const p = productMap.get(v.productId)!
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => addLine(v)}
+                    disabled={v.stockQty <= 0 && !sale.lines.some((l) => l.variantId === v.id)}
+                    className="sale-correction-match sale-search-choice disabled:opacity-40"
+                  >
+                    <span>
+                      {p.name} — {v.size} {v.color}
+                    </span>
+                    <span className="text-sm text-slate-500">
+                      {fmtNum(v.stockQty)} عدد · {fmtMoney(sale.saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {search.trim() && variants && matches.length === 0 && <p role="status" className="sale-correction-help">جنسی با این جستجو پیدا نشد.</p>}
+          {newLines.length === 0 && <p className="sale-correction-help">جنس جایگزین را جستجو و انتخاب کنید؛ قیمت و تعداد قابل تغییر است.</p>}
+          {newLines.map((l, i) => (
+            <div key={l.variantId} className="sale-cart-line">
+              <div>
+                <p className="text-sm font-bold">
+                  {l.productName} {l.size} {l.color}
+                </p>
+              </div>
+              <label className="sale-correction-price">
+                <span className="field-label">قیمت فی جوړه</span>
+                <input
+                  className={inputCls}
+                  aria-label={`قیمت فی جوړه ${l.productName} ${l.size} ${l.color}`}
+                  inputMode="numeric"
+                  value={l.unitPrice}
+                  onChange={(e) => setNewLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(e.target.value) } : x)))}
+                />
+              </label>
+              <label>
+                <span className="field-label">تعداد</span>
+                <input
+                  className="quantity-value"
+                  aria-label={`تعداد جنس جدید ${l.productName} ${l.size} ${l.color}`}
+                  inputMode="numeric"
+                  value={l.qty}
+                  onChange={(e) => setNewLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
+                />
+              </label>
+              <button className="sale-remove-line" aria-label={`حذف جنس جدید ${l.productName} ${l.size} ${l.color}`} onClick={() => setNewLines((ls) => ls.filter((_, j) => j !== i))}>
+                ✕
+              </button>
+            </div>
+          ))}
+        </section>
+        <section className="sale-correction-group" aria-label="تصفیه تبادله">
+          <h3>۳) تفاوت و تصفیه</h3>
+          <div className="sale-correction-summary">
+            <dl>
+              <div><dt>ارزش جنس برگشتی</dt><dd>{fmtMoney(returnAmount)}</dd></div>
+              <div><dt>ارزش جنس جدید</dt><dd>{fmtMoney(newTotal)}</dd></div>
+            </dl>
+            {diff > 0 && (
+              <>
+                <div className="sale-correction-difference">
+                  <span>تفاوت — از مشتری بگیرید</span>
+                  <span>{fmtMoney(diff)}</span>
+                </div>
+                <Field label="دریافتی نقدی">
+                  <input
+                    className={inputCls}
+                    inputMode="numeric"
+                    value={cashTouched ? cashStr : String(diff)}
+                    onFocus={() => {
+                      if (!cashTouched) {
+                        setCashTouched(true)
+                        setCashStr(String(diff))
+                      }
+                    }}
+                    onChange={(e) => setCashStr(e.target.value)}
+                  />
+                </Field>
+                {remainder > 0 && <p className="text-sm font-bold text-red-700">باقی (قرض مشتری): {fmtMoney(remainder)}</p>}
+              </>
+            )}
+            {diff < 0 && <p className="font-bold text-amber-700">بازگشت نقدی به مشتری: {fmtMoney(-diff)}</p>}
+            {diff === 0 && newTotal > 0 && <p className="font-bold text-teal-700">برابر — بدون پرداخت ✓</p>}
+          </div>
+        </section>
+      </fieldset>
+      {error && <p role="alert" className="sale-correction-error">{error}</p>}
+      {saving && <p role="status" className="sale-correction-help">در حال ثبت… تا پایان ثبت، این صفحه باز می‌ماند.</p>}
       <div className="mt-3">
-        <PrimaryBtn onClick={save} disabled={returnAmount <= 0 || !newLines.length}>
-          ثبت تبادله
+        <PrimaryBtn onClick={save} disabled={saving || returnAmount <= 0 || !newLines.length}>
+          {saving ? 'در حال ثبت…' : 'ثبت تبادله'}
         </PrimaryBtn>
       </div>
     </Modal>

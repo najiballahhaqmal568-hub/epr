@@ -20,6 +20,7 @@ export function NewSaleModal({
   onSaved,
   onHeld,
   onPendingChange,
+  onStageChange,
   draft: suppliedDraft,
   embedded = false
 }: {
@@ -27,6 +28,7 @@ export function NewSaleModal({
   onSaved?: (sale: Sale) => void
   onHeld?: (draft: SaleDraft) => void
   onPendingChange?: (pending: boolean) => void
+  onStageChange?: (stage: 'selection' | 'payment') => void
   draft?: SaleDraft
   embedded?: boolean
 }) {
@@ -34,6 +36,15 @@ export function NewSaleModal({
   const pendingRef = useRef(false)
   const completedRef = useRef(false)
   const [pending, setPending] = useState(false)
+  const [stage, setStage] = useState<'selection' | 'payment'>('selection')
+  const stageHeading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => { onStageChange?.(stage) }, [stage, onStageChange])
+  function changeStage(next: 'selection' | 'payment') {
+    if (pendingRef.current) return
+    setStage(next)
+    setError('')
+    requestAnimationFrame(() => { stageHeading.current?.focus(); stageHeading.current?.scrollIntoView({ block: 'start' }) })
+  }
   useEffect(() => { onPendingChange?.(pending) }, [pending, onPendingChange])
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (pendingRef.current && !completedRef.current) { event.preventDefault(); event.returnValue = '' } }
@@ -323,13 +334,18 @@ export function NewSaleModal({
         {lines.length > 0 && <button disabled={pending} onClick={discard} className="text-red-600">پاک‌کردن سبد</button>}
       </div>
       <fieldset disabled={pending} className="min-w-0">
-      <div className={embedded ? 'sale-workspace' : ''}>
-      <section className="sale-finder">
+      <div className="sale-stage-heading">
+        <div><p className="text-xs text-slate-500">{stage === 'selection' ? '۱ از ۲ · انتخاب جنس' : '۲ از ۲ · پرداخت'}</p><h2 ref={stageHeading} tabIndex={-1} className="text-xl font-bold">{stage === 'selection' ? 'جنس و تعداد را انتخاب کنید' : 'پرداخت فروش'}</h2></div>
+        {stage === 'payment' && <button onClick={() => changeStage('selection')} className="sale-secondary-action">بازگشت به انتخاب</button>}
+      </div>
+      <div className={embedded ? 'sale-workspace' : ''} data-stage={stage}>
+      <section className="sale-finder" hidden={stage !== 'selection'}>
       <h2 className="mb-4 text-xl font-bold">انتخاب جنس</h2>
-      <div className="mb-3 flex gap-2">
+      <div className="segmented mb-4" role="group" aria-label="نوع فروش">
         {(['retail', 'wholesale'] as const).map((t) => (
           <button
             key={t}
+            aria-pressed={saleType === t}
             onClick={() => {
               setSaleType(t)
               setLines((ls) =>
@@ -339,9 +355,7 @@ export function NewSaleModal({
                 })
               )
             }}
-            className={`flex-1 rounded-xl py-2 font-bold ${
-              saleType === t ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
-            }`}
+            className="font-bold"
           >
             {t === 'retail' ? 'پرچون' : 'عمده'}
           </button>
@@ -375,18 +389,18 @@ export function NewSaleModal({
                     setPickerMode(saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0 ? 'choice' : 'single')
                     setHalfQtys({})
                   }}
-                  className="sale-product-card rounded-xl border border-slate-200 bg-white p-3 text-right active:bg-teal-50"
+                  className="sale-product-card"
                 >
                   {e.p.photo ? (
                     <img src={e.p.photo} alt={e.p.name} className="mb-3 h-28 w-full rounded-lg object-cover" />
                   ) : (
                     <span className="sale-product-placeholder mb-3 flex h-28 items-center justify-center rounded-lg bg-slate-50 text-3xl text-slate-400" aria-hidden="true">{e.p.name.slice(0, 2)}</span>
                   )}
-                  <p className="truncate text-sm font-bold text-slate-800">{e.p.name}</p>
-                  <p className="truncate text-xs text-slate-500">
+                  <p className="sale-product-name">{e.p.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">
                     {fmtNum(inStock.length)} سایز · {fmtNum(e.stock)} جوړه
                   </p>
-                  <p className="text-xs font-bold text-teal-700">{fmtMoney(minPrice)}</p>
+                  <p className="sale-product-price">{fmtMoney(minPrice)}</p>
                 </button>
               )
             })}
@@ -402,10 +416,10 @@ export function NewSaleModal({
           return (
             <div
               key={`c${p.id}`}
-              className="mb-2 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800"
+              className="sale-carton-result mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-right"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate">{p.name}</p>
+                <p className="break-words font-bold">{p.name}</p>
                 <p className="block text-xs font-normal">
                   هر کارتن {fmtNum(pairs)} جوړه
                   {p.carton!.price ? ` · کارتنی: ${fmtMoney(p.carton!.price)}` : ''} ·{' '}
@@ -433,7 +447,7 @@ export function NewSaleModal({
                 <button
                   onClick={() => addCartonSale(p, n)}
                   disabled={avail <= 0 || n > avail}
-                  className="rounded-xl bg-amber-700 px-4 py-2 text-white active:bg-amber-800 disabled:opacity-40"
+                  className="rounded-xl bg-[var(--action)] px-4 py-2 text-white disabled:opacity-40"
                 >
                   ＋ افزودن
                 </button>
@@ -446,11 +460,11 @@ export function NewSaleModal({
           {matches.map((v) => {
             const p = productMap.get(v.productId)!
             return (
-              <div key={v.id} className="flex items-stretch border-b border-slate-100 bg-white last:border-0">
+              <div key={v.id} className="sale-search-row flex flex-wrap items-stretch border-b border-slate-100 bg-white last:border-0">
                 <button
                   onClick={() => addLine(v)}
                   disabled={remainingQty(v) <= 0}
-                  className="flex flex-1 items-center justify-between px-3 py-2 text-right active:bg-teal-50 disabled:opacity-40"
+                  className="sale-search-choice flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2 px-3 py-3 text-right disabled:opacity-40"
                 >
                   <span>
                     {p.name} — {v.size} {v.color}
@@ -479,17 +493,18 @@ export function NewSaleModal({
 
       </section>
       <section className="sale-checkout">
+      <div hidden={stage !== 'selection'}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
       {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
       {saleType === 'wholesale' && variants && <BulkSalePrice lines={lines} variants={variants} setLines={setLines} disabled={pending} />}
       {lines.map((l, i) => (
-        <div key={l.variantId} className="mb-2 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-2">
-          <div className="flex-1">
+        <div key={l.variantId} className="sale-cart-line">
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-bold">
               {l.productName} {l.size} {l.color}
             </p>
             <input
-              className="mt-1 w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+              className="sale-line-price mt-2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
               inputMode="numeric"
               aria-label={`قیمت ${l.productName} ${l.size}`}
               value={l.unitPrice}
@@ -497,28 +512,34 @@ export function NewSaleModal({
             />
             <span className="mr-1 text-xs text-slate-500">قیمت فی جوړه</span>
           </div>
-          <div className="flex items-center gap-2">
-            <button aria-label={`کاهش تعداد ${l.productName}`} className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>
+          <div className="sale-quantity-actions">
+            <button aria-label={`کاهش تعداد ${l.productName}`} disabled={l.qty <= 1} className="quantity-step" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>
               −
             </button>
             <input
-              className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+              className="quantity-value"
               inputMode="numeric"
               value={l.qty}
               aria-label={`تعداد ${l.productName} ${l.size}`}
               onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
             />
-            <button aria-label={`افزایش تعداد ${l.productName}`} disabled={!variants || selectedQty(l.variantId) >= (variants.find(v => v.id === l.variantId)?.stockQty ?? 0)} className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800 disabled:opacity-40" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
+            <button aria-label={`افزایش تعداد ${l.productName}`} disabled={!variants || selectedQty(l.variantId) >= (variants.find(v => v.id === l.variantId)?.stockQty ?? 0)} className="quantity-step" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: x.qty + 1 } : x)))}>
               ＋
             </button>
-            <button aria-label={`حذف ${l.productName} از سبد`} className="mr-1 text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+            <button aria-label={`حذف ${l.productName} از سبد`} className="sale-remove-line" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
               <Icon name="trash" />
             </button>
           </div>
           <div className="w-full"><StockSelectionSummary stock={variants ? variants.find(v => v.id === l.variantId)?.stockQty ?? 0 : undefined} selected={selectedQty(l.variantId)} /></div>
         </div>
       ))}
+      </div>
 
+      <div hidden={stage !== 'payment'}>
+      <div className="sale-payment-summary"><div><span>{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه · {saleType === 'retail' ? 'پرچون' : 'عمده'}</span><p className="mt-1 font-bold text-slate-800">{selectedCustomer?.name ?? (remainder > 0 ? 'مشتری را انتخاب کنید' : 'مشتری نقدی')}</p></div><div><span className="block text-xs">قابل پرداخت</span><strong>{fmtMoney(total)}</strong></div></div>
+      {stockInvalid && <p role="alert" className="mb-3 text-sm text-red-700">موجودی یا تعداد سبد درست نیست؛ به انتخاب برگردید و سبد را اصلاح کنید.</p>}
+      <div className="sale-payment-fields">
+      <div className="sale-payment-customer">
       {selectedCustomer ? (
         <div className="mb-3 flex items-center justify-between rounded-xl bg-teal-50 p-2.5">
           <div>
@@ -582,39 +603,34 @@ export function NewSaleModal({
           </button>
         </div>
       )}
+      </div>
 
-      <div className="mt-3 rounded-xl bg-teal-50 p-3">
+      <div className="sale-payment-amounts">
         <div className="flex justify-between text-slate-600">
           <span>مجموع اجناس</span>
           <span>{fmtMoney(subtotal)}</span>
         </div>
         {showDiscount ? (
           <Field label="تخفیف (اختیاری)">
-            <div className="flex gap-2">
-              <input className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
+            <div className="flex flex-wrap gap-2">
+              <input aria-label="تخفیف (اختیاری)" className={inputCls} inputMode="numeric" value={discountStr} onChange={(e) => setDiscountStr(e.target.value)} placeholder="۰" />
+              <button type="button" className="px-3 text-sm text-red-700" onClick={() => { setDiscountStr(''); setShowDiscount(false) }}>حذف تخفیف</button>
               <button
                 type="button"
                 className="shrink-0 rounded-xl bg-white px-3 text-sm font-bold text-slate-500"
-                onClick={() => {
-                  setDiscountStr('')
-                  setShowDiscount(false)
-                }}
+                onClick={() => setShowDiscount(false)}
               >
-                حذف
+                بستن تخفیف
               </button>
             </div>
           </Field>
         ) : (
           <button type="button" onClick={() => setShowDiscount(true)} className="my-2 text-sm font-bold text-teal-700">
-            ＋ افزودن تخفیف
+            {discount > 0 ? `ویرایش تخفیف · ${fmtMoney(discount)}` : '＋ افزودن تخفیف'}
           </button>
         )}
-        <div className="flex items-center justify-between font-bold text-slate-800">
-          <span>قابل پرداخت{discount > 0 ? ` (با ${fmtMoney(discount)} تخفیف)` : ''}</span>
-          <span className="text-xl">{fmtMoney(total)}</span>
-        </div>
-        <div role="group" aria-label="روش پرداخت" className="my-4 flex gap-2">
-          {(['cash', 'credit', 'mixed'] as const).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} className={`flex-1 rounded-xl px-2 py-2 text-sm font-bold ${paymentMode === mode ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`} onClick={() => {
+        <div role="group" aria-label="روش پرداخت" className="segmented my-4">
+          {(['cash', 'credit', 'mixed'] as const).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} onClick={() => {
             setPaidTouched(mode !== 'cash')
             setPaidStr(mode === 'credit' ? '0' : '')
             if (mode !== 'cash') setShowCust(true)
@@ -655,6 +671,7 @@ export function NewSaleModal({
         )}
         {remainder < 0 && <p className="text-sm font-bold text-amber-600">بازگشت به مشتری: {fmtMoney(-remainder)}</p>}
       </div>
+      </div>
 
       {/* نوار چسپان: مجموع و ثبت همیشه دیده شوند */}
       {(saleType === 'wholesale' || shipping) && <div className="mb-3 rounded-xl border border-slate-200 p-3 text-sm">
@@ -667,6 +684,7 @@ export function NewSaleModal({
         {shipping && saleType !== 'wholesale' && <p role="alert" className="mt-2 text-red-700">کرایه برای عمده است؛ نوع فروش را اصلاح کنید یا کرایه را بردارید.</p>}
       </div>}
       {showShipping && <ShippingEditor sale={{ date: Date.now(), saleType, customerId: customerId || undefined, customerName: customers?.find(c => c.id === customerId)?.name, lines, total, paid }} prepared={shipping} onPrepared={setShipping} onClose={() => setShowShipping(false)} />}
+      </div>
       <div data-empty={!lines.length} className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : 'قابل پرداخت'}</p>
@@ -681,11 +699,11 @@ export function NewSaleModal({
           معطل
         </button>
         <button
-          onClick={save}
+          onClick={stage === 'selection' ? () => changeStage('payment') : save}
           disabled={!lines.length || pending || stockInvalid}
-          className="rounded-xl bg-teal-700 px-5 py-3 text-lg font-bold text-white active:bg-teal-800 disabled:opacity-40"
+          className="rounded-xl bg-[var(--action)] px-5 py-3 text-lg font-bold text-white disabled:opacity-40"
         >
-          {pending ? 'در حال ثبت…' : 'ثبت فروش'}
+          {pending ? 'در حال ثبت…' : stage === 'selection' ? 'ادامه به پرداخت' : 'ثبت فروش'}
         </button>
       </div>
       </section>
@@ -706,7 +724,7 @@ export function NewSaleModal({
               <Modal title={`${p.name}`} onClose={() => setPickerFor(null)}>
                 <div className="mb-2 flex items-center justify-center gap-3 rounded-xl bg-slate-50 p-2">
                   <button
-                    className="h-9 w-9 rounded-full bg-white font-bold"
+                    className="quantity-step"
                     onClick={() => setCartonCount(p.id!, n - 1)}
                     disabled={n <= 1}
                   >
@@ -714,7 +732,7 @@ export function NewSaleModal({
                   </button>
                   <span className="text-lg font-bold">{fmtNum(n)} کارتن</span>
                   <button
-                    className="h-9 w-9 rounded-full bg-white font-bold"
+                    className="quantity-step"
                     onClick={() => setCartonCount(p.id!, Math.min(n + 1, avail))}
                     disabled={avail <= 0 || n >= avail}
                   >
@@ -727,12 +745,12 @@ export function NewSaleModal({
                     addCartonSale(p, n)
                     setPickerFor(null)
                   }}
-                  className="mb-2 w-full rounded-xl bg-teal-700 p-4 text-right font-bold text-white active:bg-teal-800 disabled:opacity-40"
+                  className="mb-3 w-full rounded-xl bg-[var(--action)] p-4 text-right font-bold text-white disabled:opacity-40"
                 >
                   <span className="block text-lg">
                     {fmtNum(n)} کارتن ({fmtNum(pairs * n)} جوړه)
                   </span>
-                  <span className="text-sm font-normal opacity-90">
+                  <span className="text-sm font-normal">
                     {avail > 0 ? `${fmtNum(avail)} کارتن باقی‌مانده پس از سبد` : 'کارتن کامل دیگری موجود نیست'}
                     <span className="block">پس از این انتخاب: {fmtNum(Math.max(0, avail - n))} کارتن باقی می‌ماند</span>
                     {p.carton.price ? ` · قیمت کارتنی هر کارتن: ${fmtMoney(p.carton.price)}` : ''}
@@ -741,7 +759,7 @@ export function NewSaleModal({
                 {n > avail && <p role="alert" className="mb-2 text-sm font-bold text-red-700">تعداد کارتن از باقی‌مانده بیشتر است؛ تعداد را کم کنید یا نیم کارتن انتخاب کنید.</p>}
                 <button
                   onClick={() => setPickerMode('half')}
-                  className="w-full rounded-xl bg-amber-100 p-4 text-right font-bold text-amber-800 active:bg-amber-200"
+                  className="w-full rounded-xl border border-slate-200 bg-white p-4 text-right font-bold text-[var(--action)]"
                 >
                   <span className="block text-lg">نیم کارتن ({fmtNum(Math.round(pairs / 2))} جوړه)</span>
                   <span className="text-sm font-normal">سایزها را خودتان تا نصف کارتن انتخاب کنید</span>
@@ -776,21 +794,22 @@ export function NewSaleModal({
                     </span>
                     <div className="flex items-center gap-1">
                       <button
-                        className="h-8 w-8 rounded-full bg-slate-200 font-bold"
+                        className="quantity-step"
                         aria-label={`کاهش نیم کارتن ${v.size} ${v.color}`}
+                        disabled={(halfQtys[v.id!] ?? 0) <= 0}
                         onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) - 1)}
                       >
                         −
                       </button>
                       <input
-                        className="w-12 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
+                        className="quantity-value"
                         inputMode="numeric"
                         aria-label={`تعداد نیم کارتن ${v.size} ${v.color}`}
                         value={halfQtys[v.id!] ?? 0}
                         onChange={(e) => setQ(v.id!, parseNum(e.target.value) || 0)}
                       />
                       <button
-                        className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800"
+                        className="quantity-step"
                         aria-label={`افزایش نیم کارتن ${v.size} ${v.color}`}
                         disabled={remainingQty(v) <= (halfQtys[v.id!] ?? 0)}
                         onClick={() => setQ(v.id!, (halfQtys[v.id!] ?? 0) + 1)}
@@ -837,7 +856,7 @@ export function NewSaleModal({
                     addLine(v)
                     setPickerFor(null)
                   }}
-                  className="mb-1 flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-3 text-right active:bg-teal-50 disabled:opacity-40"
+                  className="mb-2 flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-right disabled:opacity-40"
                 >
                   <span className="text-lg font-bold text-slate-800">
                     {v.size} <span className="text-sm font-normal text-slate-500">{v.color}</span>

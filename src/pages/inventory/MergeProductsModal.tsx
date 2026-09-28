@@ -63,11 +63,11 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
   })
 
   return (
-    <Modal title="🔗 یکجا کردن اجناس تکراری" onClose={onClose}>
-      <p className="mb-3 text-sm text-slate-500">
+    <Modal title="یکجا کردن اجناس تکراری" onClose={onClose}>
+      <section className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm leading-6 text-slate-700" aria-label="راهنمای ادغام">
         اگر یک جنس چند بار ثبت شده (یک بار کارتنی، یک بار جوړه‌ای، یک بار بوجی) این‌جا زیر یک نام می‌آید. بسته‌بندی هویت
         جنس نیست — موجودی همیشه به جوړه شمرده می‌شود. <b>مجموع جوړه و ارزش گدام تغییر نمی‌کند.</b>
-      </p>
+      </section>
 
       {msg && <p className="mb-3 rounded-xl bg-teal-50 p-3 text-sm font-bold text-teal-800">{msg}</p>}
       {error && <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">⚠️ {error}</p>}
@@ -89,12 +89,13 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
                     withIds: [picked.keepId, ...picked.withIds].filter((x) => x !== id)
                   })
                 }
-                className={`mb-1 flex w-full items-center justify-between rounded-xl border-2 p-3 text-right ${
-                  keep ? 'border-teal-600 bg-teal-50' : 'border-slate-200 bg-white'
+                aria-pressed={keep}
+                className={`mb-2 flex min-h-[52px] w-full items-center justify-between rounded-xl border-2 p-3 text-right ${
+                  keep ? 'border-blue-600 bg-blue-50' : 'border-slate-200 bg-white'
                 }`}
               >
                 {label(p)}
-                <span className="text-sm font-bold text-teal-700">{keep ? '✓ می‌ماند' : 'در آن ادغام شود'}</span>
+                <span className="text-sm font-bold text-blue-700">{keep ? 'نام اصلی می‌ماند' : 'نام اصلی شود'}</span>
               </button>
             )
           })}
@@ -104,7 +105,7 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
             <b>{fmtNum([picked.keepId, ...picked.withIds].reduce((s, id) => s + pairsOf(id), 0))}</b>
           </p>
           <div className="flex gap-2">
-            <button onClick={() => setPicked(null)} className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600">
+            <button onClick={() => setPicked(null)} className="min-h-[44px] rounded-xl bg-slate-100 px-5 font-bold text-slate-600">
               لغو
             </button>
             <div className="flex-1">
@@ -131,11 +132,11 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
                     setManualPicks((cur) => (on ? cur.filter((x) => x !== p.id) : [...cur, p.id!]))
                   }
                   className={`mb-1 flex w-full items-center justify-between rounded-xl border-2 p-2.5 text-right ${
-                    on ? 'border-teal-600 bg-teal-50' : 'border-transparent bg-slate-50'
+                  on ? 'border-blue-600 bg-blue-50' : 'border-transparent bg-slate-50'
                   }`}
                 >
                   {label(p)}
-                  <span className="text-xs font-bold text-teal-700">{on ? '✓ انتخاب شد' : 'انتخاب'}</span>
+                  <span className="text-xs font-bold text-blue-700">{on ? 'انتخاب شد' : 'انتخاب'}</span>
                 </button>
               )
             })}
@@ -146,7 +147,7 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
                 setManual(false)
                 setManualPicks([])
               }}
-              className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600"
+              className="min-h-[44px] rounded-xl bg-slate-100 px-5 font-bold text-slate-600"
             >
               ← برگشت
             </button>
@@ -195,7 +196,7 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
                       .map((p) => p.id!)
                   })
                 }
-                className="mt-1 w-full rounded-xl bg-amber-600 py-2 text-sm font-bold text-white"
+                className="mt-2 min-h-[44px] w-full rounded-xl bg-blue-700 px-3 text-sm font-bold text-white active:bg-blue-800"
               >
                 این‌ها یک جنس است — یکجا کن
               </button>
@@ -203,7 +204,7 @@ export default function MergeProductsModal({ onClose }: { onClose: () => void })
           ))}
           <button
             onClick={() => setManual(true)}
-            className="mt-2 w-full rounded-xl border-2 border-dashed border-slate-300 py-2.5 text-sm font-bold text-slate-600"
+            className="mt-3 min-h-[44px] w-full rounded-xl border-2 border-dashed border-blue-200 bg-white px-3 text-sm font-bold text-blue-800"
           >
             انتخاب دستی (نام‌ها فرق دارد ولی جنس یکی است)
           </button>

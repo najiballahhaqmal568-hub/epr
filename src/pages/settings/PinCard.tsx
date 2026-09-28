@@ -25,7 +25,7 @@ export function PinCard() {
       <p className="mb-3 text-sm text-slate-500">با فعال کردن قفل، هر بار که اپ باز می‌شود کود پرسیده می‌شود.</p>
       {!editing ? (
         <div className="flex gap-2">
-          <button onClick={() => setEditing(true)} className="rounded-xl bg-teal-700 px-5 py-2 font-bold text-white">
+          <button onClick={() => setEditing(true)} className="rounded-xl bg-[var(--action)] px-5 py-2 font-bold text-white">
             {pinSet ? 'تغییر کود' : 'فعال کردن قفل'}
           </button>
           {pinSet && (
@@ -50,7 +50,7 @@ export function PinCard() {
             value={pin}
             onChange={(e) => setPin(e.target.value)}
           />
-          <button onClick={save} className="whitespace-nowrap rounded-xl bg-teal-700 px-4 font-bold text-white">
+          <button onClick={save} className="whitespace-nowrap rounded-xl bg-[var(--action)] px-4 font-bold text-white">
             ذخیره
           </button>
         </div>

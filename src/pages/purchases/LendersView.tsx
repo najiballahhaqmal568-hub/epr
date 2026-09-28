@@ -22,7 +22,7 @@ import {
   type LenderGoodsMode
 } from '../../lib/ops'
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
-import { Modal, Field, inputCls, PrimaryBtn, Fab, Empty, Card } from '../../components/ui'
+import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
 import CorrectLenderPaymentModal from './CorrectLenderPaymentModal'
 
@@ -38,38 +38,32 @@ function LendersView() {
 
   return (
     <>
-      <div className="mb-3 rounded-xl bg-white p-3 shadow-sm">
-        <div className="flex justify-between">
-          <span className="text-sm text-slate-500">مجموع قرض ما از اشخاص</span>
-          <span className="font-bold text-red-600">{fmtMoney(total)}</span>
-        </div>
-        <p className="mt-1 text-xs text-slate-400">
+      <button onClick={() => setShowNew(true)} className="primary-button mb-3">＋ قرض‌دهندهٔ جدید</button>
+      <div className="surface party-balance mb-3">
+        <p className="text-sm text-slate-500">مجموع قرض ما از اشخاص</p>
+        <p className="party-balance-amount inventory-money text-red-700">{fmtMoney(total)}</p>
+        <p className="mt-1 text-xs text-slate-500">
           تا وقتی شریک نشده، پولش قرض است — از دارایی کم می‌شود و از مفاد سهم نمی‌برد.
         </p>
       </div>
 
       {lenders?.length === 0 && <Empty text="قرض‌دهنده‌ای ثبت نشده. کسی که به دکان پول قرض داده اینجا ثبت می‌شود." />}
-      {lenders?.map((l) => (
-        <Card key={l.id} onClick={() => setDetail(l)}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-bold text-slate-800">🤝 {l.name}</p>
-              {l.phone && (
-                <p className="text-sm text-slate-500" dir="ltr">
-                  {l.phone}
-                </p>
-              )}
-            </div>
-            <div className="text-left">
-              <p className={`font-bold ${l.balance < 0 ? 'text-teal-700' : 'text-red-600'}`}>{fmtMoney(Math.abs(l.balance))}</p>
-              <p className="text-xs text-slate-400">{l.balance > 0 ? 'قرض ما به او' : l.balance < 0 ? 'طلب ما از او' : 'تصفیه'}</p>
-            </div>
-          </div>
-          <p className="mt-2 text-xs text-slate-500">جزئیات و قسط‌ها ←</p>
-        </Card>
-      ))}
+      {!!lenders?.length && <section className="surface customers-list" aria-label="فهرست قرض‌دهندگان">
+        {lenders.map((l) => (
+          <button key={l.id} className="customer-row" onClick={() => setDetail(l)}>
+            <span className="customer-row-main">
+              <span className="customer-row-name">{l.name}</span>
+              {l.phone && <small dir="ltr" className="customer-row-phone">{l.phone}</small>}
+              <small className="purchase-link">جزئیات و قسط‌ها ←</small>
+            </span>
+            <span className="customer-row-amount">
+              <strong className={`inventory-money ${l.balance > 0 ? 'text-red-700' : l.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(l.balance))}</strong>
+              <small>{l.balance > 0 ? 'قرض ما به او' : l.balance < 0 ? 'طلب ما از او' : 'تصفیه'}</small>
+            </span>
+          </button>
+        ))}
+      </section>}
 
-      <Fab onClick={() => setShowNew(true)} label="قرض‌دهندهٔ جدید" />
       {showNew && <NewLenderModal onClose={() => setShowNew(false)} />}
       {detail && <LenderDetailModal lender={detail} onClose={() => setDetail(null)} />}
     </>
@@ -83,7 +77,7 @@ function NewLenderModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('')
 
   return (
-    <Modal title="🤝 قرض‌دهندهٔ جدید" onClose={onClose}>
+    <Modal title="قرض‌دهندهٔ جدید" onClose={onClose}>
       {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
       <p className="mb-3 text-sm text-slate-500">کسی که به دکان پول قرض داده. اگر بعداً شریک شد، با یک دکمه قرضش سرمایه می‌شود.</p>
       <Field label="نام *">
@@ -241,7 +235,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   }
 
   return (
-    <Modal title={`🤝 ${l.name}`} onClose={onClose}>
+    <Modal title={l.name} onClose={onClose}>
       {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
 
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
@@ -279,12 +273,13 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           setError('')
         }}
       >
-        ✏️ ویرایش مشخصات قرض‌دهنده
+        ویرایش مشخصات قرض‌دهنده
       </button>
 
       <div className="mb-3 grid grid-cols-2 gap-2">
         <button
-          className="flex-1 rounded-xl bg-teal-700 py-2 text-sm font-bold text-white"
+          className="primary-button text-sm"
+          aria-pressed={mode === 'loan'}
           onClick={() => {
             setMode(mode === 'loan' ? 'none' : 'loan')
             reset()
@@ -293,7 +288,8 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           ＋ دریافت از او
         </button>
         <button
-          className="flex-1 rounded-xl bg-amber-100 py-2 text-sm font-bold text-amber-800"
+          className="party-action"
+          aria-pressed={mode === 'repay'}
           onClick={() => {
             setMode(mode === 'repay' ? 'none' : 'repay')
             reset()
@@ -302,7 +298,8 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           پول به او
         </button>
         <button
-          className="rounded-xl bg-orange-100 py-2 text-sm font-bold text-orange-800"
+          className="party-action"
+          aria-pressed={mode === 'goods'}
           onClick={() => {
             setMode(mode === 'goods' ? 'none' : 'goods')
             reset()
@@ -311,7 +308,8 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           کفش به او
         </button>
         <button
-          className="rounded-xl bg-blue-100 py-2 text-sm font-bold text-blue-800"
+          className="party-action"
+          aria-pressed={mode === 'direct'}
           onClick={() => {
             setMode(mode === 'direct' ? 'none' : 'direct')
             reset()
@@ -320,13 +318,14 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           پرداخت مستقیم به فروشنده
         </button>
         <button
-          className="col-span-2 rounded-xl border border-dashed border-slate-400 bg-slate-50 py-2 text-sm font-bold text-slate-700"
+          className="party-action col-span-2"
+          aria-pressed={mode === 'opening'}
           onClick={() => {
             setMode(mode === 'opening' ? 'none' : 'opening')
             reset()
           }}
         >
-          🕘 سند قبلی — قبل از استفاده از اپ
+          سند قبلی — قبل از استفاده از اپ
         </button>
       </div>
 
@@ -653,7 +652,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
 
       {mode === 'opening' && (
         <div className="mb-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-3">
-          <p className="mb-2 font-bold text-slate-800">🕘 سند قبلی — قبل از استفاده از اپ</p>
+          <p className="mb-2 font-bold text-slate-800">سند قبلی — قبل از استفاده از اپ</p>
           <p className="mb-2 rounded-lg bg-white p-2 text-xs text-slate-600">
             این سند فقط حساب قرض‌دهنده را می‌سازد؛ صندوق، موجودی گدام و مفاد امروز تغییر نمی‌کند.
           </p>
@@ -693,7 +692,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               <div className="mb-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${manualOpeningGoods ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-600'}`}
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${manualOpeningGoods ? 'border-[var(--action)] bg-[var(--action)] text-white' : 'border-slate-300 bg-white text-slate-600'}`}
                   onClick={() => {
                     setManualOpeningGoods(true)
                     setVariantId('')
@@ -704,7 +703,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
                 </button>
                 <button
                   type="button"
-                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${!manualOpeningGoods ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-600'}`}
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${!manualOpeningGoods ? 'border-[var(--action)] bg-[var(--action)] text-white' : 'border-slate-300 bg-white text-slate-600'}`}
                   onClick={() => {
                     setManualOpeningGoods(false)
                     setOldProductName('')
@@ -911,9 +910,10 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
             setShareStr(String(fairShare))
             setError('')
           }}
-          className="mb-3 w-full rounded-xl border-2 border-dashed border-purple-400 py-2.5 text-sm font-bold text-purple-700"
+          className="party-action mb-3 w-full"
+          aria-pressed={mode === 'partner'}
         >
-          🤝 شریک شدن — تبدیل قرض به سرمایه
+          شریک شدن — تبدیل قرض به سرمایه
         </button>
       )}
 

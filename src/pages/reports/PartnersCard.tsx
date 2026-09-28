@@ -92,14 +92,14 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
 
   return (
     <Card>
-      <p className="mb-1 font-bold text-slate-700">🤝 شرکا و سرمایه</p>
+      <p className="mb-1 font-bold text-slate-700">شرکا و سرمایه</p>
       {start > 0 && <p className="mb-2 text-xs text-slate-400">شروع سال شراکت: {fmtDateShort(start)}</p>}
       {partners?.length === 0 && (
         <div className="mb-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
           <p className="mb-1 font-bold">شریکی ثبت نشده.</p>
           <p>
             برای تعیین سهم‌ها اول همهٔ حساب‌ها (گدام، صندوق، طلب، قرض) را در اپ وارد کنید، بعد از
-            <b> «تنظیمات ← 🎬 شروع سال مالی» </b>
+            <b> «بیشتر ← تنظیمات پیشرفته ← شروع سال مالی» </b>
             سهم‌ها را یک‌بار تعیین کنید. آنجا فیصدی و سرمایهٔ خودتان خودکار حساب می‌شود.
           </p>
         </div>
@@ -192,7 +192,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
           ＋ شریک جدید (در میان سال)
         </button>
         {(partners?.length ?? 0) > 0 && (
-          <button onClick={() => setShowSettle(true)} className="flex-1 rounded-xl bg-teal-700 py-2 text-sm font-bold text-white">
+          <button onClick={() => setShowSettle(true)} className="flex-1 rounded-xl bg-[var(--action)] py-2 text-sm font-bold text-white">
             📒 حساب سال شراکت
           </button>
         )}
@@ -211,7 +211,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
         <Modal title="شریک جدید در میان سال" onClose={() => setShowAdd(false)}>
           <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
             این فورم فقط برای کسی است که <b>در میان سال</b> با پول نو شریک می‌شود. اگر تازه می‌خواهید سال مالی را شروع
-            کنید، این را ببندید و به <b>«تنظیمات ← 🎬 شروع سال مالی»</b> بروید — آنجا سهم و سرمایهٔ خودتان خودکار حساب
+            کنید، این را ببندید و به <b>«بیشتر ← تنظیمات پیشرفته ← شروع سال مالی»</b> بروید — آنجا سهم و سرمایهٔ خودتان خودکار حساب
             می‌شود.
           </p>
           <Field label="نام شریک *">

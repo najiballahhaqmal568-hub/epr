@@ -101,13 +101,9 @@ export default function Settings({
 
   return (
     <div className="p-4">
-      <div className="mb-3 flex items-center gap-2">
-        {onBack && (
-          <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
-            برگشت
-          </button>
-        )}
-        <h1 className="text-xl font-bold text-slate-800">{titles[section]}</h1>
+      <div className="page-heading">
+        <div><h1>{titles[section]}</h1></div>
+        {onBack && <button onClick={onBack} className="customers-back">برگشت</button>}
       </div>
 
       {show('account') && <SyncDetails />}
@@ -126,7 +122,7 @@ export default function Settings({
             <p className="mb-3 text-sm text-slate-500">
               هر چند روز یک بار بکاپ بگیرید تا اگر موبایل گم یا خراب شد، اطلاعات از بین نرود.
             </p>
-            <button onClick={backup} className="w-full rounded-xl bg-teal-700 py-3 font-bold text-white">
+            <button onClick={backup} className="w-full rounded-xl bg-[var(--action)] py-3 font-bold text-white">
               دانلود فایل بکاپ
             </button>
           </Card>
@@ -139,7 +135,7 @@ export default function Settings({
             <button
               disabled={restoreBusy}
               onClick={() => mergeFileRef.current?.click()}
-              className="w-full rounded-xl bg-teal-50 py-3 font-bold text-teal-700 disabled:opacity-40"
+              className="w-full rounded-xl bg-[var(--action-tint)] py-3 font-bold text-[var(--action)] disabled:opacity-40"
             >
               ادغام امن بکاپ (پیشنهادی)
             </button>

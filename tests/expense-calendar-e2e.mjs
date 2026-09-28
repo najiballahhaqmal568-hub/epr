@@ -40,7 +40,7 @@ await page.click('text=مصارف و صندوق')
 await page.waitForSelector('button:has-text("ثبت مصرف جدید")', { timeout: 30000 })
 
 // پیش‌فرض: فهرست — سوییچ به تقویم
-check('پیش‌فرض فهرست است', await page.locator('button:text-is("📋 فهرست")').getAttribute('class').then((c) => c.includes('bg-teal-700')), true)
+check('پیش‌فرض فهرست است', await page.getByRole('group', { name: 'نمایش مصارف' }).getByRole('button', { name: 'فهرست', exact: true }).getAttribute('aria-pressed'), 'true')
 await page.click('button:has-text("تقویم")')
 await page.waitForSelector('text=لمس کنید تا مصارف روز باز شود', { timeout: 10000 })
 check('تقویم باز شد', true, true)

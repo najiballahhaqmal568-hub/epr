@@ -17,7 +17,7 @@ function YearStartCard() {
 
   return (
     <Card>
-      <p className="mb-1 font-bold text-slate-800">🎬 شروع سال مالی</p>
+      <p className="mb-1 font-bold text-slate-800">شروع سال مالی</p>
       <p className="mb-3 text-sm text-slate-500">
         ترتیب کار: <b>۱)</b> اول همهٔ حساب‌ها را در اپ وارد کنید (گدام، صندوق، طلب، قرض) — <b>۲)</b> بعد اینجا سهم شریک را
         تعیین کنید. سهم و سرمایهٔ خودتان خودکار حساب می‌شود تا مفاد روز اول صفر باشد.
@@ -83,7 +83,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
 
   if (done)
     return (
-      <Modal title="🎬 شروع سال مالی" onClose={onClose}>
+      <Modal title="شروع سال مالی" onClose={onClose}>
         <p className="py-6 text-center text-lg font-bold text-teal-700">✅ سال مالی شروع شد</p>
         <p className="mb-4 text-center text-sm text-slate-500">
           سرمایهٔ شما {fmtMoney(ownerCapital)} ثبت شد و مفاد از امروز شمرده می‌شود.
@@ -93,7 +93,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
     )
 
   return (
-    <Modal title="🎬 شروع سال مالی" onClose={onClose}>
+    <Modal title="شروع سال مالی" onClose={onClose}>
       {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
 
       {step === 0 && (
@@ -328,7 +328,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
               <span className="font-bold">{fmtMoney(othersCapital + ownerCapital)}</span>
             </div>
           </div>
-          <p className="mt-2 rounded-xl bg-teal-700 p-3 text-center font-bold text-white">مفاد امروز: ۰ ؋ ✅</p>
+          <p className="mt-2 rounded-xl bg-[var(--action)] p-3 text-center font-bold text-white">مفاد امروز: ۰ ؋ ✅</p>
           <p className="mt-1 text-center text-xs text-slate-400">یعنی سال با حساب پاک شروع می‌شود</p>
           <div className="mt-3 flex gap-2">
             <button onClick={() => setStep(1)} className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600">

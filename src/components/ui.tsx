@@ -13,6 +13,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 
   useEffect(() => {
     const dialog = dialogRef.current
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     dialog?.showModal()
     pushModal()
     const entry = {
@@ -24,13 +25,14 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     addModal(entry.close, entry.popped)
     return () => {
       dialog?.close()
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
       // اگر Back مودال را بسته، appHistory همان پله و استک را جمع کرده است.
       if (!poppedRef.current) removeModal(entry.close)
     }
   }, [])
 
   return (
-    <dialog ref={dialogRef} className="modal-dialog" aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); onClose() }}>
+    <dialog ref={dialogRef} className="modal-dialog" aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose() }}>
       <div className="modal-body">
         <div className="modal-heading">
           <h2 id={titleId}>{title}</h2>
@@ -47,14 +49,13 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="mb-3 block">
-      <span className="mb-1 block text-sm font-bold text-slate-600">{label}</span>
+      <span className="field-label">{label}</span>
       {children}
     </label>
   )
 }
 
-export const inputCls =
-  'w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-800 focus:border-teal-600 focus:outline-none'
+export const inputCls = 'ui-input'
 
 export function PrimaryBtn({ children, onClick, disabled, type }: { children: ReactNode; onClick?: () => void; disabled?: boolean; type?: 'submit' | 'button' }) {
   return (
@@ -62,7 +63,7 @@ export function PrimaryBtn({ children, onClick, disabled, type }: { children: Re
       type={type ?? 'button'}
       onClick={onClick}
       disabled={disabled}
-      className="w-full rounded-xl bg-teal-700 py-3 font-bold text-white active:bg-teal-800 disabled:opacity-40"
+      className="primary-button"
     >
       {children}
     </button>
@@ -75,6 +76,7 @@ export function Fab({ onClick, label }: { onClick: () => void; label?: string })
   return (
     <button
       onClick={onClick}
+      aria-label={label || 'افزودن'}
       className="premium-fab"
     >
       <Icon name="plus" /> {label}
@@ -83,14 +85,19 @@ export function Fab({ onClick, label }: { onClick: () => void; label?: string })
 }
 
 export function Empty({ text }: { text: string }) {
-  return <p className="mt-16 text-center text-slate-400">{text}</p>
+  return <p className="empty-state">{text}</p>
 }
 
 export function Card({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
   return (
-    <div onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
+    <div onClick={onClick ? (event) => {
+      const target = event.target as Element
+      const control = target.closest('button, a, input, select, textarea, summary, [role="button"], [contenteditable="true"]')
+      if (control && control !== event.currentTarget) return
+      onClick()
+    } : undefined} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onClick() } } : undefined}
-      className="mb-2 rounded-xl border border-slate-200 bg-white p-3 active:bg-slate-50">
+      className="ui-card">
       {children}
     </div>
   )

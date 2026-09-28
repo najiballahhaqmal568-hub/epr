@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: صفحهٔ دفتر فزیکی — نوشتن، دیدن، جستجو و چیدمان */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // سه مشتری پرچون: صفحه‌ها عمداً مخالف حروف — «۱۰» نباید پیش از «۲» بیاید
 await page.evaluate(async () => {
@@ -34,12 +34,14 @@ await page.evaluate(async () => {
   await put('customers', { name: 'رحیم', type: 'retail', balance: 0, family: 'کریمی', createdAt: Date.now() })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=مشتریان')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
+await page.getByRole('button', { name: 'مشتریان', exact: true }).click()
 await page.waitForTimeout(700)
 
 const order = async () => {
-  const names = await page.locator('.mt-3 p.font-bold.text-slate-800').allInnerTexts()
+  const names = await page.locator('[aria-label="فهرست مشتریان"] .customer-row-name').allInnerTexts()
   return names.map((n) => n.trim().split(/\s/)[0]).filter((n) => ['الف', 'ب', 'پ'].includes(n))
 }
 
@@ -81,11 +83,11 @@ await page.waitForTimeout(600)
 if (await page.locator('input[placeholder="مثلاً ۱۲ یا ۱۲/الف"]').count()) fail('خانهٔ صفحه هنوز در فرم ثبت مشتری است')
 if (await page.locator('text=قرض قبلی (اختیاری)').count()) fail('قرض قبلی هنوز در فرم ثبت مشتری است')
 console.log('✅ در فرم ثبت مشتری نه خانهٔ صفحه است نه قرض قبلی')
-await page.locator('button:has-text("✕")').last().click()
+await page.locator('dialog[open]').last().getByRole('button', { name: 'بستن', exact: true }).click()
 await page.waitForTimeout(500)
 
 // «پ» تنها حرف است و در «پرچون» هم می‌آید — پس دقیقاً همان کارت را می‌گیریم
-await page.locator('.mt-3 p.font-bold.text-slate-800', { hasText: /^پ$/ }).click()
+await page.locator('[aria-label="فهرست مشتریان"] .customer-row-name', { hasText: /^پ$/ }).click()
 await page.waitForTimeout(500)
 await page.click('button:has-text("قرض قبلی")')
 await page.waitForTimeout(400)

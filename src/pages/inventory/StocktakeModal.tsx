@@ -76,16 +76,16 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
     <Modal title="شمارش فزیکی گدام" onClose={onClose}>
       {phase === 'counting' && (
         <>
-          <p className="mb-2 text-sm text-slate-500">
+          <p className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm leading-6 text-slate-700">
             هر جنس را بشمارید و تعداد واقعی را بنویسید. اجناسی که خالی بمانند تغییری نمی‌کنند.
           </p>
-          <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
+          <div className="mb-3 flex gap-2 overflow-x-auto pb-1" role="group" aria-label="دامنهٔ شمارش">
             {SCOPES.map((s) => (
               <button
                 key={s.id}
                 onClick={() => setScope(s.id)}
-                className={`whitespace-nowrap rounded-full px-3 py-1 text-sm font-bold ${
-                  scope === s.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'
+                className={`min-h-[44px] whitespace-nowrap rounded-xl px-3 text-sm font-bold transition-colors ${
+                  scope === s.id ? 'bg-blue-700 text-white shadow-sm' : 'bg-white text-slate-700 ring-1 ring-slate-200'
                 }`}
               >
                 {s.label}
@@ -93,33 +93,35 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           {scope !== 'all' && (
-            <p className="mb-2 rounded-xl bg-teal-50 p-2.5 text-xs text-teal-900">
+            <p className="mb-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-900">
               فقط اجناسی که در این دوره فروخته شده نشان داده می‌شود — {fmtNum(skipped)} سایز دیگر حرکت نکرده و لازم نیست
               دوباره شمرده شود.
             </p>
           )}
-          <input className={inputCls} placeholder="فلتر نام یا برند..." value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <p className="my-2 text-sm font-bold text-teal-700">
-            {fmtNum(countedNum)} از {fmtNum(total)} شمارش شده
-          </p>
+          <input aria-label="جستجوی شمارش گدام" className={inputCls} placeholder="فلتر نام یا برند..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <section className="my-3 flex items-center justify-between rounded-2xl bg-slate-950 p-3 text-sm text-white" aria-label="خلاصهٔ شمارش">
+            <span className="text-slate-300">پیشرفت شمارش</span>
+            <strong>{fmtNum(countedNum)} از {fmtNum(total)} سایز</strong>
+          </section>
           {total === 0 && (
             <p className="mb-3 rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-500">
               در این دوره چیزی فروخته نشده — چیزی برای شمارش نیست.
             </p>
           )}
           {visible.map((p) => (
-            <div key={p.id} className="mb-3">
-              <p className="mb-1 font-bold text-slate-700">
+            <div key={p.id} className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="mb-2 font-bold text-slate-800">
                 {p.name} {p.brand && <span className="text-sm font-normal text-slate-400">({p.brand})</span>}
               </p>
               {(byProduct.get(p.id!) ?? []).map((v) => (
-                <div key={v.id} className="mb-1 flex items-center gap-2 rounded-lg bg-slate-50 p-2">
+                <div key={v.id} className="mb-2 flex items-center gap-2 rounded-xl bg-slate-50 p-2.5">
                   <span className="flex-1 text-sm">
                     {v.size} {v.color}
                     <span className="mr-2 text-xs text-slate-400">در اپ: {fmtNum(v.stockQty)}</span>
                   </span>
                   <input
-                    className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-center"
+                    aria-label={`شمارش واقعی ${p.name} ${v.size} ${v.color}`}
+                    className="min-h-[44px] w-20 rounded-xl border border-slate-300 bg-white px-2 text-center font-bold text-slate-800"
                     inputMode="numeric"
                     placeholder="شمار"
                     value={counts[v.id!] ?? ''}
@@ -137,11 +139,11 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
 
       {phase === 'confirm' && (
         <>
-          <p className="mb-3 font-bold text-slate-700">نتیجهٔ شمارش — قبل از ثبت بررسی کنید:</p>
-          <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
+          <p className="mb-3 text-base font-bold text-slate-800">نتیجهٔ شمارش — قبل از ثبت بررسی کنید</p>
+          <section className="mb-3 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm" aria-label="خلاصهٔ اختلاف شمارش">
             <div className="flex justify-between py-1">
               <span>برابر با اپ</span>
-              <span className="font-bold text-teal-700">{fmtNum(diffs.length - changed.length)} جنس</span>
+              <span className="font-bold text-blue-700">{fmtNum(diffs.length - changed.length)} جنس</span>
             </div>
             <div className="flex justify-between py-1">
               <span>دارای تفاوت</span>
@@ -149,11 +151,11 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex justify-between border-t border-slate-200 py-1">
               <span>تفاوت ارزش (به قیمت خرید)</span>
-              <span className={`font-bold ${valueDiff < 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(valueDiff)}</span>
+              <span className={`font-bold ${valueDiff < 0 ? 'text-red-600' : 'text-blue-700'}`}>{fmtMoney(valueDiff)}</span>
             </div>
-          </div>
+          </section>
           {changed.map((d) => (
-            <div key={d.v.id} className="mb-1 flex justify-between rounded-lg bg-red-50 p-2 text-sm">
+            <div key={d.v.id} className="mb-2 flex justify-between rounded-xl border border-red-100 bg-red-50 p-3 text-sm">
               <span>
                 {productName(d.v)} {d.v.size} {d.v.color}
               </span>
@@ -163,12 +165,12 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
               </span>
             </div>
           ))}
-          {changed.length === 0 && <p className="mb-3 text-teal-700">✅ همه چیز برابر است — چیزی تغییر نمی‌کند.</p>}
+          {changed.length === 0 && <p className="mb-3 rounded-xl bg-blue-50 p-3 text-blue-800">همه چیز برابر است — چیزی تغییر نمی‌کند.</p>}
           <div className="mt-3 flex gap-2">
-            <button onClick={() => setPhase('counting')} className="flex-1 rounded-xl bg-slate-100 py-3 font-bold text-slate-700">
+            <button onClick={() => setPhase('counting')} className="min-h-[44px] flex-1 rounded-xl bg-slate-100 px-3 font-bold text-slate-700">
               برگشت
             </button>
-            <button onClick={apply} className="flex-1 rounded-xl bg-teal-700 py-3 font-bold text-white">
+            <button onClick={apply} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
               ثبت شمارش
             </button>
           </div>
@@ -182,7 +184,7 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
           <div className="mx-auto max-w-xs rounded-xl bg-slate-50 p-3 text-right text-sm">
             <div className="flex justify-between py-1">
               <span>برابر</span>
-              <span className="font-bold text-teal-700">{fmtNum(result.matched)} جنس</span>
+              <span className="font-bold text-blue-700">{fmtNum(result.matched)} جنس</span>
             </div>
             <div className="flex justify-between py-1">
               <span>اصلاح شد</span>
@@ -190,11 +192,11 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex justify-between border-t border-slate-200 py-1">
               <span>تفاوت ارزش</span>
-              <span className={`font-bold ${result.valueDiff < 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(result.valueDiff)}</span>
+              <span className={`font-bold ${result.valueDiff < 0 ? 'text-red-600' : 'text-blue-700'}`}>{fmtMoney(result.valueDiff)}</span>
             </div>
           </div>
           <p className="mt-3 text-xs text-slate-400">اصلاحات در تاریخچهٔ تعدیل هر جنس با یادداشت «شمارش گدام» ثبت شد.</p>
-          <button onClick={onClose} className="mt-4 w-full rounded-xl bg-teal-700 py-3 font-bold text-white">
+          <button onClick={onClose} className="mt-4 min-h-[44px] w-full rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
             بستن
           </button>
         </div>

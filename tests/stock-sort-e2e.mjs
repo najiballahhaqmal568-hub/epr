@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: چیدمان گدام — حرف، تاریخ، ارزش */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // سه جنس با حرف، تاریخ و ارزش عمداً مخالف هم:
 //  «الف» → کهنه‌ترین (۱۰۰ روز پیش)، ارزش کم   ۵×۱۰۰ = ۵۰۰
@@ -43,17 +43,18 @@ await page.evaluate(async () => {
   await mk('پ', 10 * day, 4, 1000)
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 await page.waitForTimeout(700)
 
 // ترتیب نام‌ها در فهرست
 const order = async () => {
-  const names = await page.locator('.mt-3 p.font-bold.text-slate-800').allInnerTexts()
+  const names = await page.locator('[aria-label="فهرست موجودی"] button[aria-expanded] p.font-bold').allInnerTexts()
   return names.map((n) => n.trim().split(/\s/)[0]).filter((n) => ['الف', 'ب', 'پ'].includes(n))
 }
 
-if (!(await page.locator('text=چیدمان:').count())) fail('گزینهٔ چیدمان نیامد')
+if (!(await page.getByRole('group', { name: 'چیدمان فهرست' }).count())) fail('گزینهٔ چیدمان نیامد')
 
 await page.click('button:has-text("حرف (الف–ی)")')
 await page.waitForTimeout(400)
@@ -88,8 +89,9 @@ console.log('✅ ارزش: ' + o.join(' ← '))
 
 // انتخاب باید بعد از بستن و باز کردن اپ یادش بماند
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 await page.waitForTimeout(700)
 o = await order()
 if (o.join(',') !== 'ب,پ,الف') fail('چیدمان انتخابی یادش نماند: ' + o.join(','))

@@ -37,13 +37,13 @@ try {
   assert.equal(await page.getByRole('button', { name: 'افزایش تعداد بوت آزمایشی', exact: true }).isDisabled(), true)
   await qty.fill('6')
   await page.getByText(/۱ جوره بیشتر از موجودی/).first().waitFor()
-  assert.equal(await page.getByRole('button', { name: 'ثبت فروش', exact: true }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).isDisabled(), true)
   assert.deepEqual(await page.evaluate(() => window.stock()), [5, 4], 'selection never changes stock')
   await qty.fill('1.5')
   await page.getByText('تعداد باید عدد صحیح باشد', { exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: 'ثبت فروش', exact: true }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).isDisabled(), true)
   await qty.fill('4')
-  assert.equal(await page.getByRole('button', { name: 'ثبت فروش', exact: true }).isEnabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).isEnabled(), true)
   // Half-carton choices must subtract the four pairs already in the cart.
   await page.getByRole('button', { name: /بوت آزمایشی/ }).filter({ has: page.locator('p') }).first().click()
   await page.getByRole('button', { name: /نیم کارتن/ }).click()
@@ -59,7 +59,7 @@ try {
   // Incoming stock changes revalidate an open cart immediately.
   await page.evaluate(async () => { await (await import('/src/db.ts')).db.variants.update(window.v1, { stockQty: 3 }) })
   await page.getByText(/۲ جوره بیشتر از موجودی/).first().waitFor()
-  assert.equal(await page.getByRole('button', { name: 'ثبت فروش', exact: true }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).isDisabled(), true)
   await page.screenshot({ path: 'qa-sale-availability.png', fullPage: true })
   await qty.fill('1')
   await page.evaluate(async () => {
@@ -88,6 +88,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `no overflow at ${width}`)
   }
   assert.deepEqual(await page.evaluate(() => window.stock()), [3, 8], 'cartons and search never write stock')
+  await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
   await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
   await page.waitForFunction(async () => (await (await import('/src/db.ts')).db.sales.count()) === 1)
   assert.deepEqual(await page.evaluate(() => window.stock()), [0, 5], 'stock changes only at final sale registration')

@@ -53,9 +53,9 @@ export function FamilyDetail({
 
   return (
     <Modal title={`👨‍👩‍👦 خانوادهٔ ${family}`} onClose={onClose}>
-      <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
+      <div className="surface party-balance mb-3">
         <p className="text-sm text-slate-500">قرض مجموعی خانواده</p>
-        <p className={`text-2xl font-bold ${famDebt > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(famDebt)}</p>
+        <p className={`party-balance-amount inventory-money ${famDebt > 0 ? 'text-red-700' : 'text-teal-700'}`}>{fmtMoney(famDebt)}</p>
       </div>
       <p className="mb-1 text-sm font-bold text-slate-700">اعضا</p>
       <div className="mb-3">

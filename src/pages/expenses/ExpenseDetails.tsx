@@ -69,7 +69,7 @@ export default function ExpenseDetails({ expenseId, onClose, onCorrect }: {
             </div>
           </div> : <div className="flex flex-col gap-2">
             {correctionBlocked && (expense.type === 'home' || expense.type === 'personal') && <p className="text-sm text-amber-800">{correctionBlocked}</p>}
-            {canCorrect && <button className="rounded-xl bg-teal-700 py-3 font-bold text-white" onClick={() => onCorrect(expense)}>اصلاح سند</button>}
+            {canCorrect && <button className="rounded-xl bg-[var(--action)] py-3 font-bold text-white" onClick={() => onCorrect(expense)}>اصلاح سند</button>}
             <button className="rounded-xl border border-red-200 py-3 font-bold text-red-700" onClick={() => setConfirmDelete(true)}>حذف سند اشتباهی</button>
           </div>}
           {error && <p role="alert" className="mt-3 text-sm font-bold text-red-700">{error}</p>}

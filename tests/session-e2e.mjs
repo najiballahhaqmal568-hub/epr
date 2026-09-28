@@ -1,17 +1,16 @@
 /** آزمایش واقعی مرورگر: با تمام شدن سشن سرور، اپ نباید به صفحهٔ ورود بپرد */
-import { chromium } from 'playwright-core'
-
-const URL = process.env.URL ?? 'http://localhost:4173/'
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
-const page = await browser.newPage()
-page.on('pageerror', (e) => console.error('خطای صفحه:', e.message))
+import { localApp } from './local-app.mjs'
+import assert from 'node:assert/strict'
+const app = await localApp()
+const { page, origin } = app
+const errors = []
+page.on('pageerror', (e) => errors.push(e.message))
 const fail = (m) => {
   console.error('❌ ' + m)
-  process.exit(1)
+  throw new Error(m)
 }
-
-await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+try {
+await page.getByRole('heading', { name: 'خانه', exact: true }).waitFor()
 
 // دکانی که سرور تنظیم شده و پروفایلش ذخیره است، ولی سشن سرور تمام شده
 // (توکن کهنه شده — همان چیزی که در گوشی مالک پیش می‌آمد)
@@ -35,25 +34,36 @@ await page.evaluate(async () => {
     stockQty: 10, purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, lowStock: 2
   })
 })
-await page.reload()
+await page.goto(origin, { waitUntil: 'domcontentloaded' })
 await page.waitForTimeout(4000)
 
 let body = await page.locator('body').innerText()
 if (/ورود به حساب/.test(body)) fail('اپ به صفحهٔ ورود پرید — همان اشکالی که مالک دید:\n' + body.slice(0, 400))
-if (!/داشبورد/.test(body)) fail('اپ باز نشد:\n' + body.slice(0, 400))
+if (!/خانه/.test(body)) fail('اپ باز نشد:\n' + body.slice(0, 400))
 console.log('✅ با تمام شدن سشن سرور، اپ باز ماند و به صفحهٔ ورود نپرید')
 
 if (!/همگام‌سازی متوقف است/.test(body)) fail('نوار «همگام‌سازی متوقف است» نیامد:\n' + body.slice(0, 400))
 console.log('✅ نوار زرد گفت همگام‌سازی متوقف است — کار ادامه دارد')
 
 // کار دکان باید ادامه یابد: یک فروش نقدی ثبت شود
-await page.click('nav >> text=فروش')
+await page.getByRole('navigation').getByRole('button', { name: 'فروش', exact: true }).click()
 await page.click('button:has-text("فروش جدید")')
 await page.waitForTimeout(700)
 await page.locator('button:has-text("کوهستان")').first().click()
 await page.waitForSelector('text=انتخاب سایز')
 await page.click('button:has-text("42 سیاه")')
 await page.waitForTimeout(400)
+const working = await page.evaluate(() => sessionStorage.getItem('epr_sale_working_v1'))
+assert.ok(working, 'checkout persists the working sale before navigation')
+await page.getByRole('navigation').getByRole('button', { name: 'خانه', exact: true }).click()
+await page.getByRole('navigation').getByRole('button', { name: 'فروش', exact: true }).click()
+const resumed = JSON.parse(await page.evaluate(() => sessionStorage.getItem('epr_sale_working_v1')))
+const original = JSON.parse(working)
+// Reopening the workspace refreshes its timestamp, not its commercial fields.
+delete resumed.updatedAt
+delete original.updatedAt
+assert.deepEqual(resumed, original, 'Home does not discard the working sale')
+await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
 await page.click('button:has-text("ثبت فروش")')
 await page.waitForTimeout(1200)
 const sold = await page.evaluate(async () => {
@@ -69,7 +79,7 @@ if (sold !== 1) fail('فروش ثبت نشد در حالی که سشن تمام 
 console.log('✅ فروش با وجود قطع بودن سرور ثبت شد')
 
 // «ورود دوباره» باید راه برگشت داشته باشد — دکان پشت صفحهٔ ورود نماند
-await page.click('nav >> text=داشبورد')
+await page.click('nav >> text=خانه')
 await page.waitForTimeout(500)
 await page.click('button:has-text("ورود دوباره")')
 await page.waitForTimeout(700)
@@ -78,6 +88,7 @@ if (!/ورود به حساب/.test(body)) fail('دکمهٔ «ورود دوبار
 await page.click('text=فعلاً بدون همگام‌سازی کار می‌کنم')
 await page.waitForTimeout(700)
 body = await page.locator('body').innerText()
-if (!/داشبورد/.test(body)) fail('راه برگشت از صفحهٔ ورود بسته بود:\n' + body.slice(0, 400))
+if (!/خانه/.test(body)) fail('راه برگشت از صفحهٔ ورود بسته بود:\n' + body.slice(0, 400))
 console.log('✅ از صفحهٔ ورود راه برگشت به اپ باز است')
-process.exit(0)
+assert.deepEqual(errors, [])
+} finally { await app.close() }

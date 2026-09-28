@@ -33,7 +33,7 @@ export function ReminderCard() {
               }
             }
           }}
-          className={`rounded-xl px-5 py-2 font-bold ${on ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+          className={`rounded-xl px-5 py-2 font-bold ${on ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
         >
           {on ? 'فعال ✓' : 'غیرفعال'}
         </button>
@@ -70,7 +70,7 @@ export function ReminderCard() {
           />
           <button
             onClick={() => void db.settings.put({ key: 'lowCashLimit', value: parseNum(lowStr) })}
-            className="rounded-xl bg-teal-700 px-5 py-2.5 font-bold text-white"
+            className="rounded-xl bg-[var(--action)] px-5 py-2.5 font-bold text-white"
           >
             ذخیره
           </button>
@@ -84,7 +84,7 @@ export function ReminderCard() {
         </p>
         <button
           onClick={() => void db.settings.put({ key: 'debtReminderOn', value: debtOn === false })}
-          className={`rounded-xl px-5 py-2 font-bold ${debtOn !== false ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+          className={`rounded-xl px-5 py-2 font-bold ${debtOn !== false ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
         >
           {debtOn !== false ? 'فعال ✓' : 'غیرفعال'}
         </button>

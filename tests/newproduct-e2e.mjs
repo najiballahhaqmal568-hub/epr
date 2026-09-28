@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: ثبت بوت جدید از فورم، و اصلاح موجودی از همان فورم */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,8 +12,9 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 
 // «بوت جدید» → ویزارد کارتنی → «ثبت عادی بدون کارتن»
 await page.click('button:has-text("بوت جدید")')
@@ -53,10 +54,10 @@ if (!docs.some((d) => d.qty === 24 && d.note === 'موجودی اولیه'))
 console.log('✅ سند «موجودی اولیه» نوشته شد')
 
 // کنترل حساب‌ها باید سالم باشد
-await page.click('nav >> text=داشبورد')
-await page.click('text=⚙️')
-await page.waitForSelector('text=کنترل حساب‌ها')
-await page.click('button:has-text("کنترل کن")').catch(() => {})
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByText('تنظیمات پیشرفته', { exact: true }).click()
+await page.getByRole('button', { name: /^کنترل حساب‌ها/ }).click()
+await page.getByRole('button', { name: 'اجرای کنترل', exact: true }).click()
 await page.waitForTimeout(1500)
 body = await page.locator('body').innerText()
 if (/نمی‌خواند/.test(body)) fail('کنترل حساب‌ها ایراد گرفت:\n' + body.slice(0, 700))

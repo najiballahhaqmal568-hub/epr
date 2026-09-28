@@ -47,7 +47,7 @@ function CashLedgerModal({ onClose }: { onClose: () => void }) {
     <button
       key={id}
       onClick={() => setPeriod(id)}
-      className={`rounded-full px-3 py-1.5 text-sm font-bold ${period === id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+      className={`rounded-full px-3 py-1.5 text-sm font-bold ${period === id ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
     >
       {label}
     </button>
@@ -225,10 +225,10 @@ export function CashView() {
     <>
       <LowCashBanner />
 
-      <button onClick={() => setShowLedger(true)} className="mb-3 w-full rounded-2xl bg-teal-700 p-4 text-right text-white">
-        <p className="text-sm opacity-80">پول کل تجارت (همهٔ جاها)</p>
-        <p className="text-3xl font-bold">{fmtMoney(totalCash)}</p>
-        <p className="mt-1 text-xs opacity-80">👆 برای دیدن «این عدد از کجا آمد» ضربه بزنید</p>
+      <button onClick={() => setShowLedger(true)} className="surface party-balance mb-3 block w-full text-right">
+        <p className="text-sm text-slate-500">پول کل تجارت (همهٔ جاها)</p>
+        <p className="party-balance-amount inventory-money">{fmtMoney(totalCash)}</p>
+        <p className="purchase-link mt-1">«این عدد از کجا آمد» ←</p>
       </button>
 
       <div className="mb-3 grid grid-cols-2 gap-2">
@@ -236,7 +236,7 @@ export function CashView() {
           <button
             key={b.name}
             onClick={() => setBox(b.name)}
-            className={`rounded-xl p-3 text-right ${box === b.name ? 'bg-teal-50 ring-2 ring-teal-600' : 'bg-white shadow-sm'}`}
+            className={`rounded-xl p-3 text-right ${box === b.name ? 'bg-[var(--action-tint)] ring-2 ring-[var(--action)]' : 'bg-white shadow-sm'}`}
           >
             <p className="text-sm text-slate-500">
               {b.name === SHOP_BOX ? '🏪' : b.name.includes('صراف') ? '💱' : b.name.includes('خانه') ? '🏠' : '💰'} {b.name}
@@ -280,7 +280,7 @@ export function CashView() {
       <CashFlowChart box={box} />
 
       {!accessFlags.readOnly && (
-        <button onClick={() => setShowReconcile(true)} className="mb-3 w-full rounded-xl bg-teal-700 py-3 font-bold text-white">
+        <button onClick={() => setShowReconcile(true)} className="mb-3 w-full rounded-xl bg-[var(--action)] py-3 font-bold text-white">
           تصفیه «{box}» (شمارش نقد)
         </button>
       )}

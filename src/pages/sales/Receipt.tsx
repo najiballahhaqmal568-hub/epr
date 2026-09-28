@@ -41,21 +41,22 @@ export function ReceiptModal({ sale, onClose, onNext }: { sale: Sale; onClose: (
   }
 
   return (
-    <Modal title="🧾 رسید فروش" onClose={onClose}>
-      {img ? <img src={img} alt="رسید" className="mb-3 w-full rounded-xl border border-slate-200" /> : <p className="py-8 text-center text-slate-400">در حال ساخت رسید...</p>}
-      {msg && <p className="mb-2 text-sm font-bold text-teal-700">{msg}</p>}
-      <div className="flex gap-2">
-        <button onClick={() => void share()} className="flex-1 rounded-xl bg-teal-700 py-3 font-bold text-white active:bg-teal-800">
-          📤 اشتراک (واتساپ/تلگرام)
+    <Modal title="رسید فروش" onClose={onClose}>
+      <p className="mb-4 text-sm text-slate-500">رسید مشتری · آماده برای ذخیره یا اشتراک</p>
+      {img ? <img src={img} alt="رسید" className="sale-receipt-image" /> : <p role="status" className="py-8 text-center text-slate-500">در حال ساخت رسید...</p>}
+      {msg && <p role="status" className="mb-3 text-sm font-bold text-slate-700">{msg}</p>}
+      <div className="sale-document-actions">
+        <button disabled={!img} onClick={() => void share()} className="primary-button">
+          اشتراک (واتساپ/تلگرام)
         </button>
-        <button onClick={onClose} className="rounded-xl bg-slate-100 px-6 py-3 font-bold text-slate-600">
+        <button onClick={onClose} className="sale-secondary-action">
           بستن
         </button>
       </div>
       {/* در وقت شلوغ: مستقیم به فروش بعدی */}
       {onNext && (
-        <button onClick={onNext} className="mt-2 w-full rounded-xl bg-amber-100 py-3 text-lg font-bold text-amber-800 active:bg-amber-200">
-          ➕ فروش بعدی
+        <button onClick={onNext} className="sale-secondary-action w-full">
+          فروش بعدی
         </button>
       )}
     </Modal>
@@ -69,7 +70,7 @@ function drawReceipt(sale: Sale): string {
   const discount = sale.discount ?? 0
   const subtotal = sale.total + discount
   const extraRows = (discount > 0 ? 1 : 0) + (remainder > 0 ? 1 : 0)
-  const H = 330 + lines.length * 44 + extraRows * 40 + 120
+  const H = 350 + lines.length * 80 + extraRows * 40 + 120
   const c = document.createElement('canvas')
   c.width = W
   c.height = H
@@ -79,7 +80,7 @@ function drawReceipt(sale: Sale): string {
   x.direction = 'rtl'
 
   // سرصفحه
-  x.fillStyle = '#0f766e'
+  x.fillStyle = '#0066d6'
   x.fillRect(0, 0, W, 96)
   x.fillStyle = '#ffffff'
   x.textAlign = 'center'
@@ -92,10 +93,10 @@ function drawReceipt(sale: Sale): string {
   x.fillStyle = '#334155'
   x.textAlign = 'right'
   x.font = 'bold 24px Vazirmatn, sans-serif'
-  x.fillText(`مشتری: ${sale.customerName || 'نقدی'}`, W - 30, y)
-  x.textAlign = 'left'
+  x.fillText(`مشتری: ${sale.customerName || 'نقدی'}`, W - 30, y, W - 60)
+  y += 32
   x.font = '22px Vazirmatn, sans-serif'
-  x.fillText(sale.saleType === 'retail' ? 'پرچون' : 'عمده', 30, y)
+  x.fillText(sale.saleType === 'retail' ? 'پرچون' : 'عمده', W - 30, y)
   y += 24
 
   // خط جدا
@@ -107,11 +108,11 @@ function drawReceipt(sale: Sale): string {
     x.fillStyle = '#0f172a'
     x.textAlign = 'right'
     x.font = '24px Vazirmatn, sans-serif'
-    x.fillText(`${l.productName} ${l.size} ${l.color}`.replace(/\s+/g, ' '), W - 30, y)
-    x.textAlign = 'left'
+    x.fillText(`${l.productName} ${l.size} ${l.color}`.replace(/\s+/g, ' '), W - 30, y, W - 60)
+    y += 32
     x.fillStyle = '#334155'
-    x.fillText(`${fmtNum(l.qty)} × ${fmtNum(l.unitPrice)} = ${fmtNum(l.qty * l.unitPrice)}`, 30, y)
-    y += 44
+    x.fillText(`${fmtNum(l.qty)} × ${fmtNum(l.unitPrice)} = ${fmtNum(l.qty * l.unitPrice)}`, W - 30, y, W - 60)
+    y += 48
   }
 
   x.beginPath(); x.moveTo(30, y - 14); x.lineTo(W - 30, y - 14); x.stroke()
@@ -130,12 +131,12 @@ function drawReceipt(sale: Sale): string {
     row('مجموع اجناس', `${fmtNum(subtotal)} ؋`)
     row('تخفیف', `${fmtNum(discount)} ؋`, '#d97706')
   }
-  row('قابل پرداخت', `${fmtNum(sale.total)} ؋`, '#0f766e', true)
+  row('قابل پرداخت', `${fmtNum(sale.total)} ؋`, '#1d1d1f', true)
   row('دریافتی', `${fmtNum(sale.paid)} ؋`)
   if (remainder > 0) row('باقی (قرض)', `${fmtNum(remainder)} ؋`, '#dc2626', true)
 
   y += 16
-  x.fillStyle = '#94a3b8'
+  x.fillStyle = '#63636d'
   x.textAlign = 'center'
   x.font = '22px Vazirmatn, sans-serif'
   x.fillText('تشکر از خرید شما 🙏', W / 2, y)
