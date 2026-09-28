@@ -35,6 +35,7 @@ try {
 
   // 1) Today's sales: total and profit steps. Profit = (1,800 + 1,500) − (1,000 + 1,000) − 100 = 1,200.
   const card = page.getByRole('button', { name: /فروش امروز .* از کجا آمد/ })
+  await card.getByText('۳٬۲۰۰ ؋', { exact: true }).waitFor()
   assert.match(await card.innerText(), /۳٬۲۰۰ ؋[\s\S]*مفاد: ۱٬۲۰۰ ؋/)
   await card.click()
   const sales = page.getByRole('dialog', { name: 'فروش امروز از کجا آمد' })

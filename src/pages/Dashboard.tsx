@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
-import { fmtMoney, fmtNum, startOfDay } from '../lib/format'
+import { fmtDateShort, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
+import { expenseAlert, profitSummary } from '../lib/profit'
+import MonthProfitModal from './dashboard/MonthProfitModal'
 import { reorderProducts } from '../lib/reorder'
 import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
@@ -71,6 +73,17 @@ export default function Dashboard({
   const customers = useLiveQuery(() => db.customers.filter((row) => !row.deleted).toArray(), [])
   const payments = useLiveQuery(() => db.payments.where('date').aboveOrEqual(dayStart).filter(row => !row.deleted).toArray(), [dayStart])
   const worth = useLiveQuery(() => netWorth(), [])
+  // مفاد خالص این ماه و همین وقت ماه گذشته — همان فورمول راپورها (lib/profit.ts)
+  const monthStart = startOfMonth()
+  const prevStart = startOfMonth(monthStart - 1)
+  const month = useLiveQuery(async () => {
+    const [sales, returns, expenses] = await Promise.all([
+      db.sales.where('date').aboveOrEqual(prevStart).toArray(),
+      db.returns.where('date').aboveOrEqual(prevStart).toArray(),
+      db.expenses.where('date').aboveOrEqual(prevStart).toArray()
+    ])
+    return { sales, returns, expenses }
+  }, [prevStart])
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((variant) => variantMap.set(variant.id!, variant))
@@ -96,12 +109,23 @@ export default function Dashboard({
   const goodsValue = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + line.unitPrice * line.qty, 0), 0)
   const goodsCost = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + costOf(line) * line.qty, 0), 0)
   const discounts = todaySales.reduce((sum, sale) => sum + (sale.discount ?? 0), 0)
-  const [explain, setExplain] = useState<ExplainKind | 'sales' | null>(null)
+  const [explain, setExplain] = useState<ExplainKind | 'sales' | 'month' | null>(null)
+  const nowTs = Date.now()
+  const prevEnd = Math.min(monthStart, prevStart + (nowTs - monthStart))
+  const within = <T extends { date: number }>(rows: T[] | undefined, from: number, to: number) => (rows ?? []).filter(r => r.date >= from && r.date < to)
+  const summaryFor = (from: number, to: number) => profitSummary({
+    sales: within(month?.sales, from, to), returns: within(month?.returns, from, to), expenses: within(month?.expenses, from, to),
+    variants: variants ?? [], readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids
+  })
+  const thisMonth = summaryFor(monthStart, Number.MAX_SAFE_INTEGER)
+  const lastMonthSoFar = summaryFor(prevStart, prevEnd)
+  const monthAlert = !isStaff && month ? expenseAlert(thisMonth, lastMonthSoFar, fmtMoney) : null
+  const monthChange = thisMonth.netProfit - lastMonthSoFar.netProfit
   const lowStock = reorderProducts(products ?? [], variants ?? [])
   const overdueCount = (customers ?? []).filter(
     (row) => row.balance > 0 && Boolean(row.promiseDate) && row.promiseDate! < dayStart
   ).length
-  const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0
+  const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0 || Boolean(monthAlert)
 
   return (
     <div className="p-4">
@@ -122,6 +146,15 @@ export default function Dashboard({
           {!isStaff && <span>مفاد: {fmtMoney(todayProfit)}</span>}
         </div>
       </button>
+
+      {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} className="surface explain-card mb-4 block w-full p-5 text-right">
+        <p className="text-sm text-slate-500">مفاد خالص این ماه <span className="text-xs">(از {fmtDateShort(monthStart)})</span> <span className="explain-hint">از کجا آمد ←</span></p>
+        <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}>{fmtMoney(thisMonth.netProfit)}</p>
+        <p className="mt-2 text-sm text-slate-600">مفاد فروش {fmtMoney(thisMonth.grossProfit)} − مصارف {fmtMoney(thisMonth.businessExpenses)}</p>
+        <p className={`mt-1 text-sm font-bold ${monthChange >= 0 ? 'text-teal-700' : 'text-red-700'}`}>
+          {monthChange >= 0 ? '▲' : '▼'} {fmtMoney(Math.abs(monthChange))} {monthChange >= 0 ? 'بیشتر' : 'کمتر'} از همین وقت ماه گذشته
+        </p>
+      </button>}
 
       <button
         onClick={() => goTo('sales-new')}
@@ -150,6 +183,13 @@ export default function Dashboard({
         <h2 className="mb-2 text-lg font-bold text-slate-800">کارهای امروز</h2>
         {!hasTasks && <div className="rounded-2xl bg-teal-50 p-3 text-sm font-bold text-teal-700">کار ضروری ثبت‌نشده ندارید.</div>}
         <div className="space-y-2">
+          {monthAlert && (
+            <button onClick={() => setExplain('month')}
+              className={`w-full rounded-2xl p-3 text-right ${monthAlert.level === 'danger' ? 'bg-red-50 text-red-800' : 'bg-amber-100 text-amber-900'}`}>
+              <span className="block font-bold">{monthAlert.level === 'danger' ? 'مصرف از مفاد بیشتر شده' : 'مصرف این ماه بالا رفته'}</span>
+              <span className="text-xs">{monthAlert.text}</span>
+            </button>
+          )}
           {pendingExpenseCount > 0 && (
             <button onClick={() => goTo('expenses')} className="w-full rounded-2xl bg-amber-100 p-3 text-right text-amber-900">
               <span className="block font-bold">{fmtNum(pendingExpenseCount)} مصرف روزانه ثبت نشده</span>
@@ -202,7 +242,8 @@ export default function Dashboard({
       </section>
       {explain === 'sales' && <TodaySalesModal sales={todaySales} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)}
         parts={{ goods: goodsValue, cost: goodsCost, discount: discounts, returned: returnedProfit, profit: todayProfit }} />}
-      {explain && explain !== 'sales' && <ExplainModal kind={explain} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)} />}
+      {explain === 'month' && <MonthProfitModal current={thisMonth} previous={lastMonthSoFar} from={monthStart} goTo={goTo} onClose={() => setExplain(null)} />}
+      {explain && explain !== 'sales' && explain !== 'month' && <ExplainModal kind={explain} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)} />}
     </div>
   )
 }

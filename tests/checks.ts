@@ -93,6 +93,7 @@ import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/me
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
+import { expenseAlert, profitSummary } from '../src/lib/profit'
 import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -252,6 +253,51 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'مفاد خالص و هشدار مصرف — همان فورمول راپور، با عددهای حساب‌شده به دست',
+    run: async () => {
+      const none = new Set<string>()
+      const line = (qty: number, unitPrice: number, unitCost: number) => ({ variantId: 1, productName: 'بوت', size: '40', color: 'سیاه', qty, unitPrice, unitCost })
+      const sales = [
+        { date: 1, saleType: 'retail', lines: [line(2, 900, 500)], total: 1800, paid: 1800 },
+        { date: 2, saleType: 'retail', lines: [line(1, 1500, 1000)], total: 1400, paid: 400, discount: 100 },
+        { date: 3, saleType: 'retail', lines: [line(5, 900, 500)], total: 4500, paid: 4500, deleted: true },
+        { date: 4, saleType: 'wholesale', lines: [], directLines: [{ lineUuid: 'l', productName: 'x', size: '1', color: 'c', qty: 1, unitCost: 100, unitPrice: 300 }], directTrade: { uuid: 't-not-ready', revision: 'r', counterpartUuid: 'p', status: 'active' }, total: 300, paid: 0 }
+      ] as unknown as Sale[]
+      const returns = [{ date: 5, kind: 'customer', partyId: 1, partyName: 'x', lines: [line(1, 900, 500)], amount: 900 }] as unknown as ReturnDoc[]
+      const expenses = [
+        { date: 1, categoryName: 'ترانسپورت', amount: 300, type: 'business' },
+        { date: 2, categoryName: 'برق', amount: 100, type: 'business' },
+        { date: 2, categoryName: 'ترانسپورت', amount: 50, type: 'business' },
+        { date: 3, categoryName: 'خانه', amount: 5000, type: 'home' },
+        { date: 3, categoryName: 'برق', amount: 999, type: 'business', shopClosed: true },
+        { date: 3, categoryName: 'برق', amount: 777, type: 'business', deleted: true }
+      ] as unknown as Expense[]
+      const p = profitSummary({ sales, returns, expenses, variants: [], readyTradeUuids: none, readyReceiptUuids: none })
+      // فروش: (2×900 + 1500) − (2×500 + 1000) − 100 = 1,200؛ برگشتی: 900 − 500 = 400؛ ناخالص 800
+      eq('مجموع فروش', p.salesTotal, 3200)
+      eq('مفاد فروش', p.salesProfit, 1200)
+      eq('مفاد برگشتی', p.returnedProfit, 400)
+      eq('مفاد ناخالص', p.grossProfit, 800)
+      // مصارف تجارت: 300 + 100 + 50 — نه خانه، نه روز بسته، نه حذف‌شده
+      eq('مصارف تجارت', p.businessExpenses, 450)
+      eq('مفاد خالص', p.netProfit, 350)
+      is('بزرگ‌ترین کتگوری', p.expenseCategories[0].name, 'ترانسپورت')
+      eq('ترانسپورت یکجا', p.expenseCategories[0].amount, 350)
+      eq('فروش مستقیم آماده‌نشده حساب نمی‌شود', profitSummary({ sales, returns: [], expenses: [], variants: [], readyTradeUuids: new Set(['t-not-ready']), readyReceiptUuids: none }).salesProfit, 1400)
+
+      const fmt = (n: number) => String(n)
+      const base = (businessExpenses: number, grossProfit: number) => ({ ...p, businessExpenses, grossProfit, netProfit: grossProfit - businessExpenses, expenseCategories: [{ name: 'ترانسپورت', amount: businessExpenses }] })
+      is('بدون افزایش هشدار ندارد', expenseAlert(base(3000, 10000), base(3000, 10000), fmt), null)
+      is('افزایش ۲۰٪ هشدار ندارد', expenseAlert(base(3600, 10000), base(3000, 10000), fmt), null)
+      is('افزایش کوچک‌تر از ۱٬۰۰۰ هشدار ندارد', expenseAlert(base(900, 10000), base(500, 10000), fmt), null)
+      const up = expenseAlert(base(4500, 10000), base(3000, 10000), fmt)
+      is('افزایش ۵۰٪ زرد', up?.level, 'warning')
+      is('درصد و کتگوری در متن', Boolean(up?.text.includes('۵۰٪') && up.text.includes('ترانسپورت')), true)
+      is('مصرف بیشتر از مفاد سرخ', expenseAlert(base(12000, 10000), base(3000, 10000), fmt)?.level, 'danger')
+      is('بدون مصرف، مفاد منفی هشدار مصرف نیست', expenseAlert(base(0, -500), base(0, 0), fmt), null)
+    }
+  },
   {
     name: '«از کجا آمد» — جمع سطرهای هر کارت خانه دقیقاً برابر همان عدد کارت',
     run: async () => {
