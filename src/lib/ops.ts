@@ -16,9 +16,9 @@ export { landingUnpaidOf }
  */
 export { afn, boxOf, SHOP_BOX }
 
-const DIRECT_SALE_ERROR = 'این سند فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
-const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
-const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+const DIRECT_SALE_ERROR = 'این سند فروش مستقیم است؛ اصلاح یا لغو آن را از «جزئیات فروش مستقیم» انجام دهید.'
+const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اصلاح یا لغو آن را از «جزئیات فروش مستقیم» انجام دهید.'
+const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح یا لغو آن را از «جزئیات فروش مستقیم» انجام دهید.'
 
 function assertOrdinarySale(sale: Sale): void {
   if (sale.goodsReceiptChild || sale.goodsReceiptLines) throw new Error(GOODS_RECEIPT_ERROR)

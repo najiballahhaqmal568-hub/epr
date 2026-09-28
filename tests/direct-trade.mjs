@@ -23,7 +23,7 @@ try {
   ].filter(Boolean)
   const executablePath = candidates.find(candidate => existsSync(candidate))
   assert.ok(executablePath, 'No Chromium browser found')
-  browser = await chromium.launch({ executablePath })
+  browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] })
   const page = await browser.newPage()
   await page.route('**/*', route => {
     const u = new URL(route.request().url())
@@ -37,7 +37,8 @@ try {
   const names = await page.evaluate(async () => {
     const base = await import('/tests/direct-trade-checks.ts')
     const reports = await import('/tests/direct-trade-report-checks.ts')
-    const cases = [...base.cases, ...reports.cases]
+    const corrections = await import('/tests/direct-trade-correction-checks.ts')
+    const cases = [...base.cases, ...reports.cases, ...corrections.cases]
     for (const test of cases) await test.run()
     return cases.map(test => test.name)
   })

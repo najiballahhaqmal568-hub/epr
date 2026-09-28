@@ -17,7 +17,7 @@ export interface CreateDirectTradeInput {
 }
 export interface DirectTradeResult { tradeUuid: string; saleId: number; purchaseId: number }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const MAX_DATE = 8_640_000_000_000_000
 
 function validUuid(value: unknown, label: string): asserts value is string {
@@ -36,7 +36,7 @@ function validateInputScalars(input: CreateDirectTradeInput): void {
     if (payment.sarrafId !== undefined && (!Number.isSafeInteger(payment.sarrafId) || payment.sarrafId <= 0)) throw new Error('صراف معتبر نیست.')
   }
 }
-function stableUuid(seed: string): string {
+export function stableUuid(seed: string): string {
   const hashes = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35]
   for (let i = 0; i < seed.length; i++) for (let j = 0; j < hashes.length; j++) {
     hashes[j] = Math.imul(hashes[j] ^ (seed.charCodeAt(i) + j * 97), 0x01000193 + j * 2)
@@ -66,15 +66,16 @@ function creationFingerprint(input: CreateDirectTradeInput, customerUuid: string
     supplierUuid, lines: input.lines, payments, shipping: input.shipping ? { ...input.shipping,
       box: boxOf(input.shipping), note: input.shipping.note?.trim() || undefined } : undefined }))
 }
-async function applyEffects(doc: Payment | Sale | Purchase, table: 'payments' | 'sales' | 'purchases'): Promise<void> {
+/** Apply (sign 1) or reverse (sign −1) a document's shared effects inside the caller's transaction. */
+export async function applyEffects(doc: Payment | Sale | Purchase, table: 'payments' | 'sales' | 'purchases', sign: 1 | -1 = 1): Promise<void> {
   for (const effect of effectsOf(table, doc)) {
     const row = await db.table(effect.table).get(effect.id!) as Record<string, number> | undefined
     if (!row) throw new Error('طرف حساب سند یافت نشد')
-    await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
+    await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta * sign })
   }
 }
 
-function buildPayment(input: DirectPaymentInput, customer: { id?: number; uuid?: string; name: string },
+export function buildPayment(input: DirectPaymentInput, customer: { id?: number; uuid?: string; name: string },
   supplier: { id?: number; uuid?: string; name: string }, tradeUuid: string): Payment {
   validUuid(input.eventUuid, 'شناسهٔ پرداخت')
   validDate(input.date)
@@ -99,9 +100,9 @@ function buildPayment(input: DirectPaymentInput, customer: { id?: number; uuid?:
     directPayment: { tradeUuid, route: input.route, supplierId: supplier.id, supplierUuid: supplier.uuid, supplierName: supplier.name }
   }
 }
-async function insertPayment(tradeUuid: string, input: DirectPaymentInput, customer: { id?: number; uuid?: string; name: string },
-  supplier: { id?: number; uuid?: string; name: string }): Promise<number> {
-  const payment = buildPayment(input, customer, supplier, tradeUuid)
+export async function insertPayment(tradeUuid: string, input: DirectPaymentInput, customer: { id?: number; uuid?: string; name: string },
+  supplier: { id?: number; uuid?: string; name: string }, extra: Partial<Payment> = {}): Promise<number> {
+  const payment = { ...buildPayment(input, customer, supplier, tradeUuid), ...extra }
   if (payment.sarrafId !== undefined) {
     const sarraf = await db.suppliers.get(payment.sarrafId)
     if (!sarraf || sarraf.deleted || !sarraf.uuid || !UUID.test(sarraf.uuid) || sarraf.kind !== 'sarraf' || sarraf.id === supplier.id) throw new Error('صراف معتبر و جدا از فروشنده را انتخاب کنید')

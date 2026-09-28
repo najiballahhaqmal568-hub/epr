@@ -20,9 +20,9 @@ import { equal, line, payment, rejects, seed, snapshot, totals, warehouseSnapsho
 
 export const cases: Array<{ name: string; run: () => Promise<void> }> = []
 
-const DIRECT_SALE_ERROR = 'این سند فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
-const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
-const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
+const DIRECT_SALE_ERROR = 'این سند فروش مستقیم است؛ اصلاح یا لغو آن را از «جزئیات فروش مستقیم» انجام دهید.'
+const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اصلاح یا لغو آن را از «جزئیات فروش مستقیم» انجام دهید.'
+const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح یا لغو آن را از «جزئیات فروش مستقیم» انجام دهید.'
 
 async function rejectsDirectWithoutMutation(action: () => Promise<unknown>, message: string): Promise<void> {
   const before = await snapshot()

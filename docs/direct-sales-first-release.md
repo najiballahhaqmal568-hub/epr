@@ -13,7 +13,7 @@ Only the cash part changes the selected cash box; customer-to-supplier payment c
 
 ## First-release limits
 
-- Advanced correction, cancellation and return are deliberately unavailable. Review values before saving; do not attempt a one-sided delete from an account. Existing ordinary transactions keep their existing controls.
+- Correction and cancellation are now available from the trade's detail (owner only) — see `docs/direct-sales-corrections.md`. Real returns of delivered goods are still not supported. Do not attempt a one-sided delete from an account.
 - Incomplete/conflicting direct trades block payment and receipt actions; retry sync and investigate instead of importing data again.
 - Customer receipts support text sharing/copying. The premium redesign and richer receipt presentation are separate follow-up work.
 - No production transactions were created for verification. Local tests use synthetic data and fake transport; they do not prove production networking/RLS or every physical device's refresh state.

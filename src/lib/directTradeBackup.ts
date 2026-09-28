@@ -66,6 +66,17 @@ export function validateDirectBackup(value: unknown): void {
     for (const candidate of rows(data, 'cashMovements')) {
       if (!candidate || typeof candidate !== 'object') continue
       const movement = row(candidate)
+      if (movement.directPaymentReversalOfUuid !== undefined) {
+        // Explicit reversal of a corrected/cancelled direct payment: exactly the negative of its cash, same box.
+        check(movement.directPaymentUuid === undefined && uuid(movement.uuid) && uuid(movement.directPaymentReversalOfUuid) && date(movement.date) && Number.isSafeInteger(movement.amount))
+        const reversed = rows(data, 'payments').find(candidate => !!candidate && typeof candidate === 'object' && row(candidate).uuid === movement.directPaymentReversalOfUuid)
+        if (reversed) {
+          const payment = row(reversed)
+          const box = (doc: Row) => typeof doc.box === 'string' && doc.box.trim() ? doc.box.trim() : 'دکان'
+          check(payment.directPayment !== undefined && payment.deleted === true && movement.amount === -(payment.cashDelta as number) && box(movement) === box(payment))
+        }
+        continue
+      }
       if (movement.directPaymentUuid === undefined) continue
       check(uuid(movement.uuid) && uuid(movement.directPaymentUuid) && date(movement.date) && Number.isSafeInteger(movement.amount))
       const linked = rows(data, 'payments').find(candidate => !!candidate && typeof candidate === 'object' && row(candidate).uuid === movement.directPaymentUuid)

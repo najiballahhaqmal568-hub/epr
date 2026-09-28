@@ -40,7 +40,7 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
   const live = useLiveQuery(() => db.customers.get(customer.id!), [customer.id])
   const role = useLiveQuery(async () => ((await db.settings.get('cachedProfile'))?.value as { role?: string } | undefined)?.role, [])
   const receiptEnabled = useLiveQuery(async () => (await db.settings.get('goodsReceiptCompatibilityAcknowledged'))?.value === true, [])
-  const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted).reverse().sortBy('date'), [customer.id])
+  const sales = useLiveQuery(() => db.sales.where('customerId').equals(customer.id!).filter((s) => !s.deleted || s.directTrade?.status === 'cancelled').reverse().sortBy('date'), [customer.id])
   const payments = useLiveQuery(
     () => db.payments.where('[partyType+partyId]').equals(['customer', customer.id!]).filter((p) => !p.deleted).reverse().sortBy('date'),
     [customer.id]

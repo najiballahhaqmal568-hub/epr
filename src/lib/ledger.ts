@@ -67,7 +67,12 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
   const events: Ev[] = []
 
   for (const s of sales) {
-    if (s.directTrade?.status === 'cancelled') continue
+    if (s.directTrade?.status === 'cancelled') {
+      // لغو شده: برای رد حساب دیده می‌شود ولی قرض را تغییر نمی‌دهد.
+      events.push({ key: `s${s.id}`, date: s.date, label: 'فروش مستقیم — لغو شده', items: itemsLabel(commercialSaleLines(s)),
+        note: s.cancelledReason ? `دلیل لغو: ${s.cancelledReason}` : undefined, source: { table: 'sales', id: s.id! }, delta: 0 })
+      continue
+    }
     if (s.directTrade) {
       events.push({ key: `s${s.id}`, date: s.date, label: 'فروش مستقیم', items: itemsLabel(commercialSaleLines(s)), page: s.bookPage?.trim() || undefined,
         source: { table: 'sales', id: s.id! }, delta: s.total })

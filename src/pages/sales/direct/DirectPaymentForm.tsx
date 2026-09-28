@@ -46,7 +46,7 @@ export default function DirectPaymentForm({ state: initial, onClose, onSaved }: 
       <Field label="تاریخ پرداخت"><input className={inputCls} type="date" value={date} onChange={e => setDate(e.target.value)} /></Field>
       <DirectPaymentFields value={draft} onChange={setDraft} supplierId={state.purchase?.supplierId} route={route} />
       <div className="mb-3 rounded-xl bg-teal-50 p-3 text-sm"><p>باقی مشتری: {fmtMoney(state.balances.customerRemaining - (valid && route !== 'supplierPayment' ? amount : 0))}</p><p>باقی فروشنده: {fmtMoney(state.balances.supplierRemaining - (valid && route !== 'customerCash' ? amount : 0))}</p></div>
-      <p className="mb-3 text-xs text-amber-800">فقط تسویهٔ همین معامله؛ قرض‌های قبلی جدا هستند. اصلاح این پرداخت فعلاً فعال نیست.</p>
+      <p className="mb-3 text-xs text-amber-800">فقط تسویهٔ همین معامله؛ قرض‌های قبلی جدا هستند. اشتباه را بعداً از جزئیات معامله اصلاح کنید.</p>
       {!valid && <p className="mb-3 text-sm text-slate-600">مبلغ معتبر، بیشتر از صفر و حداکثر برابر باقی‌ماندهٔ مربوط را وارد کنید.</p>}
       {error && <p role="alert" className="mb-3 text-red-700">{error} معلومات تازه شد؛ پیش از کوشش دوباره بررسی کنید.</p>}
       <PrimaryBtn disabled={!valid || saving} onClick={() => void save()}>{saving ? 'در حال ثبت…' : 'ثبت پرداخت مستقیم'}</PrimaryBtn>
