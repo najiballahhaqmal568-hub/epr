@@ -19,6 +19,7 @@ import ReceiptModal from './sales/Receipt'
 import InvoiceModal from './sales/InvoiceModal'
 import SaleHistory from './sales/SaleHistory'
 import SaleShipping from './sales/SaleShipping'
+import CustomerGoodsReceiptDetail from './customers/CustomerGoodsReceiptDetail'
 
 export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
   const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
@@ -27,6 +28,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
   const [detail, setDetail] = useState<Sale | null>(null)
   const [newDirect, setNewDirect] = useState(false)
   const [directDetail, setDirectDetail] = useState<string | null>(null)
+  const [goodsReceiptDetail, setGoodsReceiptDetail] = useState<string | null>(null)
   const [enableDirect, setEnableDirect] = useState(false)
   const directEnabled = useLiveQuery(directFeatureEnabled, [])
   const [error, setError] = useState('')
@@ -206,11 +208,11 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
       {view === 'list' && <SaleHistory>{(s) => {
         const remainder = s.total - s.paid
         return (
-            <button key={s.id} onClick={() => s.directTrade ? setDirectDetail(s.directTrade.uuid) : setDetail(s)} className="sale-history-row" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
+            <button key={s.id} onClick={() => s.directTrade ? setDirectDetail(s.directTrade.uuid) : s.goodsReceiptChild ? setGoodsReceiptDetail(s.goodsReceiptChild.receiptUuid) : setDetail(s)} className="sale-history-row" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
             <div className="sale-history-row-heading">
               <div className="sale-history-customer">
                 <p className="font-bold">{s.customerName || 'مشتری نقدی'}</p>
-                <p className="sale-history-meta">{s.directTrade ? 'مستقیم' : s.saleType === 'retail' ? 'پرچون' : 'عمده'} · {fmtDate(s.date)}</p>
+                <p className="sale-history-meta">{s.directTrade ? 'مستقیم' : s.goodsReceiptChild ? 'فروش جنس دریافت‌شده' : s.saleType === 'retail' ? 'پرچون' : 'عمده'} · {fmtDate(s.date)}</p>
               </div>
               <div className="sale-history-amount">
                 <strong>{fmtMoney(s.total)}</strong>
@@ -259,6 +261,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
       {enableDirect && <DirectTradeEnable onClose={() => setEnableDirect(false)} onEnabled={() => { setEnableDirect(false); setNewDirect(true) }} />}
       {newDirect && <DirectTradeForm onClose={() => setNewDirect(false)} onPendingChange={onPendingChange} onSaved={uuid => { setNewDirect(false); setDirectDetail(uuid) }} />}
       {directDetail && <DirectTradeDetail tradeUuid={directDetail} isStaff={isStaff} onClose={() => setDirectDetail(null)} />}
+      {goodsReceiptDetail && <CustomerGoodsReceiptDetail receiptUuid={goodsReceiptDetail} onClose={() => setGoodsReceiptDetail(null)} />}
     </div>
   )
 }

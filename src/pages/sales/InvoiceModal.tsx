@@ -1,6 +1,7 @@
 import { type Sale } from '../../db'
 import { fmtMoney, fmtNum, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
+import { commercialSaleLines } from '../../lib/commercialLines'
 
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
 
@@ -12,7 +13,7 @@ export function InvoiceModal({ sale, onClose }: { sale: Sale; onClose: () => voi
   const remainder = sale.total - sale.paid
   // Stored sale.total is already net of discount, as on the image receipt.
   const subtotal = sale.total + (sale.discount ?? 0)
-  const rows = sale.lines.map((l, i) => ({
+  const rows = commercialSaleLines(sale).map((l, i) => ({
     n: i + 1,
     name: `${l.productName} ${l.size} ${l.color}`.replace(/\s+/g, ' ').trim(),
     qty: l.qty,

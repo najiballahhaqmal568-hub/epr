@@ -40,7 +40,13 @@ try {
     executablePath,
     args: ['--no-sandbox']
   })
-  const page = await browser.newPage()
+  const context = await browser.newContext({ serviceWorkers: 'block' })
+  await context.route('**/*', (route) => {
+    const target = new URL(route.request().url())
+    if (!['localhost', '127.0.0.1'].includes(target.hostname)) return route.abort()
+    return route.continue()
+  })
+  const page = await context.newPage()
   page.on('pageerror', (e) => console.error('خطای صفحه:', e.message))
   await page.goto(`http://localhost:${PORT}/tests.html`)
   await page.waitForFunction('window.TESTS_FAIL !== undefined', { timeout: 120000 })

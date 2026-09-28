@@ -1,6 +1,8 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
 import { effectsOf } from './effects'
+import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
+import { validateCustomerGoodsReceiptBackup, validateCustomerGoodsReceiptConflictEvidence } from './customerGoodsReceiptBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
@@ -19,6 +21,7 @@ const DIRECT_PURCHASE_ERROR = 'این سند خرید مستقیم است؛ اص
 const DIRECT_PAYMENT_ERROR = 'این پرداخت مربوط به فروش مستقیم است؛ اصلاح آن در این نسخه موجود نیست.'
 
 function assertOrdinarySale(sale: Sale): void {
+  if (sale.goodsReceiptChild || sale.goodsReceiptLines) throw new Error(GOODS_RECEIPT_ERROR)
   if (sale.directTrade) throw new Error(DIRECT_SALE_ERROR)
 }
 
@@ -27,6 +30,7 @@ function assertOrdinaryPurchase(purchase: Purchase): void {
 }
 
 function assertOrdinaryPayment(payment: Payment): void {
+  if (payment.goodsReceipt) throw new Error(GOODS_RECEIPT_ERROR)
   if (payment.directPayment) throw new Error(DIRECT_PAYMENT_ERROR)
 }
 
@@ -1319,6 +1323,7 @@ export interface SaleShippingInput extends ShippingAmounts {
 
 async function shippingSale(saleId: number): Promise<Sale> {
   const sale = await db.sales.get(saleId)
+  if (sale?.goodsReceiptChild || sale?.goodsReceiptLines) throw new Error(GOODS_RECEIPT_ERROR)
   if (!sale || sale.deleted || !sale.uuid || sale.saleType !== 'wholesale' || sale.groupUuid || sale.lenderAction || sale.expenseCreditorId) {
     throw new Error('فروش عمدهٔ مربوط به کرایه یافت نشد')
   }
@@ -2582,6 +2587,7 @@ export async function renameCategory(categoryId: number, newName: string): Promi
 
 /** تعدیل گدام با دلیل (داغمه/مفقود/تصحیح) */
 export async function addAdjustment(adj: Adjustment): Promise<number> {
+  if (adj.goodsReceiptChild) throw new Error(GOODS_RECEIPT_ERROR)
   return db.transaction('rw', db.adjustments, db.variants, async () => {
     const v = await db.variants.get(adj.variantId)
     if (!v) throw new Error('جنس یافت نشد')
@@ -2980,18 +2986,24 @@ const TABLES = [
 // A backup may come from another owner/shop, so these rows must never replace it.
 const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
 // Compatibility acknowledgement belongs to this device, never to a backup.
-const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled'])
+const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled', 'goodsReceiptCompatibilityAcknowledged'])
 
 export async function exportBackup(): Promise<string> {
-  const data: Record<string, unknown[]> = {}
-  for (const t of TABLES) {
-    const rows = await db.table(t).toArray()
-    data[t] =
-      t === 'settings'
-        ? rows.filter((row) => !BACKUP_EXCLUDED_SETTINGS.has(String((row as { key?: unknown }).key)))
-        : rows
-  }
-  return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data })
+  return db.transaction('r', [...TABLES.map(t => db.table(t)), db.syncState], async () => {
+    const data: Record<string, unknown[]> = {}
+    for (const t of TABLES) {
+      const rows = await db.table(t).toArray()
+      data[t] =
+        t === 'settings'
+          ? rows.filter((row) => !BACKUP_EXCLUDED_SETTINGS.has(String((row as { key?: unknown }).key)))
+          : rows
+    }
+    // Document rows and their local conflict evidence must describe one snapshot.
+    const conflicts = await db.syncState.filter(row => row.key.startsWith('goodsReceiptConflict:')).toArray()
+    const receiptConflicts = validateCustomerGoodsReceiptConflictEvidence(data, conflicts)
+    return JSON.stringify({ app: 'shoeErp', version: 3, exportedAt: Date.now(), data,
+      ...(receiptConflicts.length ? { customerGoodsReceiptConflicts: receiptConflicts } : {}) })
+  })
 }
 
 export type BackupImportMode = 'merge' | 'replace'
@@ -3000,6 +3012,8 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
   const parsed = JSON.parse(json)
   if (parsed?.app !== 'shoeErp' || !parsed.data) throw new Error('فایل بکاپ معتبر نیست')
   validateDirectBackup(parsed.data)
+  validateCustomerGoodsReceiptBackup(parsed.data)
+  const receiptConflicts = validateCustomerGoodsReceiptConflictEvidence(parsed.data, parsed.customerGoodsReceiptConflicts)
   const restoreTimestamp = Date.now()
 
   const sync = await import('./sync')
@@ -3025,6 +3039,7 @@ export async function importBackup(json: string, mode: BackupImportMode = 'merge
       if (currentCloudIdentity.length) await db.settings.bulkPut(currentCloudIdentity)
 
       await db.syncState.clear()
+      if (receiptConflicts.length) await db.syncState.bulkPut(receiptConflicts)
       if (mode === 'merge') {
         await db.syncState.put({ key: 'restorePushMode', value: 'merge' })
       } else {

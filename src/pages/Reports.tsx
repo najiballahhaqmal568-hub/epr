@@ -6,7 +6,8 @@ import { inputCls, Card } from '../components/ui'
 import { ColumnChart } from '../components/charts'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialPurchaseLines, commercialSaleLines } from '../lib/commercialLines'
-import { ordinaryCustomerCollections } from '../lib/directTradeReports'
+import { customerGoodsReceiptSettlements, ordinaryCustomerCollections } from '../lib/directTradeReports'
+import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import Row from './reports/Row'
 import PartnersCard from './reports/PartnersCard'
 import {
@@ -56,6 +57,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   }
   const now = Date.now()
   const directReview = useDirectTradeReview()
+  const receiptReview = useCustomerGoodsReceiptReview()
 
   const sales = useLiveQuery(() => db.sales.where('date').between(from, to, true, true).filter((s) => !s.deleted).toArray(), [from, to])
   const purchases = useLiveQuery(() => db.purchases.where('date').between(from, to, true, true).filter((p) => !p.deleted).toArray(), [from, to])
@@ -74,7 +76,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))
 
-  const confirmedSales = sales?.filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))
+  const confirmedSales = sales?.filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))
   const confirmedPurchases = purchases?.filter(p => !p.directTrade || directReview.readyTradeUuids.has(p.directTrade.uuid))
   const salesTotal = confirmedSales?.reduce((s, x) => s + x.total, 0) ?? 0
   const salesCash = confirmedSales?.filter(s => !s.directTrade).reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
@@ -102,6 +104,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const otherSpending = expenses?.filter((e) => e.type !== 'business').reduce((s, e) => s + e.amount, 0) ?? 0
   const netProfit = grossProfit - businessExpenses
   const collected = ordinaryCustomerCollections(payments ?? [])
+  const goodsSettled = customerGoodsReceiptSettlements(payments ?? [], receiptReview.readyReceiptUuids)
   const returnsTotal = returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.amount, 0) ?? 0
 
   // مصارف به تفکیک کتگوری
@@ -195,6 +198,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         </div>
       </div>
       <DirectTradeWarning review={directReview} />
+      <CustomerGoodsReceiptWarning review={receiptReview} />
 
       <div className="mb-3 grid grid-cols-4 gap-1 rounded-2xl bg-white p-1 shadow-sm">
         {PERIODS.filter((item) => item.id !== 'custom').map((item) => (
@@ -271,6 +275,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
             <Row label="فروش" value={fmtMoney(salesTotal)} sub={`${fmtNum(confirmedSales?.length ?? 0)} فروش · ${fmtNum(pairsSold)} جوړه`} />
             <Row label="نقد دریافتی از فروش" value={fmtMoney(salesCash)} />
             <Row label="وصول قرض مشتریان" value={fmtMoney(collected)} />
+            <Row label="تصفیهٔ طلب با جنس (غیرنقدی)" value={fmtMoney(goodsSettled)} />
             <Row label="رسید نقدی معاملهٔ مستقیم" value={fmtMoney(directReceipts)} />
             <Row label="پرداخت مستقیم مشتری به فروشنده — بدون صندوق" value={fmtMoney(directToSupplier)} />
             <Row label="خرید جنس" value={fmtMoney(purchasesTotal)} red />
@@ -284,7 +289,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
 
           <PartnersCard netProfit={netProfit} />
           {catRows.length > 0 && <Card><p className="mb-2 font-bold text-slate-700">مصارف به تفکیک کتگوری</p>{catRows.map(([name, amount]) => <Row key={name} label={name} value={fmtMoney(amount)} />)}</Card>}
-          <PeriodCompareCard label="دورهٔ قبلی" now={confirmedSales ?? []} before={(prevSales ?? []).filter(s => !s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid))} returnsNow={returns ?? []} />
+          <PeriodCompareCard label="دورهٔ قبلی" now={confirmedSales ?? []} before={(prevSales ?? []).filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))} returnsNow={returns ?? []} />
           <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
           <ModelsCard sales={confirmedSales ?? []} />
           <CustomersCard sales={confirmedSales ?? []} />

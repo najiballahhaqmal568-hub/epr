@@ -4,6 +4,7 @@ export type CommercialSaleLine = Omit<SaleLine, 'variantId'> & { variantId?: num
 export type CommercialPurchaseLine = Omit<PurchaseLine, 'variantId'> & { variantId?: number; lineUuid?: string }
 
 export function commercialSaleLines(sale: Sale): ReadonlyArray<CommercialSaleLine> {
+  if (sale.goodsReceiptLines) return sale.goodsReceiptLines
   if (!sale.directLines) return sale.lines
   return sale.directLines.map(({ lineUuid, productName, size, color, qty, unitPrice, unitCost }) => ({
     lineUuid, productName, size, color, qty, unitPrice, unitCost
