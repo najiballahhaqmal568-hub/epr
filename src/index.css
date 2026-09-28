@@ -440,3 +440,43 @@ input[type='number'] {
 
 /* Filled blue backgrounds written as a Tailwind class use the fill token too (unlayered: beats utilities). */
 .bg-\[var\(--action\)\] { background-color: var(--action-fill); }
+
+/* Sale motion (lib/motion.ts): decoration only, never blocks a tap. */
+.fly-dot { position: fixed; z-index: 60; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; background: var(--action-fill); color: #fff; font-weight: 700; font-size: 0.875rem; pointer-events: none; box-shadow: 0 6px 18px rgb(var(--shadow-color) / 25%); }
+.sale-check { position: fixed; left: 50%; top: 45%; z-index: 60; display: grid; place-items: center; width: 120px; height: 120px; border-radius: 999px; background: var(--surface); color: var(--success); pointer-events: none; box-shadow: 0 12px 40px rgb(var(--shadow-color) / 22%); }
+.sale-check path { stroke-dasharray: 40; stroke-dashoffset: 40; animation: check-draw 360ms 160ms var(--ease-out) forwards; }
+@keyframes check-draw { to { stroke-dashoffset: 0; } }
+.sale-line-price[aria-invalid="true"] { border-color: var(--danger); }
+.sale-line-price[aria-invalid="true"]:not(:focus) { animation: nudge 320ms var(--ease-out); }
+@keyframes nudge { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 45% { transform: translateX(4px); } 70% { transform: translateX(-2px); } }
+
+/* Size grid: one tap = one pair in the cart. */
+.size-grid-head { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; color: var(--text-secondary); font-size: 0.8125rem; }
+.size-grid-head img { width: 56px; height: 56px; border-radius: 0.75rem; object-fit: cover; }
+.size-grid-group + .size-grid-group { margin-top: 1rem; }
+.size-grid-color { display: flex; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem; font-size: 0.875rem; font-weight: 700; color: var(--text-primary); }
+.size-grid-color > span + span { color: var(--text-secondary); font-weight: 400; }
+.size-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.75rem, 1fr)); gap: 0.5rem; }
+.size-tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.125rem; min-height: 4.75rem; padding: 0.5rem 0.25rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); line-height: 1.3; }
+.size-tile:not(:disabled):active { background: var(--action-tint); border-color: var(--action); transform: scale(0.97); }
+.size-tile:disabled { background: var(--surface-grouped); color: var(--text-secondary); }
+.size-tile:disabled .size-tile-size { text-decoration: line-through; opacity: 0.55; }
+.size-tile-size { font-size: 1.375rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.size-tile-color { font-size: 0.6875rem; color: var(--text-secondary); }
+.size-tile-stock { font-size: 0.75rem; font-weight: 700; color: var(--success); }
+.size-tile:disabled .size-tile-stock { color: var(--text-secondary); font-weight: 400; }
+.size-tile-price { font-size: 0.6875rem; color: var(--text-secondary); }
+.size-tile-in-cart { position: absolute; top: 4px; inset-inline-start: 4px; min-width: 1.25rem; padding: 0 0.3rem; border-radius: 999px; background: var(--action-fill); color: #fff; font-size: 0.6875rem; font-weight: 700; line-height: 1.25rem; }
+
+/* Money keypad: big keys, no system keyboard covering half the screen. */
+.quick-cash { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: -0.25rem 0 0.75rem; }
+.quick-cash button { flex: 1 1 5.5rem; min-width: 0; padding: 0.5rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
+.quick-cash button[aria-pressed="true"] { border-color: var(--action); background: var(--action-tint); color: var(--action); }
+.quick-cash small { display: block; color: var(--text-secondary); font-size: 0.6875rem; font-weight: 400; }
+.money-keypad { direction: ltr; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; animation: keypad-in var(--motion-base) var(--ease-out); }
+.money-keypad button { min-height: 3.25rem; border-radius: var(--radius-control); background: var(--surface-grouped); color: var(--text-primary); font-size: 1.375rem; font-weight: 700; }
+.money-keypad button:active { background: var(--action-tint); }
+.money-keypad .money-keypad-done { grid-column: 1 / -1; background: var(--action-fill); color: #fff; font-size: 1rem; }
+@keyframes keypad-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.sale-change { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: var(--radius-control); background: var(--warning-tint); color: var(--warning-text); font-weight: 700; }
+.sale-change strong { font-size: 1.5rem; }

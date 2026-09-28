@@ -96,6 +96,7 @@ import { explainCash, explainPayables, explainReceivables, explainStock } from '
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
 import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
+import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -254,6 +255,42 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'پول اضافه در فروش — صندوق فقط مجموع را می‌گیرد',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 5)
+      // مشتری ۱٬۰۰۰ داد برای فروش ۹۰۰ و ۱۰۰ پس گرفت — ثبت ۱٬۰۰۰ صندوق را ۱۰۰ بیشتر از پول واقعی نشان می‌داد
+      await throws('فروش با پول بیشتر از مجموع رد می‌شود', () => addSale(sell(vId, 1, 900, { paid: 1000 })))
+      eq('فروش ردشده گدام را کم نکرد', await stockOf(vId), 5)
+      eq('فروش ردشده صندوق را تغییر نداد', await cashBalance(), 0)
+      eq('هیچ فروشی ثبت نشد', await db.sales.count(), 0)
+      await addSale(sell(vId, 1, 900, { paid: 900 }))
+      eq('پول پوره: صندوق ۹۰۰', await cashBalance(), 900)
+      eq('گدام یک جوره کم شد', await stockOf(vId), 4)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'پول آماده و صفحه‌کلید پول',
+    run: async () => {
+      // پوره، بعد نوت‌های گرد بعدی — هیچ‌کدام کمتر از مجموع نیست
+      is('۹۰۰ → پوره، ۱٬۰۰۰، ۲٬۰۰۰', quickCashOptions(900).join(','), '900,1000,2000')
+      is('۱٬۲۵۰ → ۱٬۳۰۰، ۱٬۵۰۰، ۲٬۰۰۰', quickCashOptions(1250).join(','), '1250,1300,1500,2000')
+      is('گرد تکراری فقط یک بار', quickCashOptions(3800).join(','), '3800,4000,5000')
+      is('مجموع گرد: فقط هزار بعدی', quickCashOptions(1000).join(','), '1000,2000')
+      is('مجموع صفر: هیچ پیشنهاد', quickCashOptions(0).length, 0)
+      is('افغانی صحیح', quickCashOptions(899.6)[0], 900)
+      // اولین کلید پیشنهاد را عوض می‌کند؛ بعد رقم‌ها پشت هم می‌آیند
+      is('کلید اول جای پیشنهاد را می‌گیرد', keypadPress('900', '1', true), '1')
+      is('۰۰۰', keypadPress('1', '000', false), '1000')
+      is('پاک کردن یک رقم', keypadPress('1000', 'back', false), '100')
+      is('پاک کردن روی پیشنهاد همه را پاک می‌کند', keypadPress('900', 'back', true), '')
+      is('صفر اول حذف می‌شود', keypadPress('0', '5', false), '5')
+      is('بیشتر از ۹ رقم پذیرفته نمی‌شود', keypadPress('123456789', '1', false), '123456789')
+      is('رقم دری موجود هم رقم حساب می‌شود', keypadPress('۹۰۰', '1', false), '9001')
+    }
+  },
   {
     name: 'مفاد هر جنس، زیان فروش زیر قیمت و روزهای باقی ماه',
     run: async () => {
@@ -2477,7 +2514,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const supId = await newSupplier()
       const sarrafId = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
       const vId = await makeVariant()
-      await addSale(sell(vId, 0, 0, { lines: [], total: 0, paid: 20000 })) // پر کردن صندوق
+      await seedCash(20000) // پر کردن صندوق — فروشِ بی‌جنس با پول اضافه حالا رد می‌شود
       await addPurchase(
         buy(supId, vId, 24, 500, { total: 12000, paid: 2000, sarrafId, sarrafName: 'صراف', sarrafAmount: 10000 })
       )
@@ -2787,7 +2824,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const vId = await makeVariant()
 
       // راه اول: مصرف «کسر صندوق» — از مفاد کم می‌شود
-      await addSale(sell(vId, 0, 0, { lines: [], total: 0, paid: 10000 }))
+      await seedCash(10000)
       await reconcile(9700, 'شمارش شام', { mode: 'expense' })
       eq('صندوق برابر شمارش شد', await cashBalance(), 9700)
       eq('مصرف کسر صندوق ثبت شد', (await db.expenses.toArray()).reduce((s, e) => s + e.amount, 0), 300)
