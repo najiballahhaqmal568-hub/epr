@@ -17,7 +17,7 @@ for (const role of ['staff', 'viewer']) {
     await page.goto(origin, { waitUntil: 'domcontentloaded' })
     await page.getByRole('heading', { name: 'خانه', exact: true }).waitFor()
     if (role === 'staff') {
-      assert.doesNotMatch(await page.locator('main').innerText(), /مفاد:|راپور کامل/)
+      assert.doesNotMatch(await page.locator('main').innerText(), /مفاد:|راپور کامل|مفاد خالص این ماه|مصرف این ماه|مصرف از مفاد/)
       await page.getByRole('navigation').getByRole('button', { name: 'بیشتر', exact: true }).click()
       assert.doesNotMatch(await page.locator('main').innerText(), /بکاپ و بازیابی|شروع سال مالی|منطقهٔ خطر|تنظیمات پیشرفته/)
       assert.equal(await page.getByRole('button', { name: /^راپورها/ }).count(), 0)

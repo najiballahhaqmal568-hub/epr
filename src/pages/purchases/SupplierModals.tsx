@@ -4,12 +4,14 @@ import { db, type Payment } from '../../db'
 import {
   addPayment,
   addOpeningDebt,
+  deletePayment,
   correctSupplierPayment,
   previewSupplierPaymentCorrection,
   type SupplierPaymentCorrectionInput,
   type SupplierPaymentCorrectionPreview
 } from '../../lib/ops'
 import { fmtMoney, parseNum, toDateInput, fromDateInput } from '../../lib/format'
+import { offerUndo } from '../../lib/undo'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
 export function NewSupplierModal({ kind, onClose }: { kind: 'supplier' | 'sarraf'; onClose: () => void }) {
@@ -149,7 +151,7 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
             const lender = via === 'lender' ? lenders?.find((l) => l.id === lenderId) : undefined
             const total = parseNum(amount)
             const sarrafAmount = via === 'mixed' ? total - parseNum(cashPart) : total
-            await addPayment({
+            const paymentId = await addPayment({
               date: Date.now(),
               partyType: 'supplier',
               partyId: supplierId,
@@ -161,6 +163,7 @@ export function PaySupplierModal({ supplierId, onClose }: { supplierId: number; 
                   ? { via: 'lender' as const, lenderId: lender.id!, lenderName: lender.name }
                   : { via: 'cash' as const })
             })
+            offerUndo(`پرداخت ${fmtMoney(total)} به ${supplier.name} ثبت شد`, () => deletePayment(paymentId))
             onClose()
           } catch (e) {
             setError(e instanceof Error ? e.message : String(e))

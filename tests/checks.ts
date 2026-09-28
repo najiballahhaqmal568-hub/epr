@@ -92,7 +92,10 @@ import { dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
-import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow } from '../src/lib/format'
+import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
+import { expenseAlert, profitSummary } from '../src/lib/profit'
+import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
+import { periodBounds } from '../src/lib/period'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -251,6 +254,139 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: '«این ماه»، «ماه گذشته» و «امسال» — از اول ماه و اول حمل هجری شمسی، نه میلادی',
+    run: async () => {
+      // ۶ میزان ۱۴۰۵ = ۲۸ سپتامبر ۲۰۲۶؛ اول میزان = ۲۳ سپتامبر، اول سنبله = ۲۳ اگست
+      const mid = new Date(2026, 8, 28, 15, 30).getTime()
+      const start = startOfMonth(mid)
+      eq('اول میزان، نیمه‌شب محلی', start, new Date(2026, 8, 23).getTime())
+      const parts = jalaliDateParts(start)
+      eq('روز اول ماه', parts.d, 1)
+      eq('همان ماه میزان', parts.m, 7)
+      eq('روز اول خودش شروع ماه است', startOfMonth(start), start)
+      eq('ماه گذشته = اول سنبله', startOfMonth(start - 1), new Date(2026, 7, 23).getTime())
+      // سال‌گذر: ۱۰ حمل ۱۴۰۶ (۳۰ مارچ ۲۰۲۷) → اول حمل (۲۱ مارچ ۲۰۲۷)
+      eq('اول حمل', startOfMonth(new Date(2027, 2, 30, 9).getTime()), new Date(2027, 2, 21).getTime())
+      // ماه آخر سال: ۲۹ حوت → اول حوت
+      is('آخر حوت هنوز حوت است', jalaliDateParts(startOfMonth(new Date(2027, 2, 20, 9).getTime())).m, 12)
+      // هر روز ۴۰۰ روز پشت‌هم: شروع ماه روز اول همان ماه باشد و هرگز بعد از خود روز نیاید
+      let bad = 0
+      for (let i = 0; i < 400; i++) {
+        const day = new Date(2026, 0, 1 + i, 13).getTime()
+        const s0 = startOfMonth(day), p0 = jalaliDateParts(s0), pd = jalaliDateParts(day)
+        if (p0.d !== 1 || p0.m !== pd.m || p0.y !== pd.y || s0 > day || new Date(s0).getHours() !== 0) bad++
+      }
+      eq('۴۰۰ روز پشت‌هم درست', bad, 0)
+      // «امسال» از ۱ حمل: ۶ میزان ۱۴۰۵ → ۱ حمل ۱۴۰۵ = ۲۱ مارچ ۲۰۲۶
+      eq('امسال از اول حمل', startOfYear(mid), new Date(2026, 2, 21).getTime())
+      eq('اول حمل خودش شروع سال است', startOfYear(new Date(2026, 2, 21).getTime()), new Date(2026, 2, 21).getTime())
+      eq('آخر حوت هنوز سال قبل است', startOfYear(new Date(2026, 2, 20, 23).getTime()), new Date(2025, 2, 21).getTime())
+      eq('جنوری در سال شمسی قبلی است', startOfYear(new Date(2027, 0, 15).getTime()), new Date(2026, 2, 21).getTime())
+      let badYear = 0
+      for (let i = 0; i < 800; i++) {
+        const day = new Date(2025, 0, 1 + i, 13).getTime()
+        const y0 = startOfYear(day), p0 = jalaliDateParts(y0)
+        if (p0.m !== 1 || p0.d !== 1 || p0.y !== jalaliDateParts(day).y || y0 > day || new Date(y0).getHours() !== 0) badYear++
+      }
+      eq('۸۰۰ روز پشت‌هم: سال درست', badYear, 0)
+      const pm = periodBounds('prevMonth')
+      eq('ماه گذشته از اول ماه قبلی', pm.from, startOfMonth(startOfMonth() - 1))
+      eq('ماه گذشته تا پیش از اول این ماه', pm.to, startOfMonth() - 1)
+    }
+  },
+  {
+    name: 'مفاد خالص و هشدار مصرف — همان فورمول راپور، با عددهای حساب‌شده به دست',
+    run: async () => {
+      const none = new Set<string>()
+      const line = (qty: number, unitPrice: number, unitCost: number) => ({ variantId: 1, productName: 'بوت', size: '40', color: 'سیاه', qty, unitPrice, unitCost })
+      const sales = [
+        { date: 1, saleType: 'retail', lines: [line(2, 900, 500)], total: 1800, paid: 1800 },
+        { date: 2, saleType: 'retail', lines: [line(1, 1500, 1000)], total: 1400, paid: 400, discount: 100 },
+        { date: 3, saleType: 'retail', lines: [line(5, 900, 500)], total: 4500, paid: 4500, deleted: true },
+        { date: 4, saleType: 'wholesale', lines: [], directLines: [{ lineUuid: 'l', productName: 'x', size: '1', color: 'c', qty: 1, unitCost: 100, unitPrice: 300 }], directTrade: { uuid: 't-not-ready', revision: 'r', counterpartUuid: 'p', status: 'active' }, total: 300, paid: 0 }
+      ] as unknown as Sale[]
+      const returns = [{ date: 5, kind: 'customer', partyId: 1, partyName: 'x', lines: [line(1, 900, 500)], amount: 900 }] as unknown as ReturnDoc[]
+      const expenses = [
+        { date: 1, categoryName: 'ترانسپورت', amount: 300, type: 'business' },
+        { date: 2, categoryName: 'برق', amount: 100, type: 'business' },
+        { date: 2, categoryName: 'ترانسپورت', amount: 50, type: 'business' },
+        { date: 3, categoryName: 'خانه', amount: 5000, type: 'home' },
+        { date: 3, categoryName: 'برق', amount: 999, type: 'business', shopClosed: true },
+        { date: 3, categoryName: 'برق', amount: 777, type: 'business', deleted: true }
+      ] as unknown as Expense[]
+      const p = profitSummary({ sales, returns, expenses, variants: [], readyTradeUuids: none, readyReceiptUuids: none })
+      // فروش: (2×900 + 1500) − (2×500 + 1000) − 100 = 1,200؛ برگشتی: 900 − 500 = 400؛ ناخالص 800
+      eq('مجموع فروش', p.salesTotal, 3200)
+      eq('مفاد فروش', p.salesProfit, 1200)
+      eq('مفاد برگشتی', p.returnedProfit, 400)
+      eq('مفاد ناخالص', p.grossProfit, 800)
+      // مصارف تجارت: 300 + 100 + 50 — نه خانه، نه روز بسته، نه حذف‌شده
+      eq('مصارف تجارت', p.businessExpenses, 450)
+      eq('مفاد خالص', p.netProfit, 350)
+      is('بزرگ‌ترین کتگوری', p.expenseCategories[0].name, 'ترانسپورت')
+      eq('ترانسپورت یکجا', p.expenseCategories[0].amount, 350)
+      eq('فروش مستقیم آماده‌نشده حساب نمی‌شود', profitSummary({ sales, returns: [], expenses: [], variants: [], readyTradeUuids: new Set(['t-not-ready']), readyReceiptUuids: none }).salesProfit, 1400)
+
+      const fmt = (n: number) => String(n)
+      const base = (businessExpenses: number, grossProfit: number) => ({ ...p, businessExpenses, grossProfit, netProfit: grossProfit - businessExpenses, expenseCategories: [{ name: 'ترانسپورت', amount: businessExpenses }] })
+      is('بدون افزایش هشدار ندارد', expenseAlert(base(3000, 10000), base(3000, 10000), fmt), null)
+      is('افزایش ۲۰٪ هشدار ندارد', expenseAlert(base(3600, 10000), base(3000, 10000), fmt), null)
+      is('افزایش کوچک‌تر از ۱٬۰۰۰ هشدار ندارد', expenseAlert(base(900, 10000), base(500, 10000), fmt), null)
+      const up = expenseAlert(base(4500, 10000), base(3000, 10000), fmt)
+      is('افزایش ۵۰٪ زرد', up?.level, 'warning')
+      is('درصد و کتگوری در متن', Boolean(up?.text.includes('۵۰٪') && up.text.includes('ترانسپورت')), true)
+      is('مصرف بیشتر از مفاد سرخ', expenseAlert(base(12000, 10000), base(3000, 10000), fmt)?.level, 'danger')
+      is('بدون مصرف، مفاد منفی هشدار مصرف نیست', expenseAlert(base(0, -500), base(0, 0), fmt), null)
+    }
+  },
+  {
+    name: '«از کجا آمد» — جمع سطرهای هر کارت خانه دقیقاً برابر همان عدد کارت',
+    run: async () => {
+      // داده‌های عمداً گوناگون: سند حذف‌شده، شریک، قرض‌دهنده، صراف، طلب منفی، چند صندوق
+      const c1 = await db.customers.add({ name: 'الف', type: 'retail', balance: 1200 })
+      await db.customers.add({ name: 'ب', type: 'retail', balance: 300, bookPage: '۱۲' })
+      await db.customers.add({ name: 'پیشکی', type: 'retail', balance: -500 })
+      await db.customers.add({ name: 'حذف‌شده', type: 'retail', balance: 9999, deleted: true })
+      await db.suppliers.bulkAdd([
+        { name: 'تأمین', balance: 4000 }, { name: 'صراف', kind: 'sarraf', balance: 700 },
+        { name: 'قرض‌دهنده', kind: 'lender', balance: 10000 }, { name: 'شریک', kind: 'partner', balance: 50000 },
+        { name: 'پیشکی نزد ما', balance: -300 }, { name: 'حذف', balance: 8000, deleted: true }
+      ])
+      const pid = await db.products.add({ name: 'کوهستان', createdAt: 1 })
+      await db.variants.bulkAdd([
+        { productId: pid, size: '40', color: 'سیاه', stockQty: 5, purchasePrice: 500, retailPrice: 0, wholesalePrice: 0 },
+        { productId: pid, size: '41', color: 'سیاه', stockQty: 3, purchasePrice: 600, retailPrice: 0, wholesalePrice: 0 },
+        { productId: pid, size: '42', color: 'سیاه', stockQty: 9, purchasePrice: 700, retailPrice: 0, wholesalePrice: 0, deleted: true }
+      ])
+      await db.cashMovements.bulkAdd([
+        { date: 1, type: 'capitalIn', amount: 5000 }, { date: 2, type: 'transfer', amount: -2000, box: 'دکان' },
+        { date: 2, type: 'transfer', amount: 2000, box: 'خانه' }, { date: 3, type: 'capitalIn', amount: 777, deleted: true }
+      ])
+      const [variants, movements, customers, suppliers, purchases, products] = await Promise.all([
+        db.variants.toArray(), db.cashMovements.toArray(), db.customers.toArray(), db.suppliers.toArray(), db.purchases.toArray(), db.products.toArray()
+      ])
+      const n = computeNetWorth({ variants, movements, customers, suppliers, purchases })
+      const receivables = explainReceivables(customers)
+      const cash = explainCash(movements)
+      const stock = explainStock(products, variants)
+      const payables = explainPayables(suppliers)
+      eq('طلب = کارت', receivables.total, n.receivables)
+      eq('طلب = جمع سطرها', receivables.rows.reduce((s, r) => s + r.amount, 0), n.receivables)
+      is('بزرگ‌ترین قرضدار اول', receivables.rows[0].key, `c${c1}`)
+      eq('صندوق = کارت', cash.total, n.cash)
+      eq('صندوق = جمع جاها', cash.rows.reduce((s, r) => s + r.amount, 0), n.cash)
+      eq('خانه جدا دیده شود', cash.rows.find((r) => r.label === 'خانه')?.amount ?? 0, 2000)
+      eq('جوړه = کارت', stock.total, n.pairs)
+      eq('ارزش = ارزش گدام', stock.value, n.stock)
+      eq('جوړه = جمع اجناس', stock.rows.reduce((s, r) => s + r.amount, 0), n.pairs)
+      eq('ارزش = جمع اجناس', stock.rows.reduce((s, r) => s + (r.value ?? 0), 0), n.stock)
+      eq('قرض ما = کارت', payables.total, n.payables)
+      eq('قرض ما = جمع سطرها', payables.rows.reduce((s, r) => s + r.amount, 0), n.payables)
+      eq('قرض از اشخاص جدا = loans', payables.loans.total, n.loans)
+      is('شریک در قرض نیست', payables.rows.concat(payables.loans.rows).some((r) => r.label === 'شریک'), false)
+    }
+  },
   {
     name: 'کرایه در فروش معطل — قبل از ثبت محفوظ و بدون اثر حسابداری',
     run: async () => {

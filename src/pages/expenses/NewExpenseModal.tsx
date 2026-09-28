@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Expense, type ExpenseCategory } from '../../db'
-import { addExpense, addPartnerWithdrawal } from '../../lib/ops'
-import { parseNum } from '../../lib/format'
+import { addExpense, addPartnerWithdrawal, deleteExpense } from '../../lib/ops'
+import { fmtMoney, parseNum } from '../../lib/format'
+import { offerUndo } from '../../lib/undo'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { TYPE_LABELS, type ExpenseMode } from './labels'
 
@@ -72,7 +73,8 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
         e.cashPaid = cashPaid
         e.creditAmount = creditAmount
       }
-      await addExpense(e, needsPartner ? chosenPartner!.name : undefined)
+      const expenseId = await addExpense(e, needsPartner ? chosenPartner!.name : undefined)
+      offerUndo(`مصرف ${fmtMoney(e.amount)} (${e.categoryName}) ثبت شد`, () => deleteExpense(expenseId))
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

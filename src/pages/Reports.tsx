@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { profitSummary } from '../lib/profit'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid, type Variant } from '../db'
 import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
@@ -85,12 +86,10 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const pairsSold = confirmedSales?.reduce((s, x) => s + commercialSaleLines(x).reduce((a, l) => a + l.qty, 0), 0) ?? 0
   // قیمت خرید ثبت‌شده در خود فاکتور — مفاد گذشته با تغییر قیمت عوض نمی‌شود
   const costOf = (l: { variantId?: number; unitCost?: number }) => l.unitCost ?? (l.variantId === undefined ? 0 : variantMap.get(l.variantId)?.purchasePrice) ?? 0
-  const salesProfit =
-    confirmedSales?.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, l) => s + (l.unitPrice - costOf(l)) * l.qty, 0) - (sale.discount ?? 0), 0) ?? 0
-  // مرجوعی مشتری مفاد همان فروش را پس می‌گیرد
-  const returnedProfit =
-    returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0) ?? 0
-  const grossProfit = salesProfit - returnedProfit
+  // مفاد و مصرف از همان تابعی که کارت خانه می‌خواند (lib/profit.ts)
+  const profit = profitSummary({ sales: sales ?? [], returns: returns ?? [], expenses: expenses ?? [], variants: variants ?? [],
+    readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids })
+  const { grossProfit } = profit
   // زیان فروش زیر قیمت: خطوطی که قیمت فروش‌شان از قیمت خرید کمتر بوده
   const belowCostLoss =
     confirmedSales?.reduce(
@@ -100,9 +99,9 @@ export default function Reports({ onBack }: { onBack: () => void }) {
       0
     ) ?? 0
   const purchasesTotal = confirmedPurchases?.reduce((s, x) => s + x.total, 0) ?? 0
-  const businessExpenses = expenses?.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0) ?? 0
+  const { businessExpenses } = profit
   const otherSpending = expenses?.filter((e) => e.type !== 'business').reduce((s, e) => s + e.amount, 0) ?? 0
-  const netProfit = grossProfit - businessExpenses
+  const { netProfit } = profit
   const collected = ordinaryCustomerCollections(payments ?? [])
   const goodsSettled = customerGoodsReceiptSettlements(payments ?? [], receiptReview.readyReceiptUuids)
   const returnsTotal = returns?.filter((r) => r.kind === 'customer').reduce((s, r) => s + r.amount, 0) ?? 0

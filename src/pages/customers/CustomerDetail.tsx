@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, accessFlags, type Customer, type Payment } from '../../db'
 import { addPayment, addOpeningDebt, deletePayment, deletePaymentImpact, cancelCustomerReturn, cancelReturnImpact, type CancelReturnImpact } from '../../lib/ops'
 import { fmtMoney, fmtDate, fmtDateShort, parseNum } from '../../lib/format'
+import { offerUndo } from '../../lib/undo'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
@@ -15,6 +16,7 @@ import CustomerGoodsReceiptDetail from './CustomerGoodsReceiptDetail'
 
 export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [showPay, setShowPay] = useState(false)
+  const [payError, setPayError] = useState('')
   const [directUuid, setDirectUuid] = useState<string | null>(null)
   const [receiptUuid, setReceiptUuid] = useState<string | null>(null)
   const [receiptEntry, setReceiptEntry] = useState(false)
@@ -151,21 +153,29 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
           <PrimaryBtn
             disabled={parseNum(amount) <= 0}
             onClick={async () => {
-              await addPayment({
-                date: Date.now(),
-                partyType: 'customer',
-                partyId: c.id!,
-                partyName: c.name,
-                amount: parseNum(amount),
-                bookPage: payPage.trim() || c.bookPage?.trim()
-              })
-              setAmount('')
-              setPayPage('')
-              setShowPay(false)
+              setPayError('')
+              try {
+                const received = parseNum(amount)
+                const paymentId = await addPayment({
+                  date: Date.now(),
+                  partyType: 'customer',
+                  partyId: c.id!,
+                  partyName: c.name,
+                  amount: received,
+                  bookPage: payPage.trim() || c.bookPage?.trim()
+                })
+                offerUndo(`دریافت ${fmtMoney(received)} از ${c.name} ثبت شد`, () => deletePayment(paymentId))
+                setAmount('')
+                setPayPage('')
+                setShowPay(false)
+              } catch (e) {
+                setPayError(e instanceof Error ? e.message : String(e))
+              }
             }}
           >
             ثبت دریافت
           </PrimaryBtn>
+          {payError && <p role="alert" className="mt-2 text-sm text-red-700">{payError}</p>}
         </div>
       )}
 
