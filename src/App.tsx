@@ -23,6 +23,7 @@ import { getSupa, getProfile, getServerConfig, isPasswordRecoveryUrl, type Profi
 import { startSync, syncNow } from './lib/sync'
 import { Icon } from './components/Icon'
 import { SyncIndicator } from './components/SyncIndicator'
+import { UndoToast } from './components/UndoToast'
 
 const tabs = [
   { id: 'dashboard', label: 'خانه', icon: 'chart' },
@@ -437,6 +438,7 @@ export default function App() {
       {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => { try { sessionStorage.removeItem('epr_sale_working_v1') } catch { /* storage unavailable */ } setAuth('anon') }} />}
       {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('more')} />}
       </main>
+      <UndoToast />
       <nav className="app-nav" aria-label="بخش‌های اصلی">
         <div className="app-nav-brand app-brand">اتل<small>فروشگاه کفش</small></div>
         {tabs.map((t) => (
