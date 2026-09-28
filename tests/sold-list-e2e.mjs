@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: لیست اجناس فروخته‌شده + شمارش کوتاه */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -11,7 +11,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // دو سایز در گدام؛ فقط یکی امروز فروخته می‌شود
 await page.evaluate(async () => {
@@ -48,10 +48,10 @@ await page.evaluate(async () => {
   })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // ۱) لیست فروخته‌شده در تب فروش ← آمار
-await page.click("nav >> text=فروش")
+await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()
 await page.click('button:has-text("آمار")')
 await page.click('text=اجناس فروخته‌شدهٔ این دوره')
 await page.waitForTimeout(400)
@@ -62,17 +62,19 @@ if (!/گدام: ۵۰/.test(body)) fail('موجودی فعلی کنار لیست 
 console.log('✅ لیست اجناس فروخته‌شده درست است')
 
 // ۲) شمارش کوتاه در گدام
-await page.click("nav >> text=گدام")
-await page.click('text=📋 شمارش')
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
+await page.getByRole('button', { name: 'ابزارها' }).click()
+await page.getByRole('button', { name: 'شمارش موجودی' }).click()
 await page.waitForSelector('text=شمارش فزیکی گدام')
 await page.click('button:has-text("فروخته‌شدهٔ این ماه")')
 await page.waitForTimeout(500)
 body = await page.locator('body').innerText()
-if (!/۰ از ۱ شمارش شده/.test(body)) fail('شمارش باید فقط ۱ سایز را بخواهد:\n' + body.slice(0, 500))
+if (!/۰ از ۱ سایز/.test(body)) fail('شمارش باید فقط ۱ سایز را بخواهد:\n' + body.slice(0, 500))
 if (!/۱ سایز دیگر حرکت نکرده/.test(body)) fail('پیام «حرکت نکرده» نیامد')
 await page.click('button:has-text("همهٔ گدام")')
 await page.waitForTimeout(400)
 body = await page.locator('body').innerText()
-if (!/۰ از ۲ شمارش شده/.test(body)) fail('حالت «همهٔ گدام» باید ۲ سایز بدهد')
+if (!/۰ از ۲ سایز/.test(body)) fail('حالت «همهٔ گدام» باید ۲ سایز بدهد')
 console.log('✅ شمارش کوتاه درست کار کرد')
 process.exit(0)

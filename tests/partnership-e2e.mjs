@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: ویزارد شروع سال و محافظ سرمایه */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -11,7 +11,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // گدام ۵۰٬۰۰۰ + صندوق ۵۰٬۰۰۰ = دارایی خالص ۱۰۰٬۰۰۰
 await page.evaluate(async () => {
@@ -33,10 +33,12 @@ await page.evaluate(async () => {
   await put('cashMovements', { date: Date.now(), type: 'openingSet', amount: 50000, note: 'اول' })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
-await page.click('text=⚙️')
-await page.waitForSelector('text=🎬 شروع سال مالی')
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.locator('summary', { hasText: 'تنظیمات پیشرفته' }).click()
+await page.getByRole('button', { name: /^شروع سال مالی/ }).click()
+await page.getByRole('heading', { name: 'شروع سال مالی' }).first().waitFor()
 await page.click('button:has-text("شروع سال مالی")')
 await page.waitForSelector('text=اول این‌ها را در اپ ثبت کنید')
 await page.waitForTimeout(500)
