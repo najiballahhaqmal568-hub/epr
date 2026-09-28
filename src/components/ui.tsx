@@ -31,14 +31,45 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     }
   }, [])
 
+  // روی موبایل پنجره یک ورق پایین است: با کش دادن سرش به پایین بسته می‌شود.
+  const drag = useRef<{ y: number; t: number; dy: number } | null>(null)
+  function dragStart(event: React.PointerEvent<HTMLDivElement>) {
+    const dialog = dialogRef.current
+    if (!dialog || event.button !== 0 || !window.matchMedia('(max-width: 899px)').matches) return
+    if ((event.target as Element).closest('button, a, input, select, textarea') || dialog.scrollTop > 0) return
+    drag.current = { y: event.clientY, t: performance.now(), dy: 0 }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  function dragMove(event: React.PointerEvent<HTMLDivElement>) {
+    const d = drag.current
+    const dialog = dialogRef.current
+    if (!d || !dialog) return
+    d.dy = Math.max(0, event.clientY - d.y)
+    dialog.style.transition = 'none'
+    dialog.style.transform = `translateY(${d.dy}px)`
+  }
+  function dragEnd() {
+    const d = drag.current
+    const dialog = dialogRef.current
+    drag.current = null
+    if (!d || !dialog) return
+    dialog.style.transition = ''
+    dialog.style.transform = ''
+    const speed = d.dy / Math.max(1, performance.now() - d.t)
+    if (d.dy > 110 || (d.dy > 36 && speed > 0.6)) closeRef.current()
+  }
+
   return (
     <dialog ref={dialogRef} className="modal-dialog" aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose() }}>
       <div className="modal-body">
+        <div className="modal-grab" onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd}>
+        <span className="sheet-handle" aria-hidden="true" />
         <div className="modal-heading">
           <h2 id={titleId}>{title}</h2>
           <button onClick={onClose} aria-label="بستن">
             <Icon name="close" />
           </button>
+        </div>
         </div>
         {children}
       </div>
@@ -81,6 +112,15 @@ export function Fab({ onClick, label }: { onClick: () => void; label?: string })
     >
       <Icon name="plus" /> {label}
     </button>
+  )
+}
+
+/** Grey shapes where content is about to appear, so the page does not jump when it arrives. */
+export function Skeleton({ rows = 3, label = 'در حال خواندن…' }: { rows?: number; label?: string }) {
+  return (
+    <div role="status" aria-label={label} className="skeleton">
+      {Array.from({ length: rows }, (_, i) => <span key={i} className="skeleton-row" style={{ width: `${92 - (i % 3) * 14}%` }} />)}
+    </div>
   )
 }
 

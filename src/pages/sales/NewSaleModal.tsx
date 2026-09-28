@@ -9,8 +9,10 @@ import { lossPerPair } from '../../lib/profit'
 import { flyToCart, saleCheck } from '../../lib/motion'
 import { keypadPress, quickCashOptions } from '../../lib/quickCash'
 import { MoneyKeypad } from '../../components/MoneyKeypad'
+import { RollingNumber } from '../../components/RollingNumber'
+import { useFlipList } from '../../lib/useFlipList'
 import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
-import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
+import { Modal, Field, inputCls, PrimaryBtn, Skeleton } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import StockSelectionSummary from './StockSelectionSummary'
 import BulkSalePrice from './BulkSalePrice'
@@ -75,6 +77,8 @@ export function NewSaleModal({
   const [keypadOpen, setKeypadOpen] = useState(false)
   // true while the amount field still shows a suggestion: the first key replaces it
   const freshPaid = useRef(true)
+  const cartRef = useRef<HTMLDivElement>(null)
+  useFlipList(cartRef)
   // صفحهٔ دفتر فزیکی — با انتخاب مشتری، صفحهٔ فعلی خودش پیشنهاد می‌شود
   const [bookPage, setBookPage] = useState(draft?.bookPage ?? '')
   const [pageTouched, setPageTouched] = useState(false)
@@ -386,7 +390,7 @@ export function NewSaleModal({
           placeholder="نام، سایز، رنگ یا کود..."
         /></div>
       </Field>
-      {products === undefined && <p role="status" className="py-8 text-center text-slate-500">در حال بارگذاری اجناس…</p>}
+      {products === undefined && <Skeleton rows={4} label="در حال بارگذاری اجناس…" />}
       {products?.length === 0 && <p className="py-8 text-center text-slate-500">هنوز جنسی در گدام نیست. نخست جنس اضافه کنید.</p>}
       {search.trim() && products && matches.length === 0 && <p className="py-8 text-center text-slate-500">جنسی با این جستجو پیدا نشد.</p>}
       {quickProducts.length > 0 && !search.trim() && (
@@ -508,12 +512,12 @@ export function NewSaleModal({
 
       </section>
       <section className="sale-checkout">
-      <div hidden={stage !== 'selection'}>
+      <div ref={cartRef} hidden={stage !== 'selection'}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
       {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
       {saleType === 'wholesale' && variants && <BulkSalePrice lines={lines} variants={variants} setLines={setLines} disabled={pending} />}
       {lines.map((l, i) => (
-        <div key={l.variantId} className="sale-cart-line">
+        <div key={l.variantId} data-flip-key={l.variantId} className="sale-cart-line">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold">
               {l.productName} {l.size} {l.color}
@@ -736,7 +740,7 @@ export function NewSaleModal({
       <div data-empty={!lines.length} data-cart-target className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : 'قابل پرداخت'}</p>
-          <p className="text-2xl font-bold text-teal-700">{fmtMoney(total)}</p>
+          <p className="text-2xl font-bold text-teal-700"><RollingNumber value={total} /></p>
           {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
         </div>
         <button

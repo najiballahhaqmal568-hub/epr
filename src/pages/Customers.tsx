@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Customer } from '../db'
 import { fmtNum, fmtMoney, fmtDateShort, startOfDay, toLatinDigits, pageOrder, familyPages } from '../lib/format'
@@ -6,6 +6,7 @@ import { inputCls, Empty } from '../components/ui'
 import FamilyDetail from './customers/FamilyDetail'
 import CustomerModal from './customers/CustomerModal'
 import CustomerDetail from './customers/CustomerDetail'
+import { useFlipList } from '../lib/useFlipList'
 
 type SortKey = 'name' | 'page' | 'added' | 'debt' | 'promise' | 'quiet'
 
@@ -117,10 +118,13 @@ export default function Customers({ onBack }: { onBack?: () => void }) {
     return tie
   })
 
+  const listRef = useRef<HTMLElement>(null)
+  useFlipList(listRef)
+
   const customerRow = (c: Customer) => {
     const overdue = c.balance > 0 && c.promiseDate && c.promiseDate < startOfDay()
     return (
-      <button key={c.id} onClick={() => setSelected(c)} className="customer-row">
+      <button key={c.id} data-flip-key={`c${c.id}`} onClick={() => setSelected(c)} className="customer-row">
         <span className="customer-row-main">
           <span className="customer-row-name">
             {c.flag === 'good' && '⭐ '}
@@ -169,12 +173,12 @@ export default function Customers({ onBack }: { onBack?: () => void }) {
       </section>
 
       {filtered.length === 0 && <Empty text="مشتری‌ای در این دفتر ثبت نشده." />}
-      {sortedRows.length > 0 && <section className="surface customers-list" aria-label="فهرست مشتریان">
+      {sortedRows.length > 0 && <section ref={listRef} className="surface customers-list" aria-label="فهرست مشتریان">
         {sortedRows.map((r) =>
           r.kind === 'single' ? (
             customerRow(r.c)
           ) : (
-            <button key={r.key} onClick={() => setFamilySel(r.fam)} className="customer-row">
+            <button key={r.key} data-flip-key={r.key} onClick={() => setFamilySel(r.fam)} className="customer-row">
               <span className="customer-row-main">
                 <span className="customer-row-name">خانوادهٔ {r.fam}</span>
                 {(() => {

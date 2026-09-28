@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale } from '../../db'
 import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum, startOfDay } from '../../lib/format'
 import { groupSaleHistory } from '../../lib/saleHistory'
-import { Field, inputCls } from '../../components/ui'
+import { Field, inputCls, Skeleton } from '../../components/ui'
 
 export default function SaleHistory({ children }: { children: (sale: Sale) => ReactNode }) {
   const [search, setSearch] = useState('')
@@ -31,7 +31,7 @@ export default function SaleHistory({ children }: { children: (sale: Sale) => Re
     {filtered && <button className="sale-secondary-action" onClick={() => { setSearch(''); setFrom(''); setTo('') }}>پاک‌کردن فیلترها</button>}
     </div>
     {invalidRange ? <p role="alert" className="mb-3 text-sm text-red-700">تاریخ پایان باید برابر یا بعد از تاریخ آغاز باشد.</p> : <>
-      {sales === undefined && <p role="status">در حال خواندن تاریخچه…</p>}
+      {sales === undefined && <Skeleton rows={5} label="در حال خواندن تاریخچه…" />}
       {sales !== undefined && groups.length === 0 && <p role="status" className="py-8 text-center text-slate-500">{filtered ? 'فروشی مطابق این جستجو و تاریخ پیدا نشد.' : 'هنوز فروشی ثبت نشده.'}</p>}
       {filtered && groups.length > 0 && <p className="mb-3 text-xs text-slate-500">تعداد و مبلغ هر روز مربوط به فروش‌های مطابق فیلتر است.</p>}
       {groups.map(group => {

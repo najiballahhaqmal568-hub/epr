@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid } from '../../db'
-import { Modal, PrimaryBtn } from '../../components/ui'
+import { Modal, PrimaryBtn, Skeleton } from '../../components/ui'
 import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum } from '../../lib/format'
 import { explainCash } from '../../lib/numberSources'
 import { confirmedSales, profitSummary } from '../../lib/profit'
@@ -22,7 +22,7 @@ export default function DailyCloseModal({ day, readyTradeUuids, readyReceiptUuid
     ])
     return { sales, returns, expenses, payments, variants, movements }
   }, [day, end])
-  if (!data) return <Modal title="بستن روز" onClose={onClose}><p role="status">در حال خواندن…</p></Modal>
+  if (!data) return <Modal title="بستن روز" onClose={onClose}><Skeleton rows={5} /></Modal>
   const summary = profitSummary({ ...data, readyTradeUuids, readyReceiptUuids })
   const sales = confirmedSales(data.sales, readyTradeUuids, readyReceiptUuids)
   const credit = sales.filter(s => !s.directTrade).reduce((sum, s) => sum + Math.max(0, s.total - saleCashPaid(s)), 0)

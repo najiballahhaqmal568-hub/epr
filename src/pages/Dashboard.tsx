@@ -12,6 +12,7 @@ import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
 import { Icon } from '../components/Icon'
+import { RollingNumber } from '../components/RollingNumber'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import ExplainModal, { type ExplainKind } from './dashboard/ExplainModal'
 import TodaySalesModal from './dashboard/TodaySalesModal'
@@ -154,7 +155,7 @@ export default function Dashboard({
 
       <button type="button" aria-label={`فروش امروز ${fmtMoney(todayTotal)} — از کجا آمد`} onClick={() => setExplain('sales')} className="surface explain-card mb-4 block w-full p-5 text-right">
         <p className="text-sm text-slate-500">فروش امروز <span className="explain-hint">از کجا آمد ←</span></p>
-        <p className="mt-2 text-4xl font-bold text-slate-900">{fmtMoney(todayTotal)}</p>
+        <p className="mt-2 text-4xl font-bold text-slate-900"><RollingNumber value={todayTotal} /></p>
         <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
           <span>{fmtNum(todaySales.length)} فروش</span>
           <span>نقد فروش عادی: {fmtMoney(todayCash)}</span>
@@ -165,7 +166,7 @@ export default function Dashboard({
 
       {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} className="surface explain-card mb-4 block w-full p-5 text-right">
         <p className="text-sm text-slate-500">مفاد خالص این ماه <span className="text-xs">(از {fmtDateShort(monthStart)})</span> <span className="explain-hint">از کجا آمد ←</span></p>
-        <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}>{fmtMoney(thisMonth.netProfit)}</p>
+        <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}><RollingNumber value={thisMonth.netProfit} /></p>
         <p className="mt-2 text-sm text-slate-600">مفاد فروش {fmtMoney(thisMonth.grossProfit)} − مصارف {fmtMoney(thisMonth.businessExpenses)}</p>
         <p className={`mt-1 text-sm font-bold ${monthChange >= 0 ? 'text-teal-700' : 'text-red-700'}`}>
           {monthChange >= 0 ? '▲' : '▼'} {fmtMoney(Math.abs(monthChange))} {monthChange >= 0 ? 'بیشتر' : 'کمتر'} از همین وقت ماه گذشته
@@ -249,11 +250,11 @@ export default function Dashboard({
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setExplain('receivables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">طلب از مشتریان</span>
-            <span className="block text-lg font-bold text-red-600">{fmtMoney(worth?.receivables ?? 0)}</span>
+            <span className="block text-lg font-bold text-red-600"><RollingNumber value={worth?.receivables ?? 0} /></span>
           </button>
           <button onClick={() => setExplain('cash')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">صندوق</span>
-            <span className="block text-lg font-bold text-slate-800">{fmtMoney(worth?.cash ?? 0)}</span>
+            <span className="block text-lg font-bold text-slate-800"><RollingNumber value={worth?.cash ?? 0} /></span>
           </button>
           <button onClick={() => setExplain('stock')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">موجودی گدام</span>
@@ -261,7 +262,7 @@ export default function Dashboard({
           </button>
           <button onClick={() => setExplain('payables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">قرض ما</span>
-            <span className="block text-lg font-bold text-amber-700">{fmtMoney(worth?.payables ?? 0)}</span>
+            <span className="block text-lg font-bold text-amber-700"><RollingNumber value={worth?.payables ?? 0} /></span>
           </button>
         </div>
         <p className="mt-2 text-xs text-slate-500">هر عدد را بزنید تا ببینید از کدام حساب‌ها ساخته شده است.</p>

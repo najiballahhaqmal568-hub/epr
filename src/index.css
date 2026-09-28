@@ -480,3 +480,34 @@ input[type='number'] {
 @keyframes keypad-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .sale-change { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: var(--radius-control); background: var(--warning-tint); color: var(--warning-text); font-weight: 700; }
 .sale-change strong { font-size: 1.5rem; }
+
+/* Numbers: changed digits roll in from the direction of change. */
+.rolling-number { display: inline-block; white-space: nowrap; }
+.rolling-number > span { display: inline-block; white-space: pre; }
+.roll-up { animation: roll-up var(--motion-slow) var(--ease-out); }
+.roll-down { animation: roll-down var(--motion-slow) var(--ease-out); }
+@keyframes roll-up { from { opacity: 0; transform: translateY(55%); } to { opacity: 1; transform: none; } }
+@keyframes roll-down { from { opacity: 0; transform: translateY(-55%); } to { opacity: 1; transform: none; } }
+
+/* Undo: the ten seconds as a line that shrinks. */
+.undo-toast { overflow: hidden; }
+.undo-progress { position: absolute; inset-inline: 0; bottom: 0; height: 3px; background: rgb(255 255 255 / 55%); transform-origin: right; transition: transform 260ms linear; }
+
+/* Sync: the dot breathes while it works. */
+.sync-status[data-state="syncing"] .sync-status-dot { background: var(--action); animation: sync-pulse 1.1s ease-in-out infinite; }
+@keyframes sync-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.7); opacity: 0.45; } }
+
+/* Loading: grey shapes instead of «در حال خواندن…». */
+.skeleton { display: grid; gap: 0.625rem; padding-block: 0.5rem; }
+.skeleton-row { display: block; height: 1rem; border-radius: 0.5rem; background: linear-gradient(90deg, var(--surface-grouped) 25%, var(--border-subtle) 50%, var(--surface-grouped) 75%); background-size: 300% 100%; animation: skeleton-shine 1.3s ease-in-out infinite; }
+.skeleton-row:first-child { height: 1.75rem; }
+@keyframes skeleton-shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* Bottom sheet: a handle, spring entry, pull down to close (phones only). */
+.sheet-handle { display: none; }
+@media (max-width: 899px) {
+  .modal-grab { touch-action: none; margin: -0.5rem -0.5rem 0; padding: 0.5rem 0.5rem 0; }
+  .sheet-handle { display: block; width: 40px; height: 5px; margin: -0.25rem auto 0.75rem; border-radius: 999px; background: var(--border-control); }
+  .modal-dialog[open] { transition: opacity var(--motion-panel) var(--ease-out), transform var(--motion-slow) var(--ease-spring); }
+  @starting-style { .modal-dialog[open] { opacity: 0; transform: translateY(40%); } }
+}

@@ -5,7 +5,7 @@ import { addSaleShipping, boxBalances, boxOf, cancelSaleShipping, correctSaleShi
 import type { SaleShippingInput } from '../../lib/ops'
 import { calculateShipping } from '../../lib/shipping'
 import { fmtDate, fmtMoney, fromDateInput, toDateInput, toLatinDigits } from '../../lib/format'
-import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
+import { Field, inputCls, Modal, PrimaryBtn, Skeleton } from '../../components/ui'
 
 export default function SaleShipping({ sale }: { sale: Sale }) {
   const rows = useLiveQuery(() => db.payments.filter(p => !p.deleted && p.shipping?.saleUuid === sale.uuid).toArray(), [sale.uuid])
@@ -14,7 +14,7 @@ export default function SaleShipping({ sale }: { sale: Sale }) {
   if (sale.saleType !== 'wholesale' || !sale.customerId || !sale.uuid) return null
   return <section className="my-4 border-t border-slate-200 pt-4" aria-label="کرایهٔ بار">
     <h3 className="mb-2 font-bold">کرایهٔ بار</h3>
-    {rows === undefined ? <p role="status">در حال بارگذاری…</p> : rows.length === 0 ? <p className="mb-2 text-sm text-slate-500">هنوز کرایه‌ای ثبت نشده است.</p> : rows.map(p => <div key={p.uuid} className="mb-3 rounded-xl border border-slate-200 p-3 text-sm">
+    {rows === undefined ? <Skeleton rows={2} label="در حال بارگذاری…" /> : rows.length === 0 ? <p className="mb-2 text-sm text-slate-500">هنوز کرایه‌ای ثبت نشده است.</p> : rows.map(p => <div key={p.uuid} className="mb-3 rounded-xl border border-slate-200 p-3 text-sm">
       <p className="font-bold">کرایه: {fmtMoney(p.shipping!.total)}</p>
       <p>سهم مشتری: {fmtMoney(p.shipping!.customerShare)} · سهم دکان: {fmtMoney(p.shipping!.total - p.shipping!.customerShare)}</p>
       <p>دریافت نقدی کرایه: {fmtMoney(p.shipping!.received)} · قرض کرایه: {fmtMoney(-p.amount)}</p>
