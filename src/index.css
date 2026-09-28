@@ -528,3 +528,21 @@ input[type='number'] {
 @keyframes receipt-line { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 .day-stamp { position: absolute; inset-inline: 0; top: 38%; margin-inline: auto; width: max-content; z-index: 5; padding: 0.5rem 1.25rem; border: 3px solid var(--success); border-radius: 0.75rem; color: var(--success); background: var(--surface); font-size: 1.5rem; font-weight: 700; transform: rotate(-8deg); animation: stamp 420ms var(--ease-spring) both; pointer-events: none; }
 @keyframes stamp { from { opacity: 0; transform: rotate(-8deg) scale(1.8); } to { opacity: 1; transform: rotate(-8deg) scale(1); } }
+
+/* Documents look like paper receipts; their history is a vertical line of steps. */
+.doc-paper { position: relative; margin-bottom: 1rem; padding: 1rem 1rem 1.5rem; border: 1px solid var(--border-subtle); border-bottom: 0; border-radius: var(--radius-control) var(--radius-control) 0 0; background: var(--surface); }
+.doc-paper::after { content: ''; position: absolute; inset-inline: -1px; bottom: -8px; height: 8px; background: linear-gradient(-45deg, transparent 6px, var(--surface) 0) 0 0 / 12px 8px repeat-x, linear-gradient(45deg, transparent 6px, var(--surface) 0) 0 0 / 12px 8px repeat-x; filter: drop-shadow(0 1px 0 var(--border-subtle)); }
+.doc-paper-brand { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding-bottom: 0.75rem; margin-bottom: 0.75rem; border-bottom: 1px dashed var(--border-control); color: var(--text-secondary); font-size: 0.75rem; }
+.doc-paper-brand b { color: var(--text-primary); font-size: 1rem; }
+.doc-timeline { margin-top: 1.25rem; }
+.doc-timeline h3 { margin-bottom: 0.75rem; color: var(--text-secondary); font-size: 0.875rem; font-weight: 700; }
+.doc-timeline ol { position: relative; display: grid; gap: 0.875rem; padding-inline-start: 1.25rem; }
+.doc-timeline ol::before { content: ''; position: absolute; inset-inline-start: 0.3125rem; top: 0.5rem; bottom: 0.5rem; width: 2px; background: var(--border-subtle); }
+.doc-timeline li { position: relative; font-size: 0.875rem; }
+.doc-timeline li::before { content: ''; position: absolute; inset-inline-start: -1.25rem; top: 0.375rem; width: 0.75rem; height: 0.75rem; border-radius: 999px; background: var(--surface); border: 2px solid var(--text-secondary); }
+.doc-timeline li[data-tone="good"]::before { border-color: var(--success); background: var(--success); }
+.doc-timeline li[data-tone="warn"]::before { border-color: var(--warning); }
+.doc-timeline li[data-tone="bad"]::before { border-color: var(--danger); background: var(--danger); }
+.doc-timeline-title { font-weight: 700; }
+.doc-timeline-detail { margin-top: 0.125rem; color: var(--text-primary); overflow-wrap: anywhere; }
+.doc-timeline-meta { margin-top: 0.125rem; color: var(--text-secondary); font-size: 0.75rem; }

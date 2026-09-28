@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, syncFlags, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -98,6 +98,7 @@ import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMont
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
+import { documentHistory, saleHistory } from '../src/lib/docHistory'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -256,6 +257,52 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'مهر «چه کسی ثبت کرد» — فقط اسناد عادی، نه همگام‌سازی',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 5)
+      const saleId = await addSale(sell(vId, 1, 900))
+      is('فروش نام ثبت‌کننده دارد', (await db.sales.get(saleId))!.by, 'آزمایش')
+      is('تعدیل گدام مهر نمی‌خورد (سند فروش/مصرف/پرداخت/مرجوعی نیست)', (await db.adjustments.toArray())[0].by, undefined)
+      await deleteSale(saleId)
+      const gone = (await db.sales.get(saleId))!
+      is('حذف: چه کسی', gone.deletedBy, 'آزمایش')
+      is('حذف: کی', typeof gone.deletedAt, 'number')
+      eq('حذف اثر پول را برگرداند', await cashBalance(), 0)
+      // سندی که از دستگاه دیگر می‌آید، همان‌طور که هست می‌ماند
+      syncFlags.applyingRemote = true
+      try { await db.sales.add({ date: 1, saleType: 'retail', lines: [], total: 0, paid: 0, uuid: '00000000-0000-4000-8000-000000000001' }) }
+      finally { syncFlags.applyingRemote = false }
+      is('سند همگام‌شده مهر این دستگاه را نمی‌گیرد', (await db.sales.where('uuid').equals('00000000-0000-4000-8000-000000000001').first())!.by, undefined)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      // سند معاملهٔ مستقیم مقایسهٔ دقیق دارد — مهر نمی‌خورد
+      const directId = await db.sales.add({ date: 2, saleType: 'retail', lines: [], total: 0, paid: 0, directTrade: { uuid: 'x' } } as unknown as Sale)
+      is('معاملهٔ مستقیم بدون مهر', (await db.sales.get(directId))!.by, undefined)
+    }
+  },
+  {
+    name: 'تاریخچهٔ سند — فقط آنچه اسناد ثبت کرده‌اند، به ترتیب وقت',
+    run: async () => {
+      const sale = { id: 7, uuid: 's-7', date: 100, by: 'کارمند', saleType: 'retail', lines: [{ variantId: 1, productName: 'کوهستان', size: '40', color: 'سیاه', qty: 2, unitPrice: 900 }], total: 1800, paid: 800 } as unknown as Sale
+      const returns = [
+        { id: 1, date: 300, kind: 'customer', refId: 7, partyName: 'احمد', lines: [{ qty: 1 }], reason: 'اندازه خورد نبود', settlement: 'reduceDebt', amount: 900, by: 'مالک' },
+        { id: 2, date: 200, kind: 'customer', refId: 7, partyName: 'احمد', lines: [{ qty: 1 }], reason: 'تبادله', settlement: 'cashRefund', amount: 900, deleted: true, cancelledAt: 250, cancelledReason: 'اشتباه' },
+        { id: 3, date: 150, kind: 'customer', refId: 99, partyName: 'دیگر', lines: [{ qty: 1 }], reason: 'x', settlement: 'none', amount: 1 }
+      ] as unknown as ReturnDoc[]
+      const events = saleHistory(sale, returns, [])
+      is('ترتیب وقت', events.map(e => e.title).join(' | '), 'فروش ثبت شد | تبادله | لغو شد | مرجوعی')
+      is('فروش: جوړه و نقد/قرض', events[0].detail, '۲ جوړه · نقد ۸۰۰ ؋ و قرض ۱٬۰۰۰ ؋')
+      is('چه کسی ثبت کرد', events[0].by, 'کارمند')
+      is('دلیل لغو', events[2].detail, 'دلیل: اشتباه')
+      is('دلیل مرجوعی', events[3].detail, '۱ جوړه — ۹۰۰ ؋ — دلیل: اندازه خورد نبود')
+      eq('مرجوعی فروش دیگر نیامد', events.length, 4)
+      const fixed = documentHistory({ date: 10, correctionOfUuid: 'old', correctionReason: 'رقم اشتباه' }, { title: 'مصرف ثبت شد', detail: '۵۰۰ ؋' })
+      is('سند اصلاحی دلیلش را می‌گوید', fixed[0].detail, '۵۰۰ ؋ — دلیل: رقم اشتباه')
+      const gone = documentHistory({ date: 10, deleted: true }, { title: 'مصرف ثبت شد' })
+      is('حذف بی‌وقت: وقت ساخته نمی‌شود', gone[1].at, undefined)
+    }
+  },
   {
     name: 'پول اضافه در فروش — صندوق فقط مجموع را می‌گیرد',
     run: async () => {
@@ -4715,6 +4762,8 @@ export async function runAll(): Promise<{ pass: number; fail: number; report: st
   let pass = 0
   let fail = 0
 
+  // هر سناریو با نام کاربر اجرا می‌شود تا مهر «چه کسی ثبت کرد» در همهٔ راه‌ها آزموده شود
+  accessFlags.actor = 'آزمایش'
   for (const s of SCENARIOS) {
     current = []
     await fresh()

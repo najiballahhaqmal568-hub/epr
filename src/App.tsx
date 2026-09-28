@@ -211,6 +211,7 @@ export default function App() {
   const isStaff = role === 'staff'
   const readOnly = role === 'viewer'
   accessFlags.readOnly = readOnly
+  accessFlags.actor = typeof auth === 'object' ? auth.name?.trim() ?? '' : ''
   // Each role opens on its own screen: staff on the sale counter, a partner on the reports.
   // Only the first screen after opening, and only if nothing has been tapped yet.
   const landed = useRef(false)

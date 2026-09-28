@@ -6,6 +6,11 @@ interface Synced {
   /** شناسهٔ جهانی برای همگام‌سازی بین دستگاه‌ها */
   uuid?: string
   deleted?: boolean
+  /** نام کسی که سند را ثبت کرد (از حساب واردشده) — فقط برای دیدن تاریخچه؛ در هیچ حساب دخیل نیست */
+  by?: string
+  /** کی و چه کسی سند را حذف/برگرداند — سند برای رد حساب می‌ماند */
+  deletedBy?: string
+  deletedAt?: number
   /** زمان آخرین تغییر محلی — برای ارسال به سرور */
   localUpdatedAt?: number
 }
@@ -726,8 +731,15 @@ export function makeSku(id: number, size: string): string {
 /** هنگام اعمال تغییرات دریافتی از سرور true می‌شود تا دوباره به صف ارسال نروند */
 export const syncFlags = { applyingRemote: false }
 
-/** حالت «فقط مشاهده» (شریک): هیچ تغییری در ارقام ثبت نمی‌شود */
-export const accessFlags = { readOnly: false }
+/** حالت «فقط مشاهده» (شریک): هیچ تغییری در ارقام ثبت نمی‌شود. actor = نام کاربر واردشده برای تاریخچهٔ سند. */
+export const accessFlags = { readOnly: false, actor: '' }
+
+// «چه کسی ثبت کرد» فقط روی اسناد عادی نوشته می‌شود. اسناد معاملهٔ مستقیم و جنس دریافت‌شده
+// محتوای دقیق خود را با نسخهٔ مورد انتظار مقایسه می‌کنند؛ فیلد اضافه آن مقایسه را می‌شکند.
+const AUTHORED_TABLES = new Set(['sales', 'expenses', 'payments', 'returns'])
+function authored(table: string, obj: object): boolean {
+  return AUTHORED_TABLES.has(table) && !Object.keys(obj).some((k) => /direct|goodsReceipt/i.test(k))
+}
 
 function guardReadOnly() {
   // تغییرات دریافتی از سرور (همگام‌سازی) باید ثبت شوند؛ فقط تغییرات محلی کاربر بسته می‌شوند
@@ -741,10 +753,12 @@ for (const t of SYNC_TABLES) {
     guardReadOnly()
     if (!obj.uuid) obj.uuid = newUuid()
     obj.localUpdatedAt = syncFlags.applyingRemote ? 0 : Date.now()
+    if (!syncFlags.applyingRemote && accessFlags.actor && obj.by === undefined && authored(t, obj)) obj.by = accessFlags.actor
   })
-  db.table(t).hook('updating', (mods) => {
+  db.table(t).hook('updating', (mods, _pk, obj: Record<string, unknown>) => {
     guardReadOnly()
     if (syncFlags.applyingRemote) return { ...(mods as object), localUpdatedAt: 0 }
-    return { ...(mods as object), localUpdatedAt: Date.now() }
+    const deleting = (mods as Record<string, unknown>).deleted === true && !obj.deleted && accessFlags.actor && authored(t, obj)
+    return { ...(mods as object), localUpdatedAt: Date.now(), ...(deleting ? { deletedBy: accessFlags.actor, deletedAt: Date.now() } : {}) }
   })
 }

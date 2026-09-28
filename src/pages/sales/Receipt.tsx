@@ -70,26 +70,42 @@ function drawReceipt(sale: Sale): string {
   const discount = sale.discount ?? 0
   const subtotal = sale.total + discount
   const extraRows = (discount > 0 ? 1 : 0) + (remainder > 0 ? 1 : 0)
-  const H = 350 + lines.length * 80 + extraRows * 40 + 120
+  const code = (sale.uuid ?? '').replace(/-/g, '').slice(0, 6).toUpperCase()
+  const PAD = 18 // light margin around the paper
+  const TEETH = 14 // torn-paper edge at the bottom
+  const H = 380 + lines.length * 80 + extraRows * 40 + 150 + (code ? 34 : 0)
   const c = document.createElement('canvas')
-  c.width = W
-  c.height = H
+  c.width = W + PAD * 2
+  c.height = H + PAD * 2 + TEETH
   const x = c.getContext('2d')!
+  x.fillStyle = '#EDEDF0'
+  x.fillRect(0, 0, c.width, c.height)
+  x.translate(PAD, PAD)
+  // paper with a zig-zag bottom edge
   x.fillStyle = '#ffffff'
-  x.fillRect(0, 0, W, H)
+  x.beginPath()
+  x.moveTo(0, 0); x.lineTo(W, 0); x.lineTo(W, H)
+  for (let tx = W; tx > 0; tx -= TEETH * 2) { x.lineTo(tx - TEETH, H + TEETH); x.lineTo(Math.max(0, tx - TEETH * 2), H) }
+  x.closePath(); x.fill()
   x.direction = 'rtl'
 
-  // سرصفحه
+  // سرصفحه: نشان «اتل»، نام دکان و تاریخ
   x.fillStyle = '#0066d6'
-  x.fillRect(0, 0, W, 96)
+  x.fillRect(0, 0, W, 112)
   x.fillStyle = '#ffffff'
+  x.beginPath(); x.arc(W - 70, 56, 36, 0, Math.PI * 2); x.fill()
+  x.fillStyle = '#0066d6'
   x.textAlign = 'center'
-  x.font = 'bold 36px Vazirmatn, sans-serif'
-  x.fillText('فروشگاه اتل 👞', W / 2, 46)
-  x.font = '22px Vazirmatn, sans-serif'
-  x.fillText(fmtDate(sale.date), W / 2, 80)
+  x.font = 'bold 26px Vazirmatn, sans-serif'
+  x.fillText('اتل', W - 70, 66)
+  x.fillStyle = '#ffffff'
+  x.textAlign = 'right'
+  x.font = 'bold 34px Vazirmatn, sans-serif'
+  x.fillText('فروشگاه اتل', W - 124, 52)
+  x.font = '21px Vazirmatn, sans-serif'
+  x.fillText(`رسید فروش · ${fmtDate(sale.date)}`, W - 124, 88)
 
-  let y = 140
+  let y = 156
   x.fillStyle = '#334155'
   x.textAlign = 'right'
   x.font = 'bold 24px Vazirmatn, sans-serif'
@@ -97,10 +113,16 @@ function drawReceipt(sale: Sale): string {
   y += 32
   x.font = '22px Vazirmatn, sans-serif'
   x.fillText(sale.saleType === 'retail' ? 'پرچون' : 'عمده', W - 30, y)
+  if (code) {
+    y += 34
+    x.fillStyle = '#63636d'
+    x.fillText(`کد رسید: ${code}`, W - 30, y)
+  }
   y += 24
 
-  // خط جدا
-  x.strokeStyle = '#e2e8f0'
+  // خط جدا — نقطه‌چین مثل رسید کاغذی
+  x.strokeStyle = '#c7c7cc'
+  x.setLineDash([8, 6])
   x.beginPath(); x.moveTo(30, y); x.lineTo(W - 30, y); x.stroke()
   y += 36
 
@@ -135,11 +157,16 @@ function drawReceipt(sale: Sale): string {
   row('دریافتی', `${fmtNum(sale.paid)} ؋`)
   if (remainder > 0) row('باقی (قرض)', `${fmtNum(remainder)} ؋`, '#dc2626', true)
 
-  y += 16
-  x.fillStyle = '#63636d'
+  x.beginPath(); x.moveTo(30, y - 8); x.lineTo(W - 30, y - 8); x.stroke()
+  y += 30
+  x.fillStyle = '#1d1d1f'
   x.textAlign = 'center'
-  x.font = '22px Vazirmatn, sans-serif'
+  x.font = 'bold 24px Vazirmatn, sans-serif'
   x.fillText('تشکر از خرید شما 🙏', W / 2, y)
+  y += 34
+  x.fillStyle = '#63636d'
+  x.font = '20px Vazirmatn, sans-serif'
+  x.fillText(code ? 'برای مرجوعی یا تبادله، همین رسید را نشان دهید.' : 'فروشگاه اتل', W / 2, y)
 
   return c.toDataURL('image/png')
 }
