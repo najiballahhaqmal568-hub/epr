@@ -191,3 +191,15 @@ cases.push({ name: 'trade cancellation waits for active freight to be handled fi
   if (!preview.reasons.join(' ').includes('کرایه')) throw new Error('freight reason missing')
   await rejectsWithoutMutation(() => cancelDirectTrade(tradeUuid, 'اشتباه', preview.token), 'کرایه')
 }})
+
+cases.push({ name: 'trade cancellation refuses while a payment is dated after today', run: async () => {
+  const f = await seed()
+  await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
+  const tradeUuid = newUuid()
+  const later = Date.now() + 3 * 86_400_000
+  await createDirectTrade({ tradeUuid, date: DAY, customerId: f.customerId, supplierId: f.supplierId, lines: [line],
+    payments: [{ eventUuid: newUuid(), route: 'customerToSupplier', date: later, amount: 1000 }] })
+  const preview = await previewDirectTradeCancellation(tradeUuid)
+  equal(preview.allowed, false)
+  await rejectsWithoutMutation(() => cancelDirectTrade(tradeUuid, 'اشتباه', preview.token), 'آینده')
+}})

@@ -133,6 +133,8 @@ async function planCancellation(state: DirectTradeState, reason?: string): Promi
   const reasons: string[] = []
   if (reason !== undefined && !reason.trim()) reasons.push('دلیل لغو را بنویسید.')
   if (await activeFreight(state)) reasons.push('این معامله کرایهٔ فعال دارد؛ اول کرایه را از جزئیات معامله لغو کنید. لغو جنس، کرایه را برنمی‌گرداند.')
+  // A payment dated after the cancellation would read as "paid after cancelling" and block the trade.
+  if (state.payments.some(payment => payment.date > Date.now())) reasons.push('این معامله پرداختی با تاریخ آینده دارد؛ اول تاریخ آن پرداخت را اصلاح کنید.')
   return reasons
 }
 
