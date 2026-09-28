@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: قرض اشتباهی در حساب مشتری پاک شود */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // مشتری‌ای که حسابش خلاص بود، و یک قرض قبلیِ اشتباهی ۳٬۰۰۰ به نامش
 await page.evaluate(async () => {
@@ -33,8 +33,10 @@ await page.evaluate(async () => {
   })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=مشتریان')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
+await page.getByRole('button', { name: 'مشتریان', exact: true }).click()
 await page.waitForTimeout(700)
 await page.click('text=نصیر')
 await page.waitForTimeout(500)

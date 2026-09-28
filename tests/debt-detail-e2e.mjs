@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: جزئیات قرض پرچون — کدام بوت و کدام تاریخ */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // دو مشتری از یک خانواده، هر کدام یک بوت قرضی
 await page.evaluate(async () => {
@@ -48,8 +48,10 @@ await page.evaluate(async () => {
   })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=مشتریان')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
+await page.getByRole('button', { name: 'مشتریان', exact: true }).click()
 await page.waitForTimeout(600)
 
 // ۱) خانواده — هر دو عضو با بوت خودشان
@@ -61,7 +63,7 @@ if (!/کوهستان 40 خاکی ×۱/.test(body)) fail('بوت نصیر در د
 console.log('✅ دفتر خانواده: بوت هر دو عضو آمد')
 
 // ۲) شخص — کریم، از داخل همان خانواده
-await page.click('button:has-text("کریم")')
+await page.locator('dialog[open]').last().locator('button:has-text("کریم")').first().click()
 await page.waitForSelector('text=دفتر حساب', { timeout: 10000 })
 await page.waitForTimeout(500)
 body = await page.locator('body').innerText()

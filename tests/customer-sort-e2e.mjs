@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: چیدمان مشتریان — حرف، قرض، وعده، دیر آمده */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // سه مشتری با حرف، قرض، وعده و آخرین معامله عمداً مخالف هم:
 //  الف — قرض ۱٬۰۰۰ · وعده ۳۰ روز بعد · آخرین معامله امروز
@@ -53,13 +53,15 @@ await page.evaluate(async () => {
   await fam('ت', 60 * day)
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=مشتریان')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
+await page.getByRole('button', { name: 'مشتریان', exact: true }).click()
 await page.waitForTimeout(800)
 
 // ترتیب سطرها — خانواده با «خانوادهٔ …» شناخته می‌شود
 const order = async () => {
-  const names = await page.locator('.mt-3 p.font-bold.text-slate-800').allInnerTexts()
+  const names = await page.locator('[aria-label="فهرست مشتریان"] .customer-row-name').allInnerTexts()
   return names
     .map((n) => {
       const t = n.trim()
@@ -108,8 +110,10 @@ console.log('✅ دیر آمده: ' + o.join(' ← '))
 
 // یادش بماند
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=مشتریان')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
+await page.getByRole('button', { name: 'مشتریان', exact: true }).click()
 await page.waitForTimeout(800)
 o = await order()
 if (o.join(',') !== 'پ,خانواده,ب,الف') fail('چیدمان یادش نماند: ' + o.join(','))

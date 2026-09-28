@@ -362,3 +362,22 @@ input[type='number'] {
 .purchase-row-actions button.text-amber-800 { color: #854D0E; }
 .purchase-row-actions button.text-red-700 { color: var(--danger); }
 @media (max-width: 380px) { .purchase-row-amount { align-items: flex-start; } }
+
+/* Customers directory — same grouped rows as the accounts list */
+.customers-directory { max-width: 1040px; }
+.customers-back { padding: 0.375rem 0.875rem; border-radius: 999px; background: var(--surface-grouped); color: var(--text-secondary); font-size: 0.875rem; font-weight: 700; }
+.customers-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 1rem; }
+.customers-summary > div { min-width: 0; padding: 1rem; }
+.customers-summary > div + div { border-inline-start: 1px solid var(--border-subtle); }
+.customers-summary dt { color: var(--text-secondary); font-size: 0.8125rem; }
+.customers-summary dd { margin-top: 0.25rem; font-size: clamp(0.95rem, 4vw, 1.35rem); font-weight: 700; }
+.customers-list { overflow: hidden; }
+.customer-row { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 0.75rem 1rem; flex-wrap: wrap; padding: 1rem 1.25rem; text-align: start; }
+.customer-row + .customer-row { border-top: 1px solid var(--border-subtle); }
+.customer-row small { display: block; margin-top: 0.25rem; color: var(--text-secondary); font-size: 0.75rem; line-height: 1.7; }
+.customer-row-main { flex: 1 1 11rem; min-width: 0; overflow-wrap: anywhere; }
+.customer-row-name { display: block; font-weight: 700; color: var(--text-primary); }
+.customer-row-family { font-size: 0.75rem; font-weight: 400; color: var(--text-secondary); }
+.customer-row-phone { text-align: end; }
+.customer-row-amount { flex: 0 1 auto; min-width: 0; text-align: end; }
+.customer-row-amount strong { font-size: 1.05rem; }
