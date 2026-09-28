@@ -37,7 +37,7 @@ export default function ProductPhotoPicker({ photo, onChange }: { photo?: string
     {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
     {preview && <Modal title="پیش‌نمایش عکس بوت" onClose={() => setPreview(undefined)}>
       <img src={preview} alt="پیش‌نمایش عکس جدید بوت" className="mb-4 max-h-80 w-full rounded-xl object-contain" />
-      <div className="flex gap-3"><button type="button" className="flex-1 rounded-xl bg-teal-700 p-3 font-bold text-white" onClick={() => { onChange(preview); setPreview(undefined) }}>استفاده از این عکس</button><button type="button" className="rounded-xl bg-slate-100 p-3" onClick={() => setPreview(undefined)}>لغو</button></div>
+      <div className="flex gap-3"><button type="button" className="flex-1 rounded-xl bg-[var(--action)] p-3 font-bold text-white" onClick={() => { onChange(preview); setPreview(undefined) }}>استفاده از این عکس</button><button type="button" className="rounded-xl bg-slate-100 p-3" onClick={() => setPreview(undefined)}>لغو</button></div>
     </Modal>}
   </section>
 }

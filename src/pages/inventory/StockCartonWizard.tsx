@@ -95,7 +95,7 @@ export function StockCartonWizard({
   }
 
   const stepDot = (n: number) => (
-    <span key={n} className={`h-2 w-2 rounded-full ${step === n ? 'bg-teal-700' : step > n ? 'bg-teal-300' : 'bg-slate-200'}`} />
+    <span key={n} className={`h-2 w-2 rounded-full ${step === n ? 'bg-[var(--action)]' : step > n ? 'bg-teal-300' : 'bg-slate-200'}`} />
   )
 
   return (

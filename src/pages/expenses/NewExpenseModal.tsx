@@ -86,7 +86,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
           <button
             key={m}
             onClick={() => setMode(m)}
-            className={`rounded-xl py-2 text-sm font-bold ${mode === m ? (m === 'business' ? 'bg-teal-700 text-white' : m === 'partner' ? 'bg-purple-600 text-white' : 'bg-amber-600 text-white') : 'bg-slate-100 text-slate-600'}`}
+            className={`rounded-xl py-2 text-sm font-bold ${mode === m ? (m === 'business' ? 'bg-[var(--action)] text-white' : m === 'partner' ? 'bg-purple-600 text-white' : 'bg-amber-600 text-white') : 'bg-slate-100 text-slate-600'}`}
           >
             {modeLabels[m]}
           </button>
@@ -134,7 +134,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
             <div className="mb-3 flex gap-2">
               <input className={inputCls} value={newCat} onChange={(e) => setNewCat(e.target.value)} placeholder="نام کتگوری" />
               <button
-                className="whitespace-nowrap rounded-xl bg-teal-700 px-4 font-bold text-white"
+                className="whitespace-nowrap rounded-xl bg-[var(--action)] px-4 font-bold text-white"
                 onClick={async () => {
                   if (!newCat.trim()) return
                   const id = (await db.expenseCategories.add({ name: newCat.trim() })) as number
@@ -170,7 +170,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
                     setCashPart('')
                     setError('')
                   }}
-                  className={`rounded-xl py-2 text-xs font-bold ${paymentMode === value ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+                  className={`rounded-xl py-2 text-xs font-bold ${paymentMode === value ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
                 >
                   {label}
                 </button>
@@ -202,7 +202,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
                   <input className={inputCls} value={newCreditor} onChange={(e) => setNewCreditor(e.target.value)} placeholder="نام شخص یا اداره" />
                   <button
                     type="button"
-                    className="whitespace-nowrap rounded-xl bg-teal-700 px-3 font-bold text-white"
+                    className="whitespace-nowrap rounded-xl bg-[var(--action)] px-3 font-bold text-white"
                     onClick={async () => {
                       if (!newCreditor.trim()) return
                       const id = (await db.suppliers.add({ name: newCreditor.trim(), balance: 0, kind: 'expenseCreditor' })) as number

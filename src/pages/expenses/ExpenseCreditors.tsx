@@ -109,7 +109,7 @@ export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onCl
 
       {debt > 0 && (
         <div className="mb-3 grid grid-cols-2 gap-2">
-          <button className="rounded-xl bg-teal-700 py-2 font-bold text-white" onClick={() => { setMode(mode === 'cash' ? 'none' : 'cash'); reset() }}>
+          <button className="rounded-xl bg-[var(--action)] py-2 font-bold text-white" onClick={() => { setMode(mode === 'cash' ? 'none' : 'cash'); reset() }}>
             پرداخت نقدی
           </button>
           <button className="rounded-xl bg-amber-600 py-2 font-bold text-white" onClick={() => { setMode(mode === 'goods' ? 'none' : 'goods'); reset() }}>
@@ -204,10 +204,10 @@ export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onCl
           {excess > 0 && (
             <Field label={'مازاد ' + fmtMoney(excess) + ' چگونه حساب شود؟'}>
               <div className="grid grid-cols-2 gap-2">
-                <button className={'rounded-xl py-2 text-sm font-bold ' + (excessMode === 'cash' ? 'bg-teal-700 text-white' : 'bg-white text-slate-600')} onClick={() => setExcessMode('cash')}>
+                <button className={'rounded-xl py-2 text-sm font-bold ' + (excessMode === 'cash' ? 'bg-[var(--action)] text-white' : 'bg-white text-slate-600')} onClick={() => setExcessMode('cash')}>
                   نقداً دریافت شد
                 </button>
-                <button className={'rounded-xl py-2 text-sm font-bold ' + (excessMode === 'credit' ? 'bg-teal-700 text-white' : 'bg-white text-slate-600')} onClick={() => setExcessMode('credit')}>
+                <button className={'rounded-xl py-2 text-sm font-bold ' + (excessMode === 'credit' ? 'bg-[var(--action)] text-white' : 'bg-white text-slate-600')} onClick={() => setExcessMode('credit')}>
                   قرض او به دکان
                 </button>
               </div>

@@ -19,7 +19,7 @@ export function FontSizeCard() {
               setFontScale(s.id)
               setScale(s.id)
             }}
-            className={`flex-1 rounded-xl py-3 font-bold ${scale === s.id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+            className={`flex-1 rounded-xl py-3 font-bold ${scale === s.id ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
             style={{ fontSize: `${s.px}px` }}
           >
             {s.label}

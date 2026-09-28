@@ -130,7 +130,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
                 </div>
                 <div className="mt-2 flex gap-2">
                   <button
-                    className="flex-1 rounded-lg bg-teal-700 py-2 text-sm font-bold text-white"
+                    className="flex-1 rounded-lg bg-[var(--action)] py-2 text-sm font-bold text-white"
                     onClick={() => {
                       const working = readWorkingSale()
                       if (working && working.id !== draft.id && !confirm('سبد جاری با این فروش معطل جایگزین شود؟ برای نگه‌داشتن سبد جاری، نخست آن را معطل کنید.')) return
@@ -198,7 +198,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
                 setJustSaved(null)
                 setView('new')
               }}
-              className="flex-1 rounded-lg bg-teal-700 py-2 text-sm font-bold text-white"
+              className="flex-1 rounded-lg bg-[var(--action)] py-2 text-sm font-bold text-white"
             >
               فروش بعدی
             </button>

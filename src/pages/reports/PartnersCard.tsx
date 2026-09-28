@@ -192,7 +192,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
           ＋ شریک جدید (در میان سال)
         </button>
         {(partners?.length ?? 0) > 0 && (
-          <button onClick={() => setShowSettle(true)} className="flex-1 rounded-xl bg-teal-700 py-2 text-sm font-bold text-white">
+          <button onClick={() => setShowSettle(true)} className="flex-1 rounded-xl bg-[var(--action)] py-2 text-sm font-bold text-white">
             📒 حساب سال شراکت
           </button>
         )}

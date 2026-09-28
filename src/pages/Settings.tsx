@@ -126,7 +126,7 @@ export default function Settings({
             <p className="mb-3 text-sm text-slate-500">
               هر چند روز یک بار بکاپ بگیرید تا اگر موبایل گم یا خراب شد، اطلاعات از بین نرود.
             </p>
-            <button onClick={backup} className="w-full rounded-xl bg-teal-700 py-3 font-bold text-white">
+            <button onClick={backup} className="w-full rounded-xl bg-[var(--action)] py-3 font-bold text-white">
               دانلود فایل بکاپ
             </button>
           </Card>

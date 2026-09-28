@@ -128,7 +128,7 @@ export function CartonWizardModal({
   const stepDot = (n: number) => (
     <span
       key={n}
-      className={`h-2 w-2 rounded-full ${step === n ? 'bg-teal-700' : step > n ? 'bg-teal-300' : 'bg-slate-200'}`}
+      className={`h-2 w-2 rounded-full ${step === n ? 'bg-[var(--action)]' : step > n ? 'bg-teal-300' : 'bg-slate-200'}`}
     />
   )
 
@@ -280,11 +280,11 @@ export function CartonWizardModal({
           </button>
         )}
         {step < 5 ? (
-          <button onClick={next} className="flex-1 rounded-xl bg-teal-700 py-3 font-bold text-white active:bg-teal-800">
+          <button onClick={next} className="flex-1 rounded-xl bg-[var(--action)] py-3 font-bold text-white active:bg-[var(--action-pressed)]">
             بعدی
           </button>
         ) : (
-          <button onClick={() => void confirm()} className="flex-1 rounded-xl bg-teal-700 py-3 font-bold text-white active:bg-teal-800">
+          <button onClick={() => void confirm()} className="flex-1 rounded-xl bg-[var(--action)] py-3 font-bold text-white active:bg-[var(--action-pressed)]">
             ✓ افزودن به خرید
           </button>
         )}

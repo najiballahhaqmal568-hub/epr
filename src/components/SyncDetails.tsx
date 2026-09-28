@@ -25,7 +25,7 @@ export default function SyncDetails() {
         <p>{status.restorePending ? status.message : 'همگام‌سازی کامل نشد. اتصال اینترنت و حساب کاربری را بررسی کنید؛ اطلاعات یا بکاپ را حذف نکنید.'}</p>
         {!status.restorePending && status.message && <details className="mt-2"><summary className="cursor-pointer">جزئیات خطا</summary><p className="mt-2 break-words" dir="auto">{status.message}</p></details>}
       </div>}
-      <button className="mt-4 rounded-xl bg-teal-700 px-5 py-3 font-bold text-white disabled:opacity-50" disabled={Boolean(disabled)} onClick={() => void syncNow()}>
+      <button className="mt-4 rounded-xl bg-[var(--action)] px-5 py-3 font-bold text-white disabled:opacity-50" disabled={Boolean(disabled)} onClick={() => void syncNow()}>
         {status.state === 'syncing' ? 'در حال همگام‌سازی…' : status.state === 'error' && !status.restorePending ? 'تلاش دوباره' : 'همگام‌سازی اکنون'}
       </button>
     </section>

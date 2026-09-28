@@ -328,7 +328,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
               <span className="font-bold">{fmtMoney(othersCapital + ownerCapital)}</span>
             </div>
           </div>
-          <p className="mt-2 rounded-xl bg-teal-700 p-3 text-center font-bold text-white">مفاد امروز: ۰ ؋ ✅</p>
+          <p className="mt-2 rounded-xl bg-[var(--action)] p-3 text-center font-bold text-white">مفاد امروز: ۰ ؋ ✅</p>
           <p className="mt-1 text-center text-xs text-slate-400">یعنی سال با حساب پاک شروع می‌شود</p>
           <div className="mt-3 flex gap-2">
             <button onClick={() => setStep(1)} className="rounded-xl bg-slate-100 px-5 py-3 font-bold text-slate-600">

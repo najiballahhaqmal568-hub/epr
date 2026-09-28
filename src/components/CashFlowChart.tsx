@@ -39,7 +39,7 @@ export function CashFlowChart({ box }: { box?: string }) {
             <button
               key={r.days}
               onClick={() => setDays(r.days)}
-              className={`rounded-full px-2.5 py-1 text-xs font-bold ${days === r.days ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+              className={`rounded-full px-2.5 py-1 text-xs font-bold ${days === r.days ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
             >
               {r.label}
             </button>

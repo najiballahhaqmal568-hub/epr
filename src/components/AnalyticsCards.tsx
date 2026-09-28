@@ -66,7 +66,7 @@ export function ModelsCard({ sales }: { sales: Sale[] }) {
     <button
       key={id}
       onClick={() => setSort(id)}
-      className={`rounded-full px-3 py-1 text-xs font-bold ${sort === id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+      className={`rounded-full px-3 py-1 text-xs font-bold ${sort === id ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
     >
       {label}
     </button>
@@ -115,13 +115,13 @@ export function CustomersCard({ sales }: { sales: Sale[] }) {
       <div className="mb-3 flex gap-2">
         <button
           onClick={() => setSort('sales')}
-          className={`rounded-full px-3 py-1 text-xs font-bold ${sort === 'sales' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+          className={`rounded-full px-3 py-1 text-xs font-bold ${sort === 'sales' ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
         >
           مبلغ خرید
         </button>
         <button
           onClick={() => setSort('profit')}
-          className={`rounded-full px-3 py-1 text-xs font-bold ${sort === 'profit' ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+          className={`rounded-full px-3 py-1 text-xs font-bold ${sort === 'profit' ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`}
         >
           مفادی که داد
         </button>

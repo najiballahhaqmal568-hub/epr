@@ -71,17 +71,17 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
           <button
             key={p.id}
             onClick={() => setPeriod(p.id)}
-            className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${period === p.id ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`}
+            className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${period === p.id ? 'bg-[var(--action)] text-white' : 'bg-white text-slate-600'}`}
           >
             {p.label}
           </button>
         ))}
       </div>
 
-      <div className="mb-3 rounded-2xl bg-teal-700 p-4 text-white">
-        <p className="text-sm opacity-80">مجموع فروش {periodLabel(period)}</p>
-        <p className="text-3xl font-bold">{fmtMoney(total)}</p>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+      <div className="surface party-balance mb-3">
+        <p className="text-sm text-slate-500">مجموع فروش {periodLabel(period)}</p>
+        <p className="party-balance-amount inventory-money">{fmtMoney(total)}</p>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
           <span>نقد فروش عادی: {fmtMoney(cash)}</span>
           {credit > 0 && <span>قرض فروش عادی: {fmtMoney(credit)}</span>}
           {directTotal > 0 && <span>فروش مستقیم: {fmtMoney(directTotal)}</span>}

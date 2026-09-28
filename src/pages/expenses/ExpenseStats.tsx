@@ -34,7 +34,7 @@ export function ExpenseStats() {
           <button
             key={p.id}
             onClick={() => setPeriod(p.id)}
-            className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${period === p.id ? 'bg-teal-700 text-white' : 'bg-white text-slate-600'}`}
+            className={`whitespace-nowrap rounded-full px-3 py-1 text-sm ${period === p.id ? 'bg-[var(--action)] text-white' : 'bg-white text-slate-600'}`}
           >
             {p.label}
           </button>

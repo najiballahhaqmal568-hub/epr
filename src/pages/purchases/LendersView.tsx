@@ -692,7 +692,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               <div className="mb-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${manualOpeningGoods ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-600'}`}
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${manualOpeningGoods ? 'border-[var(--action)] bg-[var(--action)] text-white' : 'border-slate-300 bg-white text-slate-600'}`}
                   onClick={() => {
                     setManualOpeningGoods(true)
                     setVariantId('')
@@ -703,7 +703,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
                 </button>
                 <button
                   type="button"
-                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${!manualOpeningGoods ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-600'}`}
+                  className={`rounded-xl border px-2 py-2 text-xs font-bold ${!manualOpeningGoods ? 'border-[var(--action)] bg-[var(--action)] text-white' : 'border-slate-300 bg-white text-slate-600'}`}
                   onClick={() => {
                     setManualOpeningGoods(false)
                     setOldProductName('')
