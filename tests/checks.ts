@@ -94,7 +94,7 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { expenseAlert, profitSummary } from '../src/lib/profit'
-import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth } from '../src/lib/format'
+import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -255,7 +255,7 @@ async function settlement() {
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
   {
-    name: '«این ماه» و «ماه گذشته» — از اول ماه هجری شمسی، نه اول ماه میلادی',
+    name: '«این ماه»، «ماه گذشته» و «امسال» — از اول ماه و اول حمل هجری شمسی، نه میلادی',
     run: async () => {
       // ۶ میزان ۱۴۰۵ = ۲۸ سپتامبر ۲۰۲۶؛ اول میزان = ۲۳ سپتامبر، اول سنبله = ۲۳ اگست
       const mid = new Date(2026, 8, 28, 15, 30).getTime()
@@ -278,6 +278,18 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
         if (p0.d !== 1 || p0.m !== pd.m || p0.y !== pd.y || s0 > day || new Date(s0).getHours() !== 0) bad++
       }
       eq('۴۰۰ روز پشت‌هم درست', bad, 0)
+      // «امسال» از ۱ حمل: ۶ میزان ۱۴۰۵ → ۱ حمل ۱۴۰۵ = ۲۱ مارچ ۲۰۲۶
+      eq('امسال از اول حمل', startOfYear(mid), new Date(2026, 2, 21).getTime())
+      eq('اول حمل خودش شروع سال است', startOfYear(new Date(2026, 2, 21).getTime()), new Date(2026, 2, 21).getTime())
+      eq('آخر حوت هنوز سال قبل است', startOfYear(new Date(2026, 2, 20, 23).getTime()), new Date(2025, 2, 21).getTime())
+      eq('جنوری در سال شمسی قبلی است', startOfYear(new Date(2027, 0, 15).getTime()), new Date(2026, 2, 21).getTime())
+      let badYear = 0
+      for (let i = 0; i < 800; i++) {
+        const day = new Date(2025, 0, 1 + i, 13).getTime()
+        const y0 = startOfYear(day), p0 = jalaliDateParts(y0)
+        if (p0.m !== 1 || p0.d !== 1 || p0.y !== jalaliDateParts(day).y || y0 > day || new Date(y0).getHours() !== 0) badYear++
+      }
+      eq('۸۰۰ روز پشت‌هم: سال درست', badYear, 0)
       const pm = periodBounds('prevMonth')
       eq('ماه گذشته از اول ماه قبلی', pm.from, startOfMonth(startOfMonth() - 1))
       eq('ماه گذشته تا پیش از اول این ماه', pm.to, startOfMonth() - 1)

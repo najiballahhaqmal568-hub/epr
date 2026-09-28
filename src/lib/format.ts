@@ -142,8 +142,12 @@ export function startOfMonth(ts = Date.now()): number {
   return addCalendarDays(startOfDay(ts), -(day - 1))
 }
 
+/** نیمه‌شب محلیِ ۱ حمل همان سال هجری شمسی — نه ۱ جنوری. */
 export function startOfYear(ts = Date.now()): number {
-  return new Date(new Date(ts).getFullYear(), 0, 1).getTime()
+  let start = startOfMonth(ts)
+  // حداکثر ۱۱ ماه به عقب تا حمل همان سال
+  for (let i = 0; i < 12 && jalaliDateParts(start).m !== 1; i++) start = startOfMonth(start - 1)
+  return start
 }
 
 /** برای input[type=date] — تاریخ میلادی به YYYY-MM-DD */
