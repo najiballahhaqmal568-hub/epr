@@ -10,7 +10,7 @@
  */
 import type { Expense, ReturnDoc, Sale, Variant } from '../db'
 import { commercialSaleLines } from './commercialLines'
-import { fmtNum } from './format'
+import { addCalendarDays, fmtNum, startOfDay, startOfMonth } from './format'
 
 export interface ProfitInput {
   sales: Sale[]
@@ -92,4 +92,48 @@ export function expenseAlert(current: ProfitSummary, previous: ProfitSummary, fm
     return { level: 'warning', text: `مصرف این ماه ${fmtNum(pct)}٪ بیشتر از همین وقت ماه گذشته است${topText}` }
   }
   return null
+}
+
+/** زیان هر جوړه وقتی قیمت فروش از قیمت خرید کمتر است؛ ۰ یعنی زیان ندارد. */
+export function lossPerPair(unitPrice: number, unitCost: number): number {
+  return Math.max(0, unitCost - unitPrice)
+}
+
+export interface ProductProfit { name: string; qty: number; revenue: number; profit: number; /** درصد مفاد از قیمت فروش */ margin: number }
+
+/**
+ * مفاد هر جنس در دوره — از همان فروش‌های تأییدشده و همان قیمت خریدِ فاکتور که
+ * profitSummary می‌خواند. تخفیف فاکتور به نسبت قیمت میان خطوط تقسیم می‌شود تا
+ * جمع مفاد اجناس دقیقاً برابر «مفاد فروش» شود.
+ */
+export function productProfits(input: Omit<ProfitInput, 'returns' | 'expenses'>): ProductProfit[] {
+  const variantCost = new Map(input.variants.map(v => [v.id!, v.purchasePrice]))
+  const costOf = (l: { variantId?: number; unitCost?: number }) => l.unitCost ?? (l.variantId === undefined ? 0 : variantCost.get(l.variantId)) ?? 0
+  const rows = new Map<string, { qty: number; revenue: number; profit: number }>()
+  for (const sale of confirmedSales(input.sales, input.readyTradeUuids, input.readyReceiptUuids)) {
+    const lines = commercialSaleLines(sale)
+    const gross = lines.reduce((s, l) => s + l.unitPrice * l.qty, 0)
+    const discount = sale.discount ?? 0
+    let discountLeft = discount
+    lines.forEach((line, index) => {
+      const value = line.unitPrice * line.qty
+      // سهم تخفیف این خط؛ خط آخر باقی‌مانده را می‌گیرد تا جمع دقیق بماند
+      const share = index === lines.length - 1 ? discountLeft : gross > 0 ? Math.round((discount * value) / gross) : 0
+      discountLeft -= share
+      const row = rows.get(line.productName) ?? { qty: 0, revenue: 0, profit: 0 }
+      row.qty += line.qty
+      row.revenue += value - share
+      row.profit += value - costOf(line) * line.qty - share
+      rows.set(line.productName, row)
+    })
+  }
+  return [...rows.entries()].map(([name, r]) => ({ name, ...r, margin: r.revenue > 0 ? Math.round((r.profit / r.revenue) * 100) : 0 }))
+    .sort((a, b) => b.profit - a.profit || a.name.localeCompare(b.name, 'fa'))
+}
+
+/** چند روز تقویمی (با امروز) تا پایان این ماه هجری شمسی. */
+export function daysLeftInMonth(now = Date.now()): number {
+  // ماه شمسی حداکثر ۳۱ روز است؛ ۳۲ روز بعد از اول ماه همیشه در ماه بعدی است
+  const next = startOfMonth(addCalendarDays(startOfMonth(now), 32))
+  return Math.round((next - startOfDay(now)) / 86_400_000)
 }

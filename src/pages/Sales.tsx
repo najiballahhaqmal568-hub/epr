@@ -231,6 +231,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         <NewSaleModal
           key={`${workspaceKey}-${activeDraft?.id ?? 'new-sale'}`}
           embedded
+          isStaff={isStaff}
           onPendingChange={onPendingChange}
           onStageChange={setCheckoutStage}
           draft={activeDraft ?? undefined}

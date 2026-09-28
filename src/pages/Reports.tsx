@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { profitSummary } from '../lib/profit'
+import { productProfits, profitSummary } from '../lib/profit'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid, type Variant } from '../db'
 import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
@@ -126,6 +126,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   )
   const topProducts = [...soldBy.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 8)
   const topProfitProduct = [...soldBy.entries()].sort((a, b) => b[1].profit - a[1].profit)[0]
+  const productRows = productProfits({ sales: sales ?? [], variants: variants ?? [], readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids })
 
   // خرید از هر تأمین‌کننده در دوره
   const bySupplier = new Map<string, { total: number; pairs: number; count: number }>()
@@ -258,6 +259,17 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         {deadStock[0] && <ResultRow label="جنس کم‌حرکت" name={`${deadStock[0].p?.name ?? ''} ${deadStock[0].v.size}`.trim()} value={`${fmtNum(deadStock[0].v.stockQty)} جوړه`} />}
         {!topProducts[0] && !deadStock[0] && <p className="py-5 text-center text-sm text-slate-400">برای این دوره هنوز نتیجه‌ای نیست.</p>}
       </div>
+
+      {productRows.length > 0 && <section aria-label="مفاد هر جنس" className="surface mb-4 p-4">
+        <p className="mb-1 font-bold text-slate-800">مفاد هر جنس</p>
+        <p className="mb-3 text-xs text-slate-500">کدام جنس بیشتر پول می‌آورد و کدام کمتر (پس از تخفیف).</p>
+        {productRows.slice(0, 5).map(row => <Row key={row.name} label={row.name} value={fmtMoney(row.profit)} sub={`${fmtNum(row.qty)} جوړه · مفاد ${fmtNum(row.margin)}٪`} teal={row.profit > 0} red={row.profit < 0} />)}
+        {productRows.length > 5 && <>
+          <p className="mb-1 mt-3 text-xs font-bold text-slate-500">کم‌مفادترین</p>
+          {productRows.slice(Math.max(5, productRows.length - 3)).map(row => <Row key={row.name} label={row.name} value={fmtMoney(row.profit)} sub={`${fmtNum(row.qty)} جوړه · مفاد ${fmtNum(row.margin)}٪`} red={row.profit < 0} />)}
+        </>}
+        {productRows.some(row => row.profit < 0) && <p className="mt-2 text-xs font-bold text-red-700">جنس سرخ زیر قیمت خرید فروخته شده است.</p>}
+      </section>}
 
       <button onClick={() => setShowDetails((value) => !value)} className="mb-3 flex w-full items-center justify-between rounded-xl bg-slate-100 px-3 py-2.5 text-sm font-bold text-slate-600">
         <span>جزئیات و تحلیل کامل</span>

@@ -5,6 +5,7 @@ import { addSale, addSaleWithShipping, type SaleShippingInput } from '../../lib/
 import { calculateShipping } from '../../lib/shipping'
 import { ShippingEditor } from './SaleShipping'
 import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
+import { lossPerPair } from '../../lib/profit'
 import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { Icon } from '../../components/Icon'
@@ -22,7 +23,8 @@ export function NewSaleModal({
   onPendingChange,
   onStageChange,
   draft: suppliedDraft,
-  embedded = false
+  embedded = false,
+  isStaff = false
 }: {
   onClose: () => void
   onSaved?: (sale: Sale) => void
@@ -31,6 +33,8 @@ export function NewSaleModal({
   onStageChange?: (stage: 'selection' | 'payment') => void
   draft?: SaleDraft
   embedded?: boolean
+  /** کارگر قیمت خرید را نمی‌بیند؛ فقط هشدار فروش زیر قیمت را. */
+  isStaff?: boolean
 }) {
   const [draft] = useState(() => suppliedDraft ?? (embedded ? readWorkingSale() ?? undefined : undefined))
   const pendingRef = useRef(false)
@@ -511,6 +515,15 @@ export function NewSaleModal({
               onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(e.target.value) } : x)))}
             />
             <span className="mr-1 text-xs text-slate-500">قیمت فی جوړه</span>
+            {(() => {
+              // هشدار فروش زیر قیمت خرید — کارگر قیمت خرید را نمی‌بیند، فقط هشدار را
+              const cost = variants?.find(v => v.id === l.variantId)?.purchasePrice ?? 0
+              const loss = cost > 0 ? lossPerPair(l.unitPrice, cost) : 0
+              if (!loss) return null
+              return <p role="alert" className="sale-loss-warning">
+                {isStaff ? 'این قیمت از قیمت خرید کمتر است — پیش از فروش با مالک مشوره کنید.' : `زیر قیمت خرید (${fmtMoney(cost)}) — زیان ${fmtMoney(loss * l.qty)}`}
+              </p>
+            })()}
           </div>
           <div className="sale-quantity-actions">
             <button aria-label={`کاهش تعداد ${l.productName}`} disabled={l.qty <= 1} className="quantity-step" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>

@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
-import { fmtDateShort, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
-import { expenseAlert, profitSummary } from '../lib/profit'
+import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
+import { daysLeftInMonth, expenseAlert, profitSummary } from '../lib/profit'
 import MonthProfitModal from './dashboard/MonthProfitModal'
+import DailyCloseModal from './dashboard/DailyCloseModal'
 import { reorderProducts } from '../lib/reorder'
 import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
@@ -110,6 +111,12 @@ export default function Dashboard({
   const goodsCost = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + costOf(line) * line.qty, 0), 0)
   const discounts = todaySales.reduce((sum, sale) => sum + (sale.discount ?? 0), 0)
   const [explain, setExplain] = useState<ExplainKind | 'sales' | 'month' | null>(null)
+  const [closingDay, setClosingDay] = useState<number | null>(null)
+  // تنظیمات همین دستگاه: آخرین روز بسته‌شده و هدف مفاد ماهانه
+  const prefs = useLiveQuery(async () => ({
+    dayClosed: Number((await db.settings.get('dayClosed'))?.value ?? 0),
+    target: Number((await db.settings.get('monthlyProfitTarget'))?.value ?? 0)
+  }), [])
   const nowTs = Date.now()
   const prevEnd = Math.min(monthStart, prevStart + (nowTs - monthStart))
   const within = <T extends { date: number }>(rows: T[] | undefined, from: number, to: number) => (rows ?? []).filter(r => r.date >= from && r.date < to)
@@ -125,7 +132,16 @@ export default function Dashboard({
   const overdueCount = (customers ?? []).filter(
     (row) => row.balance > 0 && Boolean(row.promiseDate) && row.promiseDate! < dayStart
   ).length
-  const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0 || Boolean(monthAlert)
+  // «بستن روز»: شب‌ها امروز؛ صبح‌ها اگر دیروز فروش داشت و بسته نشد، دیروز
+  const hour = new Date().getHours()
+  const yesterday = addCalendarDays(dayStart, -1)
+  const yesterdaySold = within(month?.sales, yesterday, dayStart).some(sale => !sale.deleted)
+  const closeDay = isStaff || !prefs ? null
+    : hour >= 18 && prefs.dayClosed < dayStart ? dayStart
+      : hour < 12 && prefs.dayClosed < yesterday && yesterdaySold ? yesterday : null
+  const target = prefs?.target ?? 0
+  const targetPct = target > 0 ? Math.max(0, Math.round((thisMonth.netProfit / target) * 100)) : 0
+  const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0 || Boolean(monthAlert) || closeDay !== null
 
   return (
     <div className="p-4">
@@ -154,6 +170,10 @@ export default function Dashboard({
         <p className={`mt-1 text-sm font-bold ${monthChange >= 0 ? 'text-teal-700' : 'text-red-700'}`}>
           {monthChange >= 0 ? '▲' : '▼'} {fmtMoney(Math.abs(monthChange))} {monthChange >= 0 ? 'بیشتر' : 'کمتر'} از همین وقت ماه گذشته
         </p>
+        {target > 0 && <span className="mt-3 block" aria-label="هدف ماه">
+          <span className="profit-target-bar"><span style={{ width: `${Math.min(100, targetPct)}%` }} /></span>
+          <span className="mt-1 block text-xs text-slate-600">هدف {fmtMoney(target)} — {fmtNum(targetPct)}٪ رسیده · {fmtNum(daysLeftInMonth())} روز مانده</span>
+        </span>}
       </button>}
 
       <button
@@ -183,6 +203,12 @@ export default function Dashboard({
         <h2 className="mb-2 text-lg font-bold text-slate-800">کارهای امروز</h2>
         {!hasTasks && <div className="rounded-2xl bg-teal-50 p-3 text-sm font-bold text-teal-700">کار ضروری ثبت‌نشده ندارید.</div>}
         <div className="space-y-2">
+          {closeDay !== null && (
+            <button onClick={() => setClosingDay(closeDay)} className="w-full rounded-2xl bg-[var(--action-tint)] p-3 text-right text-[var(--action)]">
+              <span className="block font-bold">{closeDay === dayStart ? 'بستن امروز' : 'خلاصهٔ دیروز را ببینید'}</span>
+              <span className="text-xs">فروش، مفاد، مصرف و صندوق روز — یک نگاه، بعد بسته کنید.</span>
+            </button>
+          )}
           {monthAlert && (
             <button onClick={() => setExplain('month')}
               className={`w-full rounded-2xl p-3 text-right ${monthAlert.level === 'danger' ? 'bg-red-50 text-red-800' : 'bg-amber-100 text-amber-900'}`}>
@@ -242,7 +268,11 @@ export default function Dashboard({
       </section>
       {explain === 'sales' && <TodaySalesModal sales={todaySales} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)}
         parts={{ goods: goodsValue, cost: goodsCost, discount: discounts, returned: returnedProfit, profit: todayProfit }} />}
-      {explain === 'month' && <MonthProfitModal current={thisMonth} previous={lastMonthSoFar} from={monthStart} goTo={goTo} onClose={() => setExplain(null)} />}
+      {explain === 'month' && <MonthProfitModal current={thisMonth} previous={lastMonthSoFar} from={monthStart} goTo={goTo} onClose={() => setExplain(null)}
+        target={target} onTarget={value => void db.settings.put({ key: 'monthlyProfitTarget', value })} />}
+      {closingDay !== null && <DailyCloseModal day={closingDay} readyTradeUuids={directReview.readyTradeUuids} readyReceiptUuids={receiptReview.readyReceiptUuids}
+        onClose={() => setClosingDay(null)}
+        onClosed={() => { void db.settings.put({ key: 'dayClosed', value: Math.max(prefs?.dayClosed ?? 0, closingDay) }); setClosingDay(null) }} />}
       {explain && explain !== 'sales' && explain !== 'month' && <ExplainModal kind={explain} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)} />}
     </div>
   )
