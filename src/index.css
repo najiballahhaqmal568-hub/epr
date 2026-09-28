@@ -89,6 +89,7 @@ input::placeholder, textarea::placeholder { color: var(--text-secondary); }
 button, a, input, select, textarea, summary { touch-action: manipulation; }
 button:not(:disabled), summary { cursor: pointer; }
 button, input:not([type='checkbox']):not([type='radio']), select, textarea { min-height: 44px; }
+summary { padding-block: 0.625rem; }
 button { min-width: 44px; }
 button:disabled { cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }

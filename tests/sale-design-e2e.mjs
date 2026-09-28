@@ -79,6 +79,15 @@ try {
   assert.deepEqual(await page.evaluate(() => window.result()), { cash: 900, sales: [{ total: 900, paid: 900 }] })
   assert.ok(await page.evaluate(() => window.marks.includes('sale-check')), 'check mark shown')
 
+  // Speed of that sale is kept on this phone and shown under «آمار».
+  await page.getByRole('button', { name: 'آمار', exact: true }).click()
+  const speed = page.getByRole('region', { name: 'سرعت فروش' })
+  assert.match((await speed.innerText()).replace(/\s+/g, ' '), /این هفته: هر فروش حدود [۰-۹]+ ثانیه و [۰-۹]+ لمس · ۱ فروش/)
+  const timing = await page.evaluate(async () => (await (await import('/src/db.ts')).db.settings.get('saleTimings')).value)
+  assert.equal(timing.length, 1)
+  assert.ok(timing[0].taps >= 8 && timing[0].pairs === 1, `taps counted from the cart to the save: ${JSON.stringify(timing[0])}`)
+  await page.getByRole('button', { name: 'فروش جدید', exact: true }).click()
+
   // 6) Reduced motion: no flying pill, the sale still adds.
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() => { window.marks = [] })

@@ -100,6 +100,7 @@ import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
 import { documentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
+import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -281,6 +282,24 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // سند معاملهٔ مستقیم مقایسهٔ دقیق دارد — مهر نمی‌خورد
       const directId = await db.sales.add({ date: 2, saleType: 'retail', lines: [], total: 0, paid: 0, directTrade: { uuid: 'x' } } as unknown as Sale)
       is('معاملهٔ مستقیم بدون مهر', (await db.sales.get(directId))!.by, undefined)
+    }
+  },
+  {
+    name: 'سرعت فروش — میانهٔ ثانیه و لمس، این هفته در برابر هفتهٔ گذشته',
+    run: async () => {
+      const now = 100 * 86_400_000
+      const t = (daysAgo: number, seconds: number, taps: number): SaleTiming => ({ at: now - daysAgo * 86_400_000, ms: seconds * 1000, taps, pairs: 1 })
+      const list = [t(1, 20, 6), t(2, 30, 8), t(3, 25, 7), t(1, 40 * 60, 50), t(9, 40, 11), t(10, 50, 13)]
+      const s = speedSummary(list, now)
+      eq('این هفته: سه فروش (سبد ۴۰ دقیقه‌ای حساب نمی‌شود)', s.thisWeek.count, 3)
+      eq('میانهٔ ثانیه: ۲۵', s.thisWeek.seconds, 25)
+      eq('میانهٔ لمس: ۷', s.thisWeek.taps, 7)
+      eq('هفتهٔ گذشته: میانهٔ دو عدد ۴۰ و ۵۰ = ۴۵', s.lastWeek.seconds, 45)
+      eq('هفتهٔ گذشته لمس: (۱۱+۱۳)/۲', s.lastWeek.taps, 12)
+      let many: SaleTiming[] = []
+      for (let i = 0; i < 305; i++) many = appendTiming(many, t(0, i, 1))
+      eq('فقط ۳۰۰ ثبت آخر نگه داشته می‌شود', many.length, 300)
+      eq('کهنه‌ترین‌ها می‌روند', many[0].ms, 5000)
     }
   },
   {

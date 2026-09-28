@@ -11,6 +11,7 @@ import { keypadPress, quickCashOptions } from '../../lib/quickCash'
 import { MoneyKeypad } from '../../components/MoneyKeypad'
 import { RollingNumber } from '../../components/RollingNumber'
 import { useFlipList } from '../../lib/useFlipList'
+import { recordSaleTiming } from '../../lib/saleSpeed'
 import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
 import { Modal, Field, inputCls, PrimaryBtn, Skeleton } from '../../components/ui'
 import { Icon } from '../../components/Icon'
@@ -79,6 +80,9 @@ export function NewSaleModal({
   const freshPaid = useRef(true)
   const cartRef = useRef<HTMLDivElement>(null)
   useFlipList(cartRef)
+  // «سرعت فروش»: from the first pair in the cart to «ثبت فروش», and the taps in between
+  const startedAt = useRef<number | null>(null)
+  const taps = useRef(0)
   // صفحهٔ دفتر فزیکی — با انتخاب مشتری، صفحهٔ فعلی خودش پیشنهاد می‌شود
   const [bookPage, setBookPage] = useState(draft?.bookPage ?? '')
   const [pageTouched, setPageTouched] = useState(false)
@@ -215,6 +219,10 @@ export function NewSaleModal({
   const lineCost = (l: SaleLine) => variants?.find((v) => v.id === l.variantId)?.purchasePrice ?? 0
   /** Loss per pair when the price is under cost; 0 when cost is unknown. */
   const lineLoss = (l: SaleLine) => (lineCost(l) > 0 ? lossPerPair(l.unitPrice, lineCost(l)) : 0)
+  useEffect(() => {
+    if (lines.length && startedAt.current === null) { startedAt.current = Date.now(); taps.current = 1 }
+    if (!lines.length) startedAt.current = null
+  }, [lines.length])
   const subtotal = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
   const discount = Math.min(parseNum(discountStr), subtotal)
   const total = subtotal - discount
@@ -328,6 +336,7 @@ export function NewSaleModal({
     // never present the sale as failed or offer a retry that duplicates it.
     completedRef.current = true
     saleCheck()
+    if (startedAt.current !== null) void recordSaleTiming({ at: Date.now(), ms: Date.now() - startedAt.current, taps: taps.current, pairs: lines.reduce((n, l) => n + l.qty, 0) })
     const warnings: string[] = []
     try {
       clearWorkingSale()
@@ -347,6 +356,7 @@ export function NewSaleModal({
 
   return (
     <Shell title="فروش جدید" onClose={() => { if (!pendingRef.current) onClose() }}>
+      <div onPointerDownCapture={() => { if (startedAt.current !== null) taps.current++ }}>
       {error && <p ref={errorRef} role="alert" className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">{error}</p>}
       <div className="sale-draft-status mb-3 flex items-center justify-between gap-3 text-xs text-slate-500">
         <span role="status">{pending ? 'در حال ثبت؛ لطفاً منتظر بمانید' : draftStatus}</span>
@@ -943,6 +953,7 @@ export function NewSaleModal({
             </Modal>
           )
         })()}
+      </div>
     </Shell>
   )
 }
