@@ -136,9 +136,10 @@ export function startOfDay(ts = Date.now()): number {
   return new Date(ts).setHours(0, 0, 0, 0)
 }
 
+/** نیمه‌شب محلیِ روز اول ماه هجری شمسی (مثلاً اول میزان) — نه اول ماه میلادی. */
 export function startOfMonth(ts = Date.now()): number {
-  const d = new Date(ts)
-  return new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+  const day = jalaliDateParts(ts).d
+  return addCalendarDays(startOfDay(ts), -(day - 1))
 }
 
 export function startOfYear(ts = Date.now()): number {

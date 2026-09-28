@@ -94,7 +94,8 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { expenseAlert, profitSummary } from '../src/lib/profit'
-import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow } from '../src/lib/format'
+import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth } from '../src/lib/format'
+import { periodBounds } from '../src/lib/period'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -253,6 +254,35 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: '«این ماه» و «ماه گذشته» — از اول ماه هجری شمسی، نه اول ماه میلادی',
+    run: async () => {
+      // ۶ میزان ۱۴۰۵ = ۲۸ سپتامبر ۲۰۲۶؛ اول میزان = ۲۳ سپتامبر، اول سنبله = ۲۳ اگست
+      const mid = new Date(2026, 8, 28, 15, 30).getTime()
+      const start = startOfMonth(mid)
+      eq('اول میزان، نیمه‌شب محلی', start, new Date(2026, 8, 23).getTime())
+      const parts = jalaliDateParts(start)
+      eq('روز اول ماه', parts.d, 1)
+      eq('همان ماه میزان', parts.m, 7)
+      eq('روز اول خودش شروع ماه است', startOfMonth(start), start)
+      eq('ماه گذشته = اول سنبله', startOfMonth(start - 1), new Date(2026, 7, 23).getTime())
+      // سال‌گذر: ۱۰ حمل ۱۴۰۶ (۳۰ مارچ ۲۰۲۷) → اول حمل (۲۱ مارچ ۲۰۲۷)
+      eq('اول حمل', startOfMonth(new Date(2027, 2, 30, 9).getTime()), new Date(2027, 2, 21).getTime())
+      // ماه آخر سال: ۲۹ حوت → اول حوت
+      is('آخر حوت هنوز حوت است', jalaliDateParts(startOfMonth(new Date(2027, 2, 20, 9).getTime())).m, 12)
+      // هر روز ۴۰۰ روز پشت‌هم: شروع ماه روز اول همان ماه باشد و هرگز بعد از خود روز نیاید
+      let bad = 0
+      for (let i = 0; i < 400; i++) {
+        const day = new Date(2026, 0, 1 + i, 13).getTime()
+        const s0 = startOfMonth(day), p0 = jalaliDateParts(s0), pd = jalaliDateParts(day)
+        if (p0.d !== 1 || p0.m !== pd.m || p0.y !== pd.y || s0 > day || new Date(s0).getHours() !== 0) bad++
+      }
+      eq('۴۰۰ روز پشت‌هم درست', bad, 0)
+      const pm = periodBounds('prevMonth')
+      eq('ماه گذشته از اول ماه قبلی', pm.from, startOfMonth(startOfMonth() - 1))
+      eq('ماه گذشته تا پیش از اول این ماه', pm.to, startOfMonth() - 1)
+    }
+  },
   {
     name: 'مفاد خالص و هشدار مصرف — همان فورمول راپور، با عددهای حساب‌شده به دست',
     run: async () => {
