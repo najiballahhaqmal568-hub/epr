@@ -86,8 +86,20 @@ try {
   await dialog.getByRole('button', { name: /^42 قهوه‌ای/ }).click()
   await page.getByRole('textbox', { name: 'تعداد کوهستان 42', exact: true }).waitFor()
   assert.equal(await page.evaluate(() => window.marks.includes('fly-dot')), false)
+  // 7) Sales saved before this fix are listed (read-only) in «کنترل حساب‌ها».
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db.ts')
+    await db.sales.add({ date: Date.now() - 86400000, saleType: 'retail', customerName: 'قدیمی', lines: [], total: 900, paid: 1000 })
+  })
+  await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+  await page.getByText('تنظیمات پیشرفته', { exact: true }).click()
+  await page.getByRole('button').filter({ hasText: 'کنترل حساب‌ها' }).first().click()
+  await page.getByRole('button', { name: 'اجرای کنترل' }).click()
+  const old = page.getByRole('region', { name: 'فروش با پول اضافه' })
+  assert.match(await old.innerText(), /۱ فروش قدیمی[\s\S]*۱۰۰ ؋ بیشتر[\s\S]*قدیمی[\s\S]*اضافه ۱۰۰ ؋/)
   assert.deepEqual(errors, [])
-  console.log('PASS sale design: colour-grouped size grid, fly-to-cart, below-cost flag, quick cash, keypad, change never kept in till, check mark, reduced motion')
+  console.log('PASS sale design: old overpaid sales listed read-only; colour-grouped size grid, fly-to-cart, below-cost flag, quick cash, keypad, change never kept in till, check mark, reduced motion')
 } finally {
   await app.close()
 }

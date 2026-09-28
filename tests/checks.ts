@@ -97,6 +97,7 @@ import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSumma
 import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
+import { overpaidSales } from '../src/lib/overpaid'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -269,6 +270,16 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('پول پوره: صندوق ۹۰۰', await cashBalance(), 900)
       eq('گدام یک جوره کم شد', await stockOf(vId), 4)
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      // فروش‌های قدیمی که پیش از این قانون ثبت شده‌اند فقط نشان داده می‌شوند
+      const old = [
+        { id: 1, date: 1, total: 900, paid: 1000, customerName: 'احمد' },
+        { id: 2, date: 2, total: 900, paid: 900 },
+        { id: 3, date: 3, total: 500, paid: 2000, deleted: true },
+        { id: 4, date: 4, total: 0, paid: 700, lenderAction: 'x' }
+      ] as unknown as Sale[]
+      const found = overpaidSales(old)
+      eq('فقط یک فروش قدیمی پول اضافه دارد', found.length, 1)
+      eq('اضافه = ثبت‌شده − مجموع', found[0].extra, 100)
     }
   },
   {

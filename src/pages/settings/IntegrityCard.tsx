@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { fmtNum, fmtMoney, fmtDate } from '../../lib/format'
 import { Card, PrimaryBtn } from '../../components/ui'
 import { runIntegrityCheck, fixMismatch, type IntegrityReport, type Mismatch } from '../../lib/integrity'
-import { accessFlags } from '../../db'
+import { accessFlags, db } from '../../db'
+import { overpaidSales, type OverpaidSale } from '../../lib/overpaid'
 
 /** کنترل حساب‌ها: مقایسهٔ عددهای ذخیره‌شده با اسناد و اصلاح اختلاف */
 function IntegrityCard() {
   const [report, setReport] = useState<IntegrityReport | null>(null)
+  const [overpaid, setOverpaid] = useState<OverpaidSale[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
@@ -15,6 +17,7 @@ function IntegrityCard() {
     setMsg('')
     try {
       setReport(await runIntegrityCheck())
+      setOverpaid(overpaidSales(await db.sales.toArray()))
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     }
@@ -90,6 +93,22 @@ function IntegrityCard() {
                 </div>
               )}
             </>
+          )}
+          {overpaid.length > 0 && (
+            <section aria-label="فروش با پول اضافه" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-bold">
+                {fmtNum(overpaid.length)} فروش قدیمی پول بیشتر از مجموع ثبت کرده — صندوق {fmtMoney(overpaid.reduce((sum, o) => sum + o.extra, 0))} بیشتر نشان داده است
+              </p>
+              <p className="mt-1 text-xs">
+                پیش از این اصلاح، وقتی مشتری نوت بزرگ‌تر می‌داد، تمام نوت در صندوق ثبت می‌شد. اگر بعد از این تاریخ‌ها پول صندوق را شمرده‌اید، اختلاف از قبل اصلاح شده است؛ اگر نه، «شمارش نقد» را بزنید.
+              </p>
+              {overpaid.slice(0, 20).map((o) => (
+                <p key={o.id ?? o.date} className="mt-1 flex justify-between gap-2 text-xs">
+                  <span>{fmtDate(o.date)} · {o.customerName ?? 'مشتری نقدی'}</span>
+                  <span>مجموع {fmtMoney(o.total)} · ثبت‌شده {fmtMoney(o.paid)} · اضافه {fmtMoney(o.extra)}</span>
+                </p>
+              ))}
+            </section>
           )}
         </div>
       )}
