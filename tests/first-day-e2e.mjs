@@ -20,8 +20,8 @@ try {
   // The step's button reaches the right place; the empty stock screen teaches and offers the action.
   await guide.getByRole('button', { name: 'گدام' }).click()
   await page.getByText('هنوز جنسی ثبت نشده.', { exact: true }).waitFor()
-  await page.getByText('بوت‌ها را با عکس اضافه کنید؛ فروشنده از عکس زودتر پیدا می‌کند.').waitFor()
-  assert.equal(await page.locator('.empty-state').getByRole('button', { name: '＋ افزودن بوت جدید' }).count(), 1)
+  await page.getByText('با «＋ افزودن بوت جدید» در بالا، بوت‌ها را با عکس اضافه کنید؛ فروشنده از عکس زودتر پیدا می‌کند.').waitFor()
+  assert.equal(await page.getByRole('button', { name: '＋ افزودن بوت جدید' }).count(), 1, 'one add button, no duplicate')
 
   // Adding a product ticks step two by itself.
   await page.evaluate(async () => {
@@ -33,11 +33,13 @@ try {
   assert.match(await guide.innerText(), /۰ از ۱ بوت عکس دارد/)
   assert.equal(await guide.locator('li[data-done="true"]').count(), 1)
 
-  // Empty customer book: the action opens the new-customer form.
+  // Empty accounts point to the customer book; its empty screen points to the one add button.
   await nav('حساب‌ها')
   await page.getByText('هنوز هیچ حسابی نیست.', { exact: true }).waitFor()
   await page.locator('.empty-state').getByRole('button', { name: 'باز کردن دفتر مشتریان' }).click()
-  await page.locator('.empty-state').getByRole('button', { name: '＋ مشتری جدید' }).click()
+  await page.getByText('با «＋ مشتری جدید» در بالا، مشتری قرضی را بسازید تا قرضش با صفحهٔ دفتر نگه داشته شود.').waitFor()
+  assert.equal(await page.getByRole('button', { name: '＋ مشتری جدید' }).count(), 1, 'one add button, no duplicate')
+  await page.getByRole('button', { name: '＋ مشتری جدید' }).click()
   await page.getByRole('dialog').waitFor()
   await page.keyboard.press('Escape')
 
