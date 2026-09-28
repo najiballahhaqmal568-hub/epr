@@ -26,7 +26,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   const [cancelReason, setCancelReason] = useState('')
   const live = useLiveQuery(() => db.suppliers.get(supplier.id!), [supplier.id])
   const purchases = useLiveQuery(
-    () => db.purchases.where('supplierId').equals(supplier.id!).filter((p) => !p.deleted).toArray(),
+    () => db.purchases.where('supplierId').equals(supplier.id!).filter((p) => !p.deleted || p.directTrade?.status === 'cancelled').toArray(),
     [supplier.id]
   )
   const hawalas = useLiveQuery(() => db.purchases.filter((p) => !p.deleted && p.sarrafId === supplier.id).toArray(), [supplier.id])
@@ -58,6 +58,11 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
   type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment; ret?: ReturnDoc; directUuid?: string }
   const events: Ev[] = []
   purchases?.forEach((p) => {
+    if (p.directTrade?.status === 'cancelled') {
+      // لغو شده: فقط برای رد حساب؛ قرض فروشنده را تغییر نمی‌دهد.
+      events.push({ date: p.date, label: 'خرید مستقیم — لغو شده', directUuid: p.directTrade.uuid, sub: p.cancelledReason ? `دلیل لغو: ${p.cancelledReason}` : undefined, amount: 0, plus: false })
+      return
+    }
     const hawala = p.sarrafAmount ?? 0
     const rem = p.total - p.paid - hawala
     events.push({

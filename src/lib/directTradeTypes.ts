@@ -16,6 +16,17 @@ export interface DirectTradeMeta {
   previousRevision?: string
   counterpartUuid: string
   status: 'active' | 'cancelled'
+  /** Earlier versions of the goods/date, newest last; the trade's audit trail. */
+  corrections?: DirectTradeCorrection[]
+}
+
+export interface DirectTradeCorrection {
+  /** Revision that this snapshot was before being replaced. */
+  revision: string
+  date: number
+  lines: DirectLine[]
+  reason: string
+  correctedAt: number
 }
 
 export type DirectPaymentRoute = 'customerCash' | 'supplierPayment' | 'customerToSupplier'

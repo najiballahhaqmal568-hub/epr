@@ -171,6 +171,9 @@ export interface PurchaseLine {
 }
 
 export interface Purchase extends Synced {
+  /** Direct trades only: why and when the whole trade was cancelled; the document stays for audit. */
+  cancelledReason?: string
+  cancelledAt?: number
   id?: number
   date: number
   supplierId: number
@@ -370,6 +373,8 @@ export interface CashMovement extends Synced {
   goodsReceiptChild?: CustomerGoodsReceiptChild
   /** Stable direct-payment link; refId alone is device-local. */
   directPaymentUuid?: string
+  /** Explicit reversal of a corrected/cancelled direct payment's cash; the original row stays. */
+  directPaymentReversalOfUuid?: string
   /** Stable freight link; refId alone is device-local and not sufficient. */
   shippingPaymentUuid?: string
   shippingRole?: 'paid' | 'received' | 'reversal'
