@@ -22,7 +22,8 @@ try {
     await db.suppliers.bulkAdd([
       { name: 'تأمین‌کنندهٔ قرضدار', phone: '0700111222', balance: 4200, createdAt: Date.now() },
       { name: 'تأمین‌کنندهٔ پیشکی', balance: -800, createdAt: Date.now() },
-      { name: 'صراف آزمایشی', kind: 'sarraf', balance: 1500, createdAt: Date.now() }
+      { name: 'صراف آزمایشی', kind: 'sarraf', balance: 1500, createdAt: Date.now() },
+      { name: 'حاجی قرض‌دهنده', kind: 'lender', balance: 50000, createdAt: Date.now() }
     ])
   })
   await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
@@ -62,6 +63,22 @@ try {
   assert.equal(await page.getByRole('button', { name: '＋ صراف جدید' }).count(), 1)
 
   await page.getByRole('group', { name: 'نوع حساب خرید' }).getByRole('button', { name: 'قرض‌دهنده‌ها' }).click()
+  const lenders = page.getByRole('region', { name: 'فهرست قرض‌دهندگان' })
+  await lenders.waitFor()
+  assert.ok((await page.getByRole('button', { name: '＋ قرض‌دهندهٔ جدید' }).boundingBox()).y < (await lenders.boundingBox()).y, 'lender create above list')
+  const lenderBefore = await snapshot()
+  await lenders.getByRole('button', { name: /حاجی قرض‌دهنده/ }).click()
+  const lender = page.locator('dialog[open]').last()
+  await lender.waitFor()
+  for (const name of ['＋ دریافت از او', 'پول به او', 'کفش به او', 'پرداخت مستقیم به فروشنده', 'سند قبلی — قبل از استفاده از اپ', 'شریک شدن — تبدیل قرض به سرمایه']) {
+    const button = lender.getByRole('button', { name, exact: true })
+    await button.click()
+    assert.equal(await button.getAttribute('aria-pressed'), 'true', `${name} shows as selected`)
+    await button.click()
+    assert.equal(await button.getAttribute('aria-pressed'), 'false', `${name} toggles off`)
+  }
+  await closeAll()
+  assert.equal(await snapshot(), lenderBefore, 'opening lender forms writes nothing')
   await page.getByRole('group', { name: 'نوع حساب خرید' }).getByRole('button', { name: 'تأمین‌کنندگان' }).click()
   for (const width of [320, 390, 1440]) {
     await page.setViewportSize({ width, height: 900 })
@@ -72,7 +89,7 @@ try {
     await page.screenshot({ path: `${shots}/suppliers-${width}.png`, fullPage: true })
   }
   assert.deepEqual(errors, [])
-  console.log('PASS purchase accounts: create above list, pay/return/detail/new open without writes, sarraf tab, lenders reachable, 320–1440 fit')
+  console.log('PASS purchase accounts: create above list, pay/return/detail/new open without writes, sarraf tab, lender list and six lender actions toggle without writes, 320–1440 fit')
 } finally {
   await app.close()
 }
