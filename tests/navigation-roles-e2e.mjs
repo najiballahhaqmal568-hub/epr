@@ -15,6 +15,10 @@ for (const role of ['staff', 'viewer']) {
       ])
     }, role)
     await page.goto(origin, { waitUntil: 'domcontentloaded' })
+    // Each role opens on its own screen: staff at the sale counter, a partner on the reports.
+    await page.getByRole('heading', { name: role === 'staff' ? 'میز فروش' : 'راپورها', exact: true }).waitFor()
+    if (role === 'viewer') assert.equal(await page.getByRole('button', { name: 'ثبت فروش', exact: true }).count(), 0)
+    await page.getByRole('navigation').getByRole('button', { name: 'خانه', exact: true }).click()
     await page.getByRole('heading', { name: 'خانه', exact: true }).waitFor()
     if (role === 'staff') {
       assert.doesNotMatch(await page.locator('main').innerText(), /مفاد:|راپور کامل|مفاد خالص این ماه|مصرف این ماه|مصرف از مفاد/)

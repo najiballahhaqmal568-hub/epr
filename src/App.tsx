@@ -207,6 +207,20 @@ export default function App() {
     }
   }, [serverCfg, passwordRecovery, uiPreview])
 
+  const role = typeof auth === 'object' ? auth.role : null
+  const isStaff = role === 'staff'
+  const readOnly = role === 'viewer'
+  accessFlags.readOnly = readOnly
+  // Each role opens on its own screen: staff on the sale counter, a partner on the reports.
+  // Only the first screen after opening, and only if nothing has been tapped yet.
+  const landed = useRef(false)
+  useEffect(() => {
+    if (landed.current || !role) return
+    landed.current = true
+    if (role === 'staff') setTab((t) => (t === 'dashboard' ? 'sales' : t))
+    if (role === 'viewer') setTab((t) => (t === 'dashboard' ? 'reports' : t))
+  }, [role])
+
   const cachedProfile = useLiveQuery(
     async () => ((await db.settings.get('cachedProfile'))?.value as Profile | undefined) ?? null,
     []
@@ -270,10 +284,6 @@ export default function App() {
     )
   }
 
-  const role = typeof auth === 'object' ? auth.role : null
-  const isStaff = role === 'staff'
-  const readOnly = role === 'viewer'
-  accessFlags.readOnly = readOnly
 
   if (pinHash && !unlocked) {
     return (
