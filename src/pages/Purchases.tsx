@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Purchase, type Supplier } from '../db'
 import { receivePurchase, payLanding, landingUnpaidOf } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { inputCls, Fab, Empty, Card } from '../components/ui'
+import { Icon } from '../components/Icon'
 import { reorderProducts } from '../lib/reorder'
 import CandidatesView from './purchases/Candidates'
 import LandingCostModal from './purchases/LandingCostModal'
@@ -48,7 +49,26 @@ export default function Purchases({
   const [showLanding, setShowLanding] = useState(false)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<PurchaseFilter>('all')
-  const [showFilters, setShowFilters] = useState(false)
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [actionError, setActionError] = useState('')
+  const busyRef = useRef(false)
+
+  // دکمهٔ «جنس رسید» و «پرداخت مصارف رسیدن» در وقت شلوغی دو بار زده می‌شود؛
+  // خطای عملیات (مثلاً صندوق خالی) هم باید دیده شود، نه اینکه خاموش گم شود.
+  async function runAction(id: number, action: () => Promise<void>) {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusyId(id)
+    setActionError('')
+    try {
+      await action()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      busyRef.current = false
+      setBusyId(null)
+    }
+  }
 
   const purchases = useLiveQuery(() => db.purchases.orderBy('date').reverse().filter((p) => !p.deleted).limit(100).toArray(), [])
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
@@ -82,21 +102,16 @@ export default function Purchases({
     <div className="p-4">
       {(view === 'history' || view === 'candidates') && (
         <>
-          <h1 className="mb-3 text-xl font-bold text-slate-800">خرید</h1>
-          <div className="mb-3 grid grid-cols-3 gap-2">
-            <button onClick={onBack} className="rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700">
-              موجودی
-            </button>
-            <button onClick={() => setView('history')} className="rounded-xl bg-teal-700 py-2.5 text-sm font-bold text-white">
-              خرید
-            </button>
-            <button
-              onClick={onOpenReorder}
-              className={`rounded-xl py-2.5 text-sm font-bold ${reorderCount ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}
-            >
-              خرید مجدد {reorderCount > 0 && `(${fmtNum(reorderCount)})`}
-            </button>
-          </div>
+          <div className="page-heading"><div><h1>خرید</h1><p>خرید، رسیدن جنس و مصارف رسیدن</p></div></div>
+          <section className="inventory-management" aria-label="مدیریت گدام">
+            <div className="inventory-actions">
+              <button onClick={onBack} disabled={!onBack} className="inventory-action">موجودی</button>
+              <button onClick={() => setView('history')} className="inventory-active" aria-pressed="true">خرید</button>
+              <button onClick={onOpenReorder} disabled={!onOpenReorder} className={`inventory-action ${reorderCount ? 'bg-amber-100 text-amber-800' : ''}`}>
+                خرید مجدد {reorderCount > 0 && `(${fmtNum(reorderCount)})`}
+              </button>
+            </div>
+          </section>
         </>
       )}
 
@@ -129,162 +144,130 @@ export default function Purchases({
       {view === 'lenders' && <LendersView />}
 
       {view === 'history' && (
-        <>
-          <button
-            onClick={() => setShowNew(true)}
-            className="mb-3 w-full rounded-2xl bg-teal-700 py-4 text-lg font-bold text-white shadow-sm active:bg-teal-800"
-          >
-            ثبت خرید جدید
+        <section aria-label="خریدها" className="purchase-history">
+          <button onClick={() => setShowNew(true)} className="primary-button mb-3 flex items-center justify-center gap-2 py-4 text-lg">
+            <Icon name="plus" /> ثبت خرید جدید
           </button>
 
           {(vendorDebt > 0 || lenderDebt > 0) && (
-            <button
-              onClick={onOpenAccounts}
-              className="mb-3 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 text-right shadow-sm"
-            >
+            <button onClick={onOpenAccounts} disabled={!onOpenAccounts} className="surface purchase-debt">
               <span>
-                <span className="block text-xs text-slate-500">قرض خرید</span>
-                <span className="block text-xs font-bold text-teal-700">تأمین‌کنندگان و قرض‌دهندگان</span>
+                <span className="purchase-muted">قرض خرید</span>
+                <span className="purchase-link">تأمین‌کنندگان و قرض‌دهندگان ←</span>
               </span>
-              <span className="text-left">
-                <span className="block text-xl font-bold text-red-600">{fmtMoney(vendorDebt + lenderDebt)}</span>
-                <span className="text-xs text-slate-400">دیدن حساب‌ها</span>
-              </span>
+              <strong className="inventory-money text-red-700">{fmtMoney(vendorDebt + lenderDebt)}</strong>
             </button>
           )}
 
-          <button
-            onClick={() => setShowLanding(true)}
-            className="mb-3 w-full rounded-xl border border-dashed border-amber-400 py-2.5 text-sm font-bold text-amber-700"
-          >
-            ثبت مصارف رسیدن (کرایه، حمالی یا کمیشن)
+          <button onClick={() => setShowLanding(true)} className="purchase-secondary" aria-label="ثبت مصارف رسیدن">
+            ثبت مصارف رسیدن <span className="purchase-muted">کرایه، حمالی یا کمیشن</span>
           </button>
 
-          <div className="mb-2 flex gap-2">
+          <div className="surface purchase-filters">
             <input
               className={inputCls}
+              type="search"
+              aria-label="جستجوی خرید"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="جستجوی تأمین‌کننده یا جنس..."
+              placeholder="تأمین‌کننده، جنس، سایز یا رنگ..."
             />
-            <button
-              onClick={() => setShowFilters((value) => !value)}
-              aria-expanded={showFilters}
-              className={`shrink-0 rounded-xl px-4 text-sm font-bold ${showFilters ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'}`}
-            >
-              فلتر
-            </button>
-          </div>
-          {showFilters && (
-            <div className="mb-3 flex gap-2">
+            <div className="segmented mt-3" role="group" aria-label="فلتر خرید">
               {([
                 ['all', 'همه'],
                 ['debt', 'قرض‌دار'],
                 ['transit', 'در راه']
               ] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setFilter(id)}
-                  className={`rounded-full px-4 py-1.5 text-xs font-bold ${filter === id ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`}
-                >
-                  {label}
-                </button>
+                <button key={id} onClick={() => setFilter(id)} aria-pressed={filter === id}>{label}</button>
               ))}
+            </div>
+          </div>
+
+          {actionError && (
+            <div role="alert" className="mb-3 flex items-start justify-between gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-800">
+              <span>{actionError}</span>
+              <button onClick={() => setActionError('')} aria-label="بستن پیام" className="shrink-0 font-bold">×</button>
             </div>
           )}
 
-          <div className="mb-2 mt-4 flex items-center justify-between">
-            <h2 className="font-bold text-slate-800">خریدهای اخیر</h2>
-            <span className="text-xs text-slate-400">{fmtNum(shownPurchases.length)} خرید</span>
+          <div className="purchase-list-heading">
+            <h2>خریدهای اخیر</h2>
+            <span>{fmtNum(shownPurchases.length)} خرید</span>
           </div>
           {shownPurchases.length === 0 && <Empty text={purchases?.length ? 'خریدی با این جستجو یا فلتر پیدا نشد.' : 'هنوز خریدی ثبت نشده.'} />}
+          {shownPurchases.length > 0 && <div className="purchase-rows">
           {shownPurchases.map((p) => {
-            if (p.directTrade) return <Card key={p.id}><button className="w-full text-right" onClick={() => setDirectUuid(p.directTrade!.uuid)}><p className="font-bold">{p.supplierName} — خرید مستقیم</p><p className="text-xs text-slate-500">{fmtDate(p.date)} · ارسال مستقیم — بدون گدام</p><p className="my-2 text-sm">{commercialPurchaseLines(p).map(l => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`).join('، ')}</p><p className="font-bold text-teal-700">{fmtMoney(p.total)}</p><span className="mt-2 block text-sm text-teal-700">جزئیات معامله و باقی‌مانده</span></button></Card>
+            if (p.directTrade) return (
+              <article key={p.id} className="purchase-row">
+                <button className="purchase-row-open" onClick={() => setDirectUuid(p.directTrade!.uuid)}>
+                  <div className="purchase-row-heading">
+                    <div className="min-w-0"><p className="font-bold">{p.supplierName}</p><p className="purchase-muted">خرید مستقیم · {fmtDate(p.date)} · بدون گدام</p></div>
+                    <strong className="inventory-money">{fmtMoney(p.total)}</strong>
+                  </div>
+                  <p className="purchase-goods">{commercialPurchaseLines(p).map(l => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`).join('، ')}</p>
+                  <span className="purchase-link">جزئیات معامله و باقی‌مانده ←</span>
+                </button>
+              </article>
+            )
             const hawala = p.sarrafAmount ?? 0
             const remainder = p.total - p.paid - hawala
             const pending = p.received === false
+            const landingDue = landingUnpaidOf(p)
+            const busy = busyId === p.id
             return (
-              <Card key={p.id}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-slate-800">
-                      {p.supplierName}
-                      {pending && <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">🚚 در راه</span>}
-                    </p>
-                    <p className="text-xs text-slate-500">{fmtDate(p.date)}</p>
+              <article key={p.id} className="purchase-row" aria-busy={busy}>
+                <div className="purchase-row-heading">
+                  <div className="min-w-0">
+                    <p className="font-bold">{p.supplierName}</p>
+                    <p className="purchase-muted">{fmtDate(p.date)}</p>
                   </div>
-                  <div className="text-left">
-                    <p className="font-bold text-teal-700">{fmtMoney(p.total)}</p>
-                    {remainder > 0 && <p className="text-xs text-red-600">باقی: {fmtMoney(remainder)}</p>}
-                    {hawala > 0 && (
-                      <p className="text-xs text-amber-600">
-                        حواله {p.sarrafName}: {fmtMoney(hawala)}
-                      </p>
-                    )}
-                    {(p.landingCost ?? 0) > 0 && (
-                      <p className="text-xs text-amber-600">مصارف رسیدن: {fmtMoney(p.landingCost!)}</p>
-                    )}
+                  <div className="purchase-row-amount">
+                    <strong className="inventory-money">{fmtMoney(p.total)}</strong>
+                    {pending && <span className="purchase-badge purchase-badge-transit">در راه</span>}
+                    {remainder > 0 ? <span className="purchase-badge purchase-badge-debt">باقی: {fmtMoney(remainder)}</span> : <span className="purchase-badge purchase-badge-paid">پرداخت شده</span>}
                   </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-600">
-                  {p.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}
-                </p>
-                {landingUnpaidOf(p) > 0 && (
-                  <button
-                    onClick={() => void payLanding(p.id!)}
-                    className="mt-2 w-full rounded-xl bg-amber-500 py-2 text-sm font-bold text-white"
-                  >
-                    💵 پرداخت مصارف رسیدن ({fmtMoney(landingUnpaidOf(p))}) — نقد از صندوق
-                  </button>
-                )}
-                {pending ? (
-                  <button
-                    onClick={() => void receivePurchase(p.id!)}
-                    className="mt-2 w-full rounded-xl bg-teal-700 py-2 text-sm font-bold text-white"
-                  >
-                    ✓ جنس رسید — به گدام اضافه شود
-                  </button>
-                ) : (
-                  <div className="mt-2 flex flex-wrap gap-4">
-                    <button className="text-xs font-bold text-amber-700" onClick={() => setReturningPurchase(p)}>
-                      مرجوعی به تأمین‌کننده
-                    </button>
-                    <button className="text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
-                      اصلاح خرید
-                    </button>
-                    <button className="text-xs font-bold text-red-700" onClick={() => setCancellingPurchase(p)}>
-                      خرید اشتباهی
-                    </button>
-                  </div>
+                <p className="purchase-goods">{p.lines.map((l) => `${l.productName} ${l.size} ${l.color} ×${fmtNum(l.qty)}`.replace(/\s+/g, ' ')).join('، ')}</p>
+                {(hawala > 0 || (p.landingCost ?? 0) > 0) && (
+                  <p className="purchase-meta">
+                    {hawala > 0 && <span>حواله {p.sarrafName}: {fmtMoney(hawala)}</span>}
+                    {(p.landingCost ?? 0) > 0 && <span>مصارف رسیدن: {fmtMoney(p.landingCost!)}</span>}
+                  </p>
                 )}
                 {pending && (
-                  <div className="mt-2 flex gap-4">
-                    <button className="text-xs font-bold text-teal-700" onClick={() => setCorrectingPurchase(p)}>
-                      اصلاح خرید
-                    </button>
-                    <button className="text-xs font-bold text-red-700" onClick={() => setCancellingPurchase(p)}>
-                      خرید اشتباهی
-                    </button>
-                  </div>
+                  <button disabled={busy} onClick={() => void runAction(p.id!, () => receivePurchase(p.id!))} className="primary-button mt-3">
+                    {busy ? 'در حال ثبت…' : 'جنس رسید — به گدام اضافه شود'}
+                  </button>
                 )}
-              </Card>
+                {landingDue > 0 && (
+                  <button disabled={busy} onClick={() => void runAction(p.id!, () => payLanding(p.id!))} className="purchase-landing-pay">
+                    پرداخت مصارف رسیدن ({fmtMoney(landingDue)}) — نقد از صندوق
+                  </button>
+                )}
+                <div className="purchase-row-actions">
+                  {!pending && <button className="text-amber-800" onClick={() => setReturningPurchase(p)}>مرجوعی به تأمین‌کننده</button>}
+                  <button onClick={() => setCorrectingPurchase(p)}>اصلاح خرید</button>
+                  <button className="text-red-700" onClick={() => setCancellingPurchase(p)}>خرید اشتباهی</button>
+                </div>
+              </article>
             )
           })}
-          <div className="mt-3 grid grid-cols-2 gap-2 pb-2">
+          </div>}
+          <div className="mt-4 grid grid-cols-2 gap-2 pb-2">
             <button
               onClick={() => {
                 setSearch('')
                 setFilter('all')
               }}
-              className="rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-700"
+              className="purchase-secondary"
             >
               همهٔ خریدها
             </button>
-            <button onClick={() => setView('candidates')} className="rounded-xl bg-slate-100 py-2.5 text-sm font-bold text-slate-700">
+            <button onClick={() => setView('candidates')} className="purchase-secondary">
               کاندیدهای خرید
             </button>
           </div>
-        </>
+        </section>
       )}
 
       {view === 'suppliers' && (
