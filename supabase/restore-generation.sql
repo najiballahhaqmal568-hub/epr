@@ -16,10 +16,15 @@ begin
   ] loop
     execute format('alter table %I add column if not exists generation bigint not null default 0', t);
     execute format('drop policy if exists %I on %I', t || '_rls', t);
-    execute format(
-      'create policy %I on %I for all to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id)) with check (shop_id = my_shop() and generation = shop_generation(shop_id))',
-      t || '_rls', t
-    );
+    execute format('drop policy if exists %I on %I', t || '_read', t);
+    execute format('drop policy if exists %I on %I', t || '_insert', t);
+    execute format('drop policy if exists %I on %I', t || '_update', t);
+    execute format('drop policy if exists %I on %I', t || '_delete', t);
+    -- خواندن برای همه اعضای دکان؛ نوشتن فقط مالک و کارمند (شریک فقط می‌بیند)
+    execute format('create policy %I on %I for select to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id))', t || '_read', t);
+    execute format($p$create policy %I on %I for insert to authenticated with check (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff'))$p$, t || '_insert', t);
+    execute format($p$create policy %I on %I for update to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff')) with check (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff'))$p$, t || '_update', t);
+    execute format($p$create policy %I on %I for delete to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff'))$p$, t || '_delete', t);
   end loop;
 end $$;
 

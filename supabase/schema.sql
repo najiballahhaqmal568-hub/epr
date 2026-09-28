@@ -40,9 +40,14 @@ create policy shops_select on shops for select to authenticated using (id = my_s
 
 create policy profiles_select on profiles for select to authenticated
   using (user_id = auth.uid() or shop_id = my_shop());
+create or replace function shop_has_members(target_shop uuid) returns boolean
+language sql stable security definer set search_path = public as
+$$ select exists (select 1 from profiles where shop_id = target_shop) $$;
+
+-- a new sign-up may only become owner of its own brand-new shop; others are added by the owner
 create policy profiles_insert on profiles for insert to authenticated
   with check (
-    (user_id = auth.uid() and not has_profile())
+    (user_id = auth.uid() and not has_profile() and role = 'owner' and not shop_has_members(shop_id))
     or (my_role() = 'owner' and shop_id = my_shop())
   );
 
@@ -70,7 +75,16 @@ begin
       )$f$, t);
     execute format('create index if not exists %I on %I (shop_id, updated_at)', t || '_shop_updated_idx', t);
     execute format('alter table %I enable row level security', t);
-    execute format('create policy %I on %I for all to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id)) with check (shop_id = my_shop() and generation = shop_generation(shop_id))', t || '_rls', t);
+    execute format('drop policy if exists %I on %I', t || '_rls', t);
+    execute format('drop policy if exists %I on %I', t || '_read', t);
+    execute format('drop policy if exists %I on %I', t || '_insert', t);
+    execute format('drop policy if exists %I on %I', t || '_update', t);
+    execute format('drop policy if exists %I on %I', t || '_delete', t);
+    -- خواندن برای همه اعضای دکان؛ نوشتن فقط مالک و کارمند (شریک فقط می‌بیند)
+    execute format('create policy %I on %I for select to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id))', t || '_read', t);
+    execute format($p$create policy %I on %I for insert to authenticated with check (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff'))$p$, t || '_insert', t);
+    execute format($p$create policy %I on %I for update to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff')) with check (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff'))$p$, t || '_update', t);
+    execute format($p$create policy %I on %I for delete to authenticated using (shop_id = my_shop() and generation = shop_generation(shop_id) and my_role() in ('owner', 'staff'))$p$, t || '_delete', t);
     execute format($f$
       create or replace trigger %I before insert or update on %I
       for each row execute function touch_updated_at()$f$, t || '_touch', t);
