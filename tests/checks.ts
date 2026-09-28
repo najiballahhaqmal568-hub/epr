@@ -93,7 +93,7 @@ import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/me
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
-import { expenseAlert, profitSummary } from '../src/lib/profit'
+import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
 import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { rebuildCosts } from '../src/lib/costing'
@@ -254,6 +254,33 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'مفاد هر جنس، زیان فروش زیر قیمت و روزهای باقی ماه',
+    run: async () => {
+      const none = new Set<string>()
+      const l = (productName: string, qty: number, unitPrice: number, unitCost: number) => ({ variantId: 1, productName, size: '40', color: 'سیاه', qty, unitPrice, unitCost })
+      const sales = [
+        // کوهستان: 3×(900−500)=1,200؛ بامیان: 1×(1,500−1,000)=500؛ تخفیف 100 به نسبت 2,700/1,500 → 64 و 36
+        { date: 1, saleType: 'retail', lines: [l('کوهستان', 3, 900, 500), l('بامیان', 1, 1500, 1000)], total: 4100, paid: 4100, discount: 100 },
+        // سندل زیر قیمت: 2×(400−600) = −400
+        { date: 2, saleType: 'retail', lines: [l('سندل', 2, 400, 600)], total: 800, paid: 800 },
+        { date: 3, saleType: 'retail', lines: [l('حذف', 9, 900, 1)], total: 8100, paid: 8100, deleted: true }
+      ] as unknown as Sale[]
+      const rows = productProfits({ sales, variants: [], readyTradeUuids: none, readyReceiptUuids: none })
+      is('ترتیب از بیشترین مفاد', rows.map((r) => r.name).join('،'), 'کوهستان،بامیان،سندل')
+      eq('کوهستان پس از سهم تخفیف', rows[0].profit, 1200 - 64)
+      eq('بامیان پس از سهم تخفیف', rows[1].profit, 500 - 36)
+      eq('سندل زیان', rows[2].profit, -400)
+      eq('جمع مفاد اجناس = مفاد فروش', rows.reduce((s, r) => s + r.profit, 0),
+        profitSummary({ sales, returns: [], expenses: [], variants: [], readyTradeUuids: none, readyReceiptUuids: none }).salesProfit)
+      eq('درصد مفاد سندل', rows[2].margin, -50)
+      eq('بدون زیان', lossPerPair(900, 500), 0)
+      eq('زیان هر جوړه', lossPerPair(400, 600), 200)
+      // ۶ میزان ۱۴۰۵؛ میزان ۳۰ روز است → با امروز ۲۵ روز
+      eq('روزهای باقی میزان', daysLeftInMonth(new Date(2026, 8, 28, 15).getTime()), 25)
+      eq('روز آخر ماه یک روز', daysLeftInMonth(new Date(2026, 9, 22, 20).getTime()), 1)
+    }
+  },
   {
     name: '«این ماه»، «ماه گذشته» و «امسال» — از اول ماه و اول حمل هجری شمسی، نه میلادی',
     run: async () => {
