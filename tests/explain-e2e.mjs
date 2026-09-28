@@ -57,7 +57,7 @@ try {
     const tileNumber = digits((await tile.innerText()).replace(tileLabel, ''))
     await tile.click()
     const sheet = page.getByRole('dialog', { name: title })
-    await sheet.waitFor()
+    await sheet.getByText(/مجموع/).first().waitFor()
     const text = await sheet.innerText()
     const total = digits(text.match(/مجموع[^:]*: ([^\n—·]+)/)[1])
     assert.equal(total, tileNumber, `${tileLabel}: breakdown total equals the tile`)

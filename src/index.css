@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./themes.css";
 
 @theme {
   --color-teal-50: #edf3ef;
@@ -21,7 +22,7 @@
   --radius-xl: 0.75rem;
   --radius-2xl: 1rem;
   --radius-3xl: 1.25rem;
-  --shadow-sm: 0 2px 8px rgb(29 29 31 / 3%);
+  --shadow-sm: 0 2px 8px rgb(var(--shadow-color) / 3%);
 }
 
 /* Actions are blue; existing teal utilities retain their financial meaning. */
@@ -36,13 +37,26 @@
   --action: #0066D6;
   --action-pressed: #0054B3;
   --action-tint: #EAF2FF;
+  /* Filled buttons (white text). Same as --action in light modes; darker than the text blue at night. */
+  --action-fill: var(--action);
   --success: #326657;
   --warning: #A16207;
   --danger: #B91C1C;
   --radius-control: 0.75rem;
   --radius-surface: 1rem;
+  --danger-tint: #FEE2E2;
+  --warning-tint: #FEF3C7;
+  --warning-text: #854D0E;
+  --toast-bg: #1D1D1F;
+  --shadow-color: 29 29 31;
+  /* Motion language — three speeds, two curves. Nothing ever waits for an animation. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   --motion-panel: 180ms;
+  color-scheme: light;
 }
 
 @font-face {
@@ -80,14 +94,14 @@ button:disabled { cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
 button { transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
 @media (hover: hover) and (pointer: fine) {
-  button:not(:disabled):hover { box-shadow: inset 0 0 0 999px rgb(29 29 31 / 4%); }
+  button:not(:disabled):hover { box-shadow: inset 0 0 0 999px rgb(var(--shadow-color) / 4%); }
 }
 @layer components {
 .field-label { display: block; margin-bottom: 0.375rem; font-size: 0.875rem; font-weight: 700; color: var(--text-secondary); }
 .ui-input { width: 100%; min-width: 0; border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--surface); padding: 0.75rem; color: var(--text-primary); font: inherit; }
 .ui-input:focus { border-color: var(--action); }
 .ui-input:disabled { background: var(--surface-grouped); color: var(--text-secondary); cursor: not-allowed; }
-.primary-button { width: 100%; border-radius: var(--radius-control); background: var(--action); padding: 0.75rem 1rem; color: white; font-weight: 700; }
+.primary-button { width: 100%; border-radius: var(--radius-control); background: var(--action-fill); padding: 0.75rem 1rem; color: white; font-weight: 700; }
 .primary-button:not(:disabled):active { background: var(--action-pressed); }
 .primary-button.primary-button-inline { width: auto; padding-inline: 2rem; }
 .primary-button:disabled { background: var(--surface-grouped); color: var(--text-secondary); }
@@ -117,7 +131,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .surface { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); }
 .segmented { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-grouped); }
 .segmented button { flex: 1; padding: 0.5rem 0.75rem; font-size: 0.875rem; border-radius: 0.5rem; color: var(--text-secondary); }
-.segmented button[aria-pressed="true"] { background: var(--action); color: #fff; }
+.segmented button[aria-pressed="true"] { background: var(--action-fill); color: #fff; }
 .summary-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 1rem 0; padding: 20px 0; border-block: 1px solid var(--border-subtle); margin-block: 20px; }
 .summary-strip > div { padding-inline: 20px; }
 .summary-strip > div + div { border-inline-start: 1px solid var(--border-subtle); }
@@ -129,8 +143,8 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .management-row > svg:first-child { color: var(--text-secondary); flex-shrink: 0; }
 .management-row > span { flex: 1; }
 .management-grid { display: grid; gap: 22px; }
-.modal-dialog { position: fixed; inset: auto 0 0; margin: 0 auto; width: min(100%, 680px); max-width: 100%; max-height: 92dvh; border: 0; border-radius: 1.25rem 1.25rem 0 0; padding: 0; background: var(--surface); color: var(--text-primary); box-shadow: 0 16px 48px rgb(29 29 31 / 14%); overflow: auto; overscroll-behavior: contain; }
-.modal-dialog::backdrop { background: rgb(29 29 31 / 30%); }
+.modal-dialog { position: fixed; inset: auto 0 0; margin: 0 auto; width: min(100%, 680px); max-width: 100%; max-height: 92dvh; border: 0; border-radius: 1.25rem 1.25rem 0 0; padding: 0; background: var(--surface); color: var(--text-primary); box-shadow: 0 16px 48px rgb(var(--shadow-color) / 14%); overflow: auto; overscroll-behavior: contain; }
+.modal-dialog::backdrop { background: rgb(0 0 0 / 34%); }
 .modal-dialog[open] { opacity: 1; transform: translateY(0); transition: opacity var(--motion-panel) var(--ease-out), transform var(--motion-panel) var(--ease-out); }
 @starting-style { .modal-dialog[open] { opacity: 0; transform: translateY(12px); } }
 .modal-body { padding: 1.25rem max(1.25rem, env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
@@ -241,7 +255,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .sale-commit-bar { flex-wrap: wrap; }
 .sale-commit-bar > div { min-width: 0; flex-basis: 100%; overflow-wrap: anywhere; }
 .sale-commit-bar { position: sticky; bottom: calc(76px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border-subtle); z-index: 10; padding: 14px 0; }
-.premium-fab { position: fixed; bottom: calc(90px + env(safe-area-inset-bottom)); inset-inline-end: max(1rem, env(safe-area-inset-left)); display: inline-flex; gap: 0.5rem; align-items: center; justify-content: center; max-width: calc(100% - 2rem); padding: 0.875rem 1.25rem; background: var(--action); color: #fff; font-weight: 700; border-radius: var(--radius-control); box-shadow: 0 4px 16px rgb(29 29 31 / 12%); z-index: 35; }
+.premium-fab { position: fixed; bottom: calc(90px + env(safe-area-inset-bottom)); inset-inline-end: max(1rem, env(safe-area-inset-left)); display: inline-flex; gap: 0.5rem; align-items: center; justify-content: center; max-width: calc(100% - 2rem); padding: 0.875rem 1.25rem; background: var(--action-fill); color: #fff; font-weight: 700; border-radius: var(--radius-control); box-shadow: 0 4px 16px rgb(var(--shadow-color) / 12%); z-index: 35; }
 .premium-fab svg { flex-shrink: 0; }
 .inventory-directory { max-width: 1040px; }
 .inventory-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; padding: 0.25rem 0; }
@@ -254,17 +268,17 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .inventory-management { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); background: var(--surface); }
 .inventory-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
 .inventory-actions button, .inventory-add, .inventory-tools-toggle { min-width: 0; border-radius: var(--radius-control); font-size: 0.875rem; font-weight: 700; }
-.inventory-active { background: var(--action); color: #fff; }
+.inventory-active { background: var(--action-fill); color: #fff; }
 .inventory-action { border: 1px solid var(--border-subtle); background: var(--surface); color: var(--text-primary); }
 .inventory-search-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
 .inventory-tools-toggle { flex: 0 0 auto; padding-inline: 0.875rem; background: var(--surface-grouped); color: var(--text-primary); }
-.inventory-tools-toggle.is-open { background: var(--text-primary); color: #fff; }
+.inventory-tools-toggle.is-open { background: var(--toast-bg); color: #fff; }
 .inventory-management-grid { display: grid; min-width: 0; gap: 0.75rem; margin-top: 0.875rem; }
 .inventory-management-grid > div { min-width: 0; }
 .inventory-section-label { margin-bottom: 0.375rem; color: var(--text-secondary); font-size: 0.8125rem; font-weight: 700; }
 .inventory-sorts { display: flex; min-width: 0; max-width: 100%; gap: 0.375rem; overflow-x: auto; padding-bottom: 0.125rem; }
 .inventory-sorts button { flex: 0 0 auto; min-height: 44px; min-width: 0; padding: 0.375rem 0.625rem; border-radius: 999px; background: var(--surface-grouped); color: var(--text-secondary); font-size: 0.75rem; font-weight: 700; }
-.inventory-sorts button.is-selected { background: var(--action); color: #fff; }
+.inventory-sorts button.is-selected { background: var(--action-fill); color: #fff; }
 .inventory-add { width: 100%; background: var(--action-tint); color: var(--action); }
 .inventory-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle); }
 .inventory-tools button { padding-inline: 0.875rem; border-radius: var(--radius-control); background: var(--surface-grouped); color: var(--text-primary); font-size: 0.8125rem; font-weight: 700; }
@@ -279,7 +293,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .product-photo-picker { margin-bottom: 1rem; }
 .product-photo-current { width: 80px; height: 80px; border-radius: var(--radius-control); object-fit: cover; }
 .product-photo-camera, .product-photo-gallery, .product-photo-remove { padding-inline: 0.875rem; border-radius: var(--radius-control); font-size: 0.875rem; font-weight: 700; }
-.product-photo-camera { background: var(--action); color: #fff; }
+.product-photo-camera { background: var(--action-fill); color: #fff; }
 .product-photo-gallery { background: var(--surface-grouped); color: var(--text-primary); }
 .product-photo-remove { color: var(--danger); }
 @media (min-width: 640px) {
@@ -310,7 +324,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
   .app-nav button { flex: none; flex-direction: row; justify-content: flex-start; padding: 14px; font-size: 14px; gap: 12px; }
   .app-header { padding: 16px 32px; }
   .app-header .app-brand { font-size: 18px; }
-  .app-content > .p-4 { padding: 28px 32px; }
+  .app-content > .p-4, .app-content > .tab-enter > .p-4 { padding: 28px 32px; }
   .sale-workspace { grid-template-columns: minmax(0,1fr) minmax(320px, 38%); }
   .sale-checkout { position: sticky; top: 20px; }
   .sale-commit-bar { bottom: 0; }
@@ -319,7 +333,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
   .premium-fab { inset-inline-end: 32px; bottom: 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  :root { --motion-panel: 0ms; }
+  :root { --motion-panel: 0ms; --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
   .modal-dialog[open] { transform: none; }
 }
@@ -351,15 +365,15 @@ input[type='number'] {
 .purchase-row-amount { display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; min-width: 0; }
 .purchase-row-amount > strong { font-size: 1.125rem; }
 .purchase-badge { display: inline-block; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: 0.75rem; font-weight: 700; }
-.purchase-badge-transit { background: #FEF3C7; color: #854D0E; }
-.purchase-badge-debt { background: #FEE2E2; color: var(--danger); }
+.purchase-badge-transit { background: var(--warning-tint); color: var(--warning-text); }
+.purchase-badge-debt { background: var(--danger-tint); color: var(--danger); }
 .purchase-badge-paid { background: var(--color-teal-50); color: var(--success); }
 .purchase-goods { margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.875rem; line-height: 1.9; }
 .purchase-meta { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin-top: 0.25rem; color: var(--warning); font-size: 0.8125rem; }
-.purchase-landing-pay { display: block; width: 100%; margin-top: 0.75rem; padding: 0.625rem 1rem; border-radius: var(--radius-control); background: #FEF3C7; color: #854D0E; font-size: 0.875rem; font-weight: 700; }
+.purchase-landing-pay { display: block; width: 100%; margin-top: 0.75rem; padding: 0.625rem 1rem; border-radius: var(--radius-control); background: var(--warning-tint); color: var(--warning-text); font-size: 0.875rem; font-weight: 700; }
 .purchase-row-actions { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin-top: 0.5rem; }
 .purchase-row-actions button { padding-inline: 0; color: var(--action); font-size: 0.875rem; font-weight: 700; }
-.purchase-row-actions button.text-amber-800 { color: #854D0E; }
+.purchase-row-actions button.text-amber-800 { color: var(--warning-text); }
 .purchase-row-actions button.text-red-700 { color: var(--danger); }
 @media (max-width: 380px) { .purchase-row-amount { align-items: flex-start; } }
 
@@ -386,7 +400,7 @@ input[type='number'] {
 .party-balance { padding: 1.25rem; }
 .party-balance-amount { margin-top: 0.25rem; font-size: clamp(1.5rem, 7vw, 2rem); font-weight: 700; }
 .party-promise { border-radius: var(--radius-control); background: var(--surface-grouped); padding: 0.5rem 0.75rem; color: var(--text-secondary); text-align: end; }
-.party-promise.is-overdue { background: #FEE2E2; color: var(--danger); }
+.party-promise.is-overdue { background: var(--danger-tint); color: var(--danger); }
 .party-action { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); padding: 0.75rem 0.5rem; color: var(--text-primary); font-size: 0.875rem; font-weight: 700; }
 .party-action:disabled { color: var(--text-secondary); background: var(--surface-grouped); }
 .customer-row small.purchase-link { color: var(--action); font-weight: 700; }
@@ -394,7 +408,7 @@ input[type='number'] {
 .primary-button[aria-pressed="true"] { box-shadow: inset 0 0 0 2px rgb(255 255 255 / 55%); }
 
 /* «برگرداندن» — ۱۰ ثانیه بالای منوی پایین */
-.undo-toast { position: fixed; inset-inline: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 45; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; border-radius: var(--radius-surface); background: var(--text-primary); color: #fff; font-size: 0.875rem; box-shadow: 0 8px 24px rgb(29 29 31 / 20%); animation: undo-in var(--motion-panel) var(--ease-out); }
+.undo-toast { position: fixed; inset-inline: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 45; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem; border-radius: var(--radius-surface); background: var(--toast-bg); color: #fff; font-size: 0.875rem; box-shadow: 0 8px 24px rgb(var(--shadow-color) / 20%); animation: undo-in var(--motion-panel) var(--ease-out); }
 .undo-toast-action { flex-shrink: 0; padding: 0.4rem 0.8rem; border-radius: var(--radius-control); background: rgb(255 255 255 / 16%); color: #fff; font-weight: 700; }
 .undo-toast-close { flex-shrink: 0; width: 2.25rem; color: rgb(255 255 255 / 80%); font-size: 1.25rem; }
 @keyframes undo-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
@@ -411,6 +425,18 @@ input[type='number'] {
 .explain-row small { display: block; margin-top: 0.125rem; color: var(--text-secondary); font-size: 0.75rem; }
 .explain-amount { flex-shrink: 0; font-weight: 700; text-align: end; white-space: nowrap; }
 .explain-note { margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.75rem; line-height: 1.8; }
-.sale-loss-warning { margin-top: 0.375rem; border-radius: 0.5rem; background: #FEE2E2; padding: 0.25rem 0.5rem; color: var(--danger); font-size: 0.75rem; font-weight: 700; line-height: 1.7; }
+.sale-loss-warning { margin-top: 0.375rem; border-radius: 0.5rem; background: var(--danger-tint); padding: 0.25rem 0.5rem; color: var(--danger); font-size: 0.75rem; font-weight: 700; line-height: 1.7; }
 .profit-target-bar { display: block; height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-grouped); }
 .profit-target-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--success); }
+
+/* Tab change: content fades (never moved, so fixed bars stay put); the title arrives from the
+   direction of travel — RTL: forward = from the left. */
+.tab-enter { animation: tab-fade var(--motion-base) var(--ease-out); }
+.tab-enter .page-heading { animation: tab-in var(--motion-base) var(--ease-out); }
+.tab-enter[data-dir="back"] .page-heading { animation-name: tab-in-back; }
+@keyframes tab-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tab-in { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+@keyframes tab-in-back { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+
+/* Filled blue backgrounds written as a Tailwind class use the fill token too (unlayered: beats utilities). */
+.bg-\[var\(--action\)\] { background-color: var(--action-fill); }

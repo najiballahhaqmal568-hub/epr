@@ -30,8 +30,8 @@ export const TYPE_LABELS: Record<ExpenseType, string> = {
 }
 
 export const TYPE_COLORS: Record<ExpenseType, string> = {
-  business: 'text-red-600',
-  home: 'text-amber-600',
-  personal: 'text-purple-600',
-  withdrawal: 'text-amber-700'
+  business: 'text-red-700',
+  home: 'text-amber-700',
+  personal: 'text-purple-700',
+  withdrawal: 'text-amber-800'
 }

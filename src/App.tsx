@@ -34,6 +34,8 @@ const tabs = [
 
 type NavTabId = (typeof tabs)[number]['id']
 type TabId = NavTabId | 'inventory' | 'expenses' | 'purchases' | 'customers' | 'settings' | 'reports'
+// Travel order for the tab-change animation: deeper pages count as «forward».
+const TAB_ORDER: Record<TabId, number> = { dashboard: 0, sales: 1, accounts: 2, customers: 3, more: 4, inventory: 5, expenses: 5, purchases: 5, settings: 5, reports: 5 }
 
 export default function App() {
   // VITE_UI_PREVIEW فقط برای build آزمایشی روی همین کمپیوتر است؛ حتی اگر اشتباهی
@@ -61,6 +63,12 @@ export default function App() {
   const [relogin, setRelogin] = useState(false)
   const [passwordRecovery, setPasswordRecovery] = useState(isPasswordRecoveryUrl)
   const reminder = useExpenseReminder()
+  const shownTab = useRef<TabId>(tab)
+  const tabDir = useRef<'forward' | 'back'>('forward')
+  if (shownTab.current !== tab) {
+    tabDir.current = TAB_ORDER[tab] >= TAB_ORDER[shownTab.current] ? 'forward' : 'back'
+    shownTab.current = tab
+  }
 
   // دکمهٔ برگشتِ تلیفون = یک قدم عقب داخل اپ (نه خروج) — هماهنگ در lib/appHistory
   useEffect(() => {
@@ -370,6 +378,7 @@ export default function App() {
       {readOnly && (
         <div className="bg-slate-700 px-4 py-1.5 text-center text-xs font-bold text-white">حالت فقط مشاهده (شریک) — تغییر ارقام ممکن نیست</div>
       )}
+      <div key={tab} className="tab-enter" data-dir={tabDir.current}>
       {tab === 'dashboard' && (
         <Dashboard
           goTo={goTo}
@@ -437,6 +446,7 @@ export default function App() {
       {tab === 'customers' && <Customers onBack={() => setTab('accounts')} />}
       {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => { try { sessionStorage.removeItem('epr_sale_working_v1') } catch { /* storage unavailable */ } setAuth('anon') }} />}
       {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('more')} />}
+      </div>
       </main>
       <UndoToast />
       <nav className="app-nav" aria-label="بخش‌های اصلی">
