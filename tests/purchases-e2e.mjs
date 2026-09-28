@@ -83,11 +83,48 @@ try {
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(() => document.documentElement.style.fontSize = '20px')
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     const overflow = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.left < -1 || r.right > innerWidth + 1) }).map(el => [el.tagName, el.className]))
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `fits ${width}: ${JSON.stringify(overflow)}`)
     await page.evaluate(() => document.documentElement.style.fontSize = '')
     await page.screenshot({ path: `${shots}/purchases-${width}.png`, fullPage: true })
   }
+
+  // Every purchase form opens, fits 320px with enlarged text, and writes nothing until saved.
+  const before = await page.evaluate(async () => {
+    const { db } = await import('/src/db.ts')
+    return JSON.stringify(await Promise.all(['purchases', 'variants', 'suppliers', 'cashMovements', 'adjustments', 'returns'].map(t => db.table(t).toArray())))
+  })
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.evaluate(() => document.documentElement.style.fontSize = '20px')
+  page.on('dialog', d => d.accept())
+  const row = main.getByRole('article').filter({ hasText: '۵٬۰۰۰' })
+  for (const [label, open] of [
+    ['new', () => page.getByRole('button', { name: 'ثبت خرید جدید', exact: true }).click()],
+    ['carton', async () => { await page.getByRole('button', { name: 'ثبت خرید جدید', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: /جنس جدید — خرید کارتنی/ }).click() }],
+    ['landing', () => page.getByRole('button', { name: 'ثبت مصارف رسیدن', exact: true }).click()],
+    ['return', () => row.getByRole('button', { name: 'مرجوعی به تأمین‌کننده', exact: true }).click()],
+    ['correct', () => row.getByRole('button', { name: 'اصلاح خرید', exact: true }).click()],
+    ['cancel', () => row.getByRole('button', { name: 'خرید اشتباهی', exact: true }).click()]
+  ]) {
+    await open()
+    const dialog = page.locator('dialog[open]').last()
+    await dialog.waitFor()
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    const overflow = await page.evaluate(() => [...document.querySelectorAll('dialog[open] *')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.left < -1 || r.right > innerWidth + 1) }).map(el => [el.tagName, el.className]))
+    assert.deepEqual(overflow, [], `${label} form fits 320`)
+    await dialog.screenshot({ path: `${shots}/form-${label}-320.png` })
+    while (await page.locator('dialog[open]').count()) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(250)
+    }
+  }
+  await page.evaluate(() => document.documentElement.style.fontSize = '')
+  const afterForms = await page.evaluate(async () => {
+    const { db } = await import('/src/db.ts')
+    return JSON.stringify(await Promise.all(['purchases', 'variants', 'suppliers', 'cashMovements', 'adjustments', 'returns'].map(t => db.table(t).toArray())))
+  })
+  assert.equal(afterForms, before, 'opening and closing forms writes nothing')
 
   // Candidates view opens and returns.
   await page.getByRole('button', { name: 'کاندیدهای خرید', exact: true }).click()
@@ -95,7 +132,7 @@ try {
   await main.waitFor()
 
   assert.deepEqual(errors, [])
-  console.log('PASS purchases: actions reachable, landing refusal visible, receive once, filters/search, 320–1440 layout, candidates')
+  console.log('PASS purchases: actions reachable, landing refusal visible, receive once, filters/search, 320–1440 layout, six forms fit and write nothing, candidates')
 } finally {
   await app.close()
 }

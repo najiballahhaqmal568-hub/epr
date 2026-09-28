@@ -133,7 +133,7 @@ export function CartonWizardModal({
   )
 
   return (
-    <Modal title={`📦 خرید کارتنی${name ? ` — ${name}` : ''}`} onClose={onClose}>
+    <Modal title={`خرید کارتنی${name ? ` — ${name}` : ''}`} onClose={onClose}>
       <div className="mb-4 flex items-center justify-center gap-2">{[1, 2, 3, 4, 5].map(stepDot)}</div>
 
       {step === 1 && (

@@ -113,9 +113,9 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           <button
             key={`c${p.id}`}
             onClick={() => addCarton(p)}
-            className="mb-2 flex w-full items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-right font-bold text-amber-800 active:bg-amber-100"
+            className="mb-2 flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-right font-bold text-[var(--action)]"
           >
-            <span>📦 {p.name} — ＋ یک کارتن</span>
+            <span>{p.name} — ＋ یک کارتن</span>
             <span className="text-sm font-normal">{fmtNum(pairs)} جوړه</span>
           </button>
         )
@@ -124,9 +124,9 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
         <button
           key={`ce${p.id}`}
           onClick={() => setCartonEditFor(p)}
-          className="mb-2 w-full rounded-xl border border-dashed border-amber-400 px-3 py-2 text-right text-sm font-bold text-amber-700 active:bg-amber-50"
+          className="mb-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-right text-sm font-bold text-[var(--action)]"
         >
-          📦 {p.name} — خرید کارتنی (شماره‌بندی)
+          {p.name} — خرید کارتنی (شماره‌بندی)
         </button>
       ))}
       {matches.length > 0 && (
@@ -158,9 +158,9 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
 
       <button
         onClick={() => setNpWizard(true)}
-        className="mb-3 w-full rounded-xl border-2 border-dashed border-amber-400 py-2.5 text-sm font-bold text-amber-700"
+        className="mb-3 w-full rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-[var(--action)]"
       >
-        📦 جنس جدید — خرید کارتنی (در گدام نیست)
+        ＋ جنس جدید — خرید کارتنی (در گدام نیست)
       </button>
 
       {lines.map((l, i) => (
@@ -192,7 +192,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
       </label>
       {!received && (
         <p className="mb-2 text-xs text-amber-600">
-          🚚 خرید «در راه» ثبت می‌شود؛ وقتی جنس رسید، در لیست خریدها دکمهٔ «جنس رسید» را بزنید تا به گدام اضافه شود.
+          خرید «در راه» ثبت می‌شود؛ وقتی جنس رسید، در لیست خریدها دکمهٔ «جنس رسید» را بزنید تا به گدام اضافه شود.
         </p>
       )}
 
@@ -253,13 +253,13 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
       <div className="sticky bottom-0 -mx-4 -mb-8 mt-3 flex items-center gap-3 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">مجموع خرید</p>
-          <p className="text-2xl font-bold text-amber-700">{fmtMoney(total)}</p>
+          <p className="text-2xl font-bold text-slate-900">{fmtMoney(total)}</p>
           {remainder > 0 && <p className="text-xs font-bold text-red-600">باقی: {fmtMoney(remainder)}</p>}
         </div>
         <button
           onClick={save}
           disabled={!lines.length || !supplierId}
-          className="rounded-xl bg-amber-700 px-8 py-3 text-lg font-bold text-white active:bg-amber-800 disabled:opacity-40"
+          className="primary-button primary-button-inline py-3 text-lg"
         >
           ثبت خرید
         </button>

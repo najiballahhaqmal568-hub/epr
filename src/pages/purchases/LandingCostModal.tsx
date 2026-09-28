@@ -74,7 +74,7 @@ export function LandingCostModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="🚚 ثبت مصارف رسیدن" onClose={onClose}>
+    <Modal title="ثبت مصارف رسیدن" onClose={onClose}>
       <p className="mb-2 text-xs text-slate-500">
         بعد از تحویل جنس، وقتی کرایه و حمالی و کمیشن معلوم شد، خریدهای همان حمل را انتخاب کنید و مجموع مصارف را بنویسید.
       </p>

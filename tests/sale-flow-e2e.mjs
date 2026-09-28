@@ -66,6 +66,8 @@ try {
   for (const width of [390, 1440, 320, 768]) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(() => document.documentElement.style.fontSize = '20px')
+    // Layout settles on the next frame after a resize + font change; measure after it.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     const overflow = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.left < -1 || r.right > innerWidth + 1) }).map(el => [el.tagName, el.className, el.getBoundingClientRect().width]))
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `scaled payment fits ${width}: ${JSON.stringify(overflow)}`)
     if ([390, 1440].includes(width)) await page.screenshot({ path: `.superpowers/sdd/plan/task-4-payment-${width}.png`, fullPage: true })
