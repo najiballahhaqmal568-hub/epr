@@ -92,6 +92,7 @@ import { dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
 import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
+import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow } from '../src/lib/format'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -251,6 +252,53 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: '«از کجا آمد» — جمع سطرهای هر کارت خانه دقیقاً برابر همان عدد کارت',
+    run: async () => {
+      // داده‌های عمداً گوناگون: سند حذف‌شده، شریک، قرض‌دهنده، صراف، طلب منفی، چند صندوق
+      const c1 = await db.customers.add({ name: 'الف', type: 'retail', balance: 1200 })
+      await db.customers.add({ name: 'ب', type: 'retail', balance: 300, bookPage: '۱۲' })
+      await db.customers.add({ name: 'پیشکی', type: 'retail', balance: -500 })
+      await db.customers.add({ name: 'حذف‌شده', type: 'retail', balance: 9999, deleted: true })
+      await db.suppliers.bulkAdd([
+        { name: 'تأمین', balance: 4000 }, { name: 'صراف', kind: 'sarraf', balance: 700 },
+        { name: 'قرض‌دهنده', kind: 'lender', balance: 10000 }, { name: 'شریک', kind: 'partner', balance: 50000 },
+        { name: 'پیشکی نزد ما', balance: -300 }, { name: 'حذف', balance: 8000, deleted: true }
+      ])
+      const pid = await db.products.add({ name: 'کوهستان', createdAt: 1 })
+      await db.variants.bulkAdd([
+        { productId: pid, size: '40', color: 'سیاه', stockQty: 5, purchasePrice: 500, retailPrice: 0, wholesalePrice: 0 },
+        { productId: pid, size: '41', color: 'سیاه', stockQty: 3, purchasePrice: 600, retailPrice: 0, wholesalePrice: 0 },
+        { productId: pid, size: '42', color: 'سیاه', stockQty: 9, purchasePrice: 700, retailPrice: 0, wholesalePrice: 0, deleted: true }
+      ])
+      await db.cashMovements.bulkAdd([
+        { date: 1, type: 'capitalIn', amount: 5000 }, { date: 2, type: 'transfer', amount: -2000, box: 'دکان' },
+        { date: 2, type: 'transfer', amount: 2000, box: 'خانه' }, { date: 3, type: 'capitalIn', amount: 777, deleted: true }
+      ])
+      const [variants, movements, customers, suppliers, purchases, products] = await Promise.all([
+        db.variants.toArray(), db.cashMovements.toArray(), db.customers.toArray(), db.suppliers.toArray(), db.purchases.toArray(), db.products.toArray()
+      ])
+      const n = computeNetWorth({ variants, movements, customers, suppliers, purchases })
+      const receivables = explainReceivables(customers)
+      const cash = explainCash(movements)
+      const stock = explainStock(products, variants)
+      const payables = explainPayables(suppliers)
+      eq('طلب = کارت', receivables.total, n.receivables)
+      eq('طلب = جمع سطرها', receivables.rows.reduce((s, r) => s + r.amount, 0), n.receivables)
+      is('بزرگ‌ترین قرضدار اول', receivables.rows[0].key, `c${c1}`)
+      eq('صندوق = کارت', cash.total, n.cash)
+      eq('صندوق = جمع جاها', cash.rows.reduce((s, r) => s + r.amount, 0), n.cash)
+      eq('خانه جدا دیده شود', cash.rows.find((r) => r.label === 'خانه')?.amount ?? 0, 2000)
+      eq('جوړه = کارت', stock.total, n.pairs)
+      eq('ارزش = ارزش گدام', stock.value, n.stock)
+      eq('جوړه = جمع اجناس', stock.rows.reduce((s, r) => s + r.amount, 0), n.pairs)
+      eq('ارزش = جمع اجناس', stock.rows.reduce((s, r) => s + (r.value ?? 0), 0), n.stock)
+      eq('قرض ما = کارت', payables.total, n.payables)
+      eq('قرض ما = جمع سطرها', payables.rows.reduce((s, r) => s + r.amount, 0), n.payables)
+      eq('قرض از اشخاص جدا = loans', payables.loans.total, n.loans)
+      is('شریک در قرض نیست', payables.rows.concat(payables.loans.rows).some((r) => r.label === 'شریک'), false)
+    }
+  },
   {
     name: 'کرایه در فروش معطل — قبل از ثبت محفوظ و بدون اثر حسابداری',
     run: async () => {

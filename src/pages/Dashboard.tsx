@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
@@ -9,6 +10,8 @@ import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTr
 import { commercialSaleLines } from '../lib/commercialLines'
 import { Icon } from '../components/Icon'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
+import ExplainModal, { type ExplainKind } from './dashboard/ExplainModal'
+import TodaySalesModal from './dashboard/TodaySalesModal'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -89,6 +92,11 @@ export default function Dashboard({
   const todayCash = todaySales.filter(row => !row.directTrade).reduce((sum, row) => sum + saleCashPaid(row), 0)
   const todayDirectReceipts = payments?.filter(row => row.directPayment?.route === 'customerCash').reduce((sum, row) => sum + row.amount, 0) ?? 0
   const todayProfit = grossProfit(todaySales) - returnedProfit
+  // Same numbers as todayProfit, split into steps for «از کجا آمد».
+  const goodsValue = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + line.unitPrice * line.qty, 0), 0)
+  const goodsCost = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + costOf(line) * line.qty, 0), 0)
+  const discounts = todaySales.reduce((sum, sale) => sum + (sale.discount ?? 0), 0)
+  const [explain, setExplain] = useState<ExplainKind | 'sales' | null>(null)
   const lowStock = reorderProducts(products ?? [], variants ?? [])
   const overdueCount = (customers ?? []).filter(
     (row) => row.balance > 0 && Boolean(row.promiseDate) && row.promiseDate! < dayStart
@@ -104,8 +112,8 @@ export default function Dashboard({
       <DirectTradeWarning review={directReview} />
       <CustomerGoodsReceiptWarning review={receiptReview} />
 
-      <section aria-label="فروش امروز" className="surface mb-4 p-5">
-        <p className="text-sm text-slate-500">فروش امروز</p>
+      <button type="button" aria-label={`فروش امروز ${fmtMoney(todayTotal)} — از کجا آمد`} onClick={() => setExplain('sales')} className="surface explain-card mb-4 block w-full p-5 text-right">
+        <p className="text-sm text-slate-500">فروش امروز <span className="explain-hint">از کجا آمد ←</span></p>
         <p className="mt-2 text-4xl font-bold text-slate-900">{fmtMoney(todayTotal)}</p>
         <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
           <span>{fmtNum(todaySales.length)} فروش</span>
@@ -113,7 +121,7 @@ export default function Dashboard({
           <span>رسید مستقیم: {fmtMoney(todayDirectReceipts)}</span>
           {!isStaff && <span>مفاد: {fmtMoney(todayProfit)}</span>}
         </div>
-      </section>
+      </button>
 
       <button
         onClick={() => goTo('sales-new')}
@@ -173,24 +181,28 @@ export default function Dashboard({
           )}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => goTo('accounts')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+          <button onClick={() => setExplain('receivables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">طلب از مشتریان</span>
             <span className="block text-lg font-bold text-red-600">{fmtMoney(worth?.receivables ?? 0)}</span>
           </button>
-          <button onClick={() => goTo('expenses')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+          <button onClick={() => setExplain('cash')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">صندوق</span>
             <span className="block text-lg font-bold text-slate-800">{fmtMoney(worth?.cash ?? 0)}</span>
           </button>
-          <button onClick={() => goTo('inventory')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+          <button onClick={() => setExplain('stock')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">موجودی گدام</span>
             <span className="block text-lg font-bold text-teal-700">{fmtNum(worth?.pairs ?? 0)} جوړه</span>
           </button>
-          <button onClick={() => goTo('accounts')} className="rounded-2xl bg-white p-3 text-right shadow-sm">
+          <button onClick={() => setExplain('payables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">قرض ما</span>
             <span className="block text-lg font-bold text-amber-700">{fmtMoney(worth?.payables ?? 0)}</span>
           </button>
         </div>
+        <p className="mt-2 text-xs text-slate-500">هر عدد را بزنید تا ببینید از کدام حساب‌ها ساخته شده است.</p>
       </section>
+      {explain === 'sales' && <TodaySalesModal sales={todaySales} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)}
+        parts={{ goods: goodsValue, cost: goodsCost, discount: discounts, returned: returnedProfit, profit: todayProfit }} />}
+      {explain && explain !== 'sales' && <ExplainModal kind={explain} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)} />}
     </div>
   )
 }

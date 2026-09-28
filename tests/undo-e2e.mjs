@@ -63,6 +63,7 @@ try {
   assert.equal(await toast.getByRole('button', { name: /^برگرداندن/ }).count(), 0, 'offer expires after 10 seconds')
   assert.deepEqual(await state(), { customer: 4000, supplier: 4000, cash: 11000, livePayments: 1, liveExpenses: 0, mismatches: 0 })
   await page.keyboard.press('Escape')
+  await account.waitFor({ state: 'detached' })
 
   // 3) Supplier payment → undo.
   await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()

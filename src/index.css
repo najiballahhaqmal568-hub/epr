@@ -400,3 +400,14 @@ input[type='number'] {
 @keyframes undo-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (min-width: 900px) { .undo-toast { inset-inline: auto 24px; bottom: 24px; max-width: 28rem; } }
 .undo-toast.undo-toast-in-window { position: sticky; inset-inline: auto; bottom: calc(12px + env(safe-area-inset-bottom)); margin: 0 12px 12px; max-width: none; }
+
+/* «از کجا آمد» */
+.explain-hint { margin-inline-start: 0.5rem; color: var(--action); font-size: 0.75rem; font-weight: 700; }
+.explain-total { margin-bottom: 0.75rem; font-size: 0.9375rem; }
+.explain-total strong { font-size: 1.125rem; }
+.explain-rows { border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); overflow: hidden; }
+.explain-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; padding: 0.75rem 1rem; font-size: 0.875rem; overflow-wrap: anywhere; }
+.explain-row + .explain-row { border-top: 1px solid var(--border-subtle); }
+.explain-row small { display: block; margin-top: 0.125rem; color: var(--text-secondary); font-size: 0.75rem; }
+.explain-amount { flex-shrink: 0; font-weight: 700; text-align: end; white-space: nowrap; }
+.explain-note { margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.75rem; line-height: 1.8; }
