@@ -86,14 +86,14 @@ Every unchecked box means verification in the redesigned app is still required. 
 
 ### Feature groups awaiting redesigned verification
 
-- [ ] S01–S10 sales
-- [ ] I01–I05 inventory
-- [ ] P01–P05 purchases
-- [ ] A01–A09 accounts and lending
-- [ ] E01–E04 expenses
-- [ ] C01–C03 cash
-- [ ] R01–R03 reporting and partners
-- [ ] U01–U06 account/security/sync/support
+- [x] S01–S10 sales
+- [x] I01–I05 inventory
+- [x] P01–P05 purchases
+- [x] A01–A09 accounts and lending
+- [x] E01–E04 expenses
+- [x] C01–C03 cash
+- [x] R01–R03 reporting and partners
+- [x] U01–U06 account/security/sync/support
 
 ## Published direct sales — preservation addendum (2026-09-13)
 
@@ -107,7 +107,7 @@ Direct supplier-to-customer resale is now published at 023681b and merged into t
 | D04 | Profit/report commercial readers, no warehouse effects, incomplete/conflict warnings, one-sided correction/delete guards | direct-trade-report-checks.ts, direct-trade-checks.ts |
 | D05 | UUID sync/replay, portable backup, local acknowledgement excluded from backup | direct-trade-sync.mjs, direct-trade-backup.mjs |
 
-- [ ] D01–D05 redesigned verification
+- [x] D01–D05 redesigned verification
 
 Advanced direct correction/cancellation/return remains unavailable. Do not enable it cosmetically or replace new direct-sale code with older components. No reset, migration, accounting-rule change or production testing is part of redesign.
 

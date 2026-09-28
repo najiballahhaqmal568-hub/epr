@@ -1,7 +1,7 @@
 /** آزمایش واقعی مرورگر: صفحهٔ دفتر در فروش قرضی و «کدام صفحه چقدر است» */
 import { chromium } from 'playwright-core'
 
-const URL = process.env.URL ?? 'http://localhost:4173/'
+const URL = process.env.URL ?? 'http://localhost:4173/?ui-preview'
 const page = await (
   await chromium.launch({ executablePath: process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
 ).newPage()
@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // مشتری عمده که صفحهٔ فعلی‌اش ۱۲ است و در همان صفحه ۵٬۰۰۰ قرض دارد
 await page.evaluate(async () => {
@@ -40,27 +40,22 @@ await page.evaluate(async () => {
   })
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // فروش قرضی — صفحه باید خودش «۱۲» پیشنهاد شود، ما آن را به «۱۳» عوض می‌کنیم
-await page.click('nav >> text=فروش')
-await page.click('button:has-text("فروش جدید")')
-await page.waitForTimeout(700)
-await page.click('button:has-text("عمده")')
-await page.waitForTimeout(300)
-await page.click('button:has-text("قرضی؟ انتخاب مشتری")')
-await page.fill('input[placeholder*="جستجوی نام"]', 'حاجی')
-await page.waitForTimeout(500)
-await page.click('button:has-text("حاجی نور")')
+await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()
+await page.getByRole('heading', { name: 'میز فروش' }).waitFor()
+await page.getByRole('button', { name: 'عمده', exact: true }).click()
+await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).first().click()
+await page.getByRole('dialog').getByRole('button').filter({ hasText: '42 سیاه' }).first().click()
 await page.waitForTimeout(400)
-
-await page.locator('button:has-text("کوهستان")').first().click()
-await page.waitForSelector('text=انتخاب سایز')
-await page.click('button:has-text("42 سیاه")')
-await page.waitForTimeout(500)
-
-// قرضی کامل: دریافتی صفر
-await page.locator('text=دریافتی').locator('..').locator('input').fill('0')
+await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
+// قرضی کامل: دریافتی صفر — فروش قرضی بدون مشتری رد می‌شود و خانهٔ مشتری باز می‌شود
+await page.getByRole('button', { name: 'قرض', exact: true }).click()
+await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
+await page.getByRole('alert').filter({ hasText: 'باید مشتری' }).waitFor()
+await page.getByPlaceholder('جستجوی نام یا تلفن مشتری...').fill('حاجی')
+await page.getByRole('button', { name: /^حاجی نور/ }).first().click()
 await page.waitForTimeout(400)
 
 const pageInput = page.locator('input[placeholder*="صفحهٔ فعلی"]')
@@ -70,15 +65,18 @@ if (prefill !== '۱۲') fail('صفحهٔ فعلی مشتری خودش پیشنه
 console.log('✅ در فروش قرضی، صفحهٔ فعلی مشتری (۱۲) خودش پیشنهاد شد')
 
 await pageInput.fill('۱۳')
-await page.click('button:has-text("ثبت فروش")')
+await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
 await page.waitForTimeout(1200)
 
 // حالا در حساب مشتری: صفحهٔ ۱۲ = ۵٬۰۰۰ و صفحهٔ ۱۳ = ۸۰۰
-await page.click('nav >> text=مشتریان')
+await page.getByText(/فروش ثبت شد/).first().waitFor()
+await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
+await page.getByRole('button', { name: 'مشتریان', exact: true }).click()
 await page.waitForTimeout(500)
 await page.click('button:has-text("دفتر عمده")')
 await page.waitForTimeout(500)
-await page.click('text=حاجی نور')
+await page.getByRole('region', { name: 'فهرست مشتریان' }).getByText('حاجی نور').click()
 await page.waitForTimeout(700)
 
 const body = await page.locator('body').innerText()
