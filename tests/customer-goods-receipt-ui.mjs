@@ -130,6 +130,7 @@ try {
   await page.getByText('پیش‌نمایش بررسی شد؛ معلومات را یک‌بار دیگر تأیید کنید.').waitFor()
   const warehouseCorrectionPreview = await page.getByRole('dialog').last().innerText()
   assert.match(warehouseCorrectionPreview, /مجموع‌های سند جایگزین:[\s\S]*3 جوره/, 'warehouse correction labels replacement totals')
+  assert.doesNotMatch(warehouseCorrectionPreview, /موجودی گدام: \+3/, 'replacement totals do not present the full quantity as a stock change')
   assert.match(warehouseCorrectionPreview, /تغییر خالص نسبت به سند اصلی:[\s\S]*تغییر طلب مشتری منبع:[\s\S]*−۱٬۰۰۰[\s\S]*تغییر موجودی گدام:[\s\S]*\+۱ جوره/, 'warehouse correction renders authoritative signed debt and stock deltas')
   await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
   await page.evaluate(() => window.testApp.db.customers.update(window.testApp.buyerId, { name: 'مشتری خریدار تازه' }))

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, newUuid, type Customer } from '../../db'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
-import { fmtDate, fmtMoney, fromDateInput, toDateInput } from '../../lib/format'
+import { fmtDate, fmtMoney, fmtNum, fromDateInput, toDateInput } from '../../lib/format'
 import { createCustomerGoodsReceipt, correctCustomerGoodsReceipt, previewCustomerGoodsReceiptCorrection } from '../../lib/customerGoodsReceiptOps'
 import type { CreateCustomerGoodsReceiptInput, CustomerGoodsReceiptPreview, CustomerGoodsReceiptState } from '../../lib/customerGoodsReceiptTypes'
 import { syncNow } from '../../lib/sync'
@@ -17,7 +17,7 @@ function signedMoney(value: number): string {
   return `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmtMoney(Math.abs(value))}`
 }
 function signedPairs(value: number): string {
-  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmtMoney(Math.abs(value)).replace(/ ؋$/, '')} جوره`
+  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmtNum(Math.abs(value))} جوره`
 }
 function fieldError(id: string, message?: string) {
   return message ? <p id={id} className="mt-1 text-xs text-red-700">{message}</p> : null
@@ -177,7 +177,7 @@ export default function CustomerGoodsReceiptModal({ customer, onClose, onSaved, 
       <Field label="یادداشت و جزئیات"><textarea aria-label="یادداشت دریافت" className={inputCls} value={note} onChange={event => { invalidate(); setNote(event.target.value) }} /></Field>
       {correction && <Field label="دلیل اصلاح *"><input aria-label="دلیل اصلاح" className={inputCls} value={reason} aria-invalid={validationVisible && Boolean(validation.reason)} aria-describedby={validationVisible && validation.reason ? 'goods-receipt-reason-error' : undefined} onChange={event => { invalidate(); setReason(event.target.value) }} />{validationVisible && fieldError('goods-receipt-reason-error', validation.reason)}</Field>}
       {validationVisible && validation.messages.length > 0 && <div role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-800"><p className="font-bold">این موارد را اصلاح کنید:</p><ul className="mt-1 list-disc pr-5">{validation.messages.map(message => <li key={message}>{message}</li>)}</ul></div>}
-      {summary && <section aria-live="polite" className="mb-3 rounded-xl bg-teal-50 p-3 text-sm">{correction && <p className="font-bold">مجموع‌های سند جایگزین:</p>}<p>ارزش توافقی: {fmtMoney(summary.value)} · {summary.pairs} جوره</p><p>طلب پس از دریافت: {fmtMoney(Math.max(0, customer.balance + (correction?.totals.value ?? 0) - summary.value))}</p>{destination === 'warehouse' ? <p>موجودی گدام: +{summary.pairs} جوره</p> : <><p>بدون ورود به گدام · فروش: {fmtMoney(summary.sale)}</p><p>نقد: {fmtMoney(summary.cash)} · قرض خریدار: {fmtMoney(summary.buyerDebt)}</p><p>مفاد: {fmtMoney(summary.profit)}</p></>}<p className="mt-1 text-xs">حساب قرض‌دهندگان/مالکان قبلی تغییر نمی‌کند.</p></section>}
+      {summary && <section aria-live="polite" className="mb-3 rounded-xl bg-teal-50 p-3 text-sm">{correction && <p className="font-bold">مجموع‌های سند جایگزین:</p>}<p>ارزش توافقی: {fmtMoney(summary.value)} · {summary.pairs} جوره</p><p>طلب پس از دریافت: {fmtMoney(Math.max(0, customer.balance + (correction?.totals.value ?? 0) - summary.value))}</p>{destination === 'warehouse' ? <p>{correction ? `جوره‌های سند جایگزین: ${fmtNum(summary.pairs)}` : `موجودی گدام: +${fmtNum(summary.pairs)} جوره`}</p> : <><p>بدون ورود به گدام · فروش: {fmtMoney(summary.sale)}</p><p>نقد: {fmtMoney(summary.cash)} · قرض خریدار: {fmtMoney(summary.buyerDebt)}</p><p>مفاد: {fmtMoney(summary.profit)}</p></>}<p className="mt-1 text-xs">حساب قرض‌دهندگان/مالکان قبلی تغییر نمی‌کند.</p></section>}
       {correction && correctionPreview && previewed && previewReasons.length === 0 && <section aria-live="polite" className="mb-3 rounded-xl bg-indigo-50 p-3 text-sm text-indigo-900"><p className="font-bold">تغییر خالص نسبت به سند اصلی:</p><p>تغییر طلب مشتری منبع: {signedMoney(correctionPreview.net.sourceDebt)}</p><p>تغییر موجودی گدام: {signedPairs(correctionPreview.net.stock)}</p><p>تغییر نقد: {signedMoney(correctionPreview.net.cash)}</p><p>تغییر طلب خریدار: {signedMoney(correctionPreview.net.buyerDebt)}</p><p>تغییر مفاد: {signedMoney(correctionPreview.net.profit)}</p></section>}
       {!previewed && <PrimaryBtn onClick={() => void preview()}>پیش‌نمایش و بررسی</PrimaryBtn>}
       {previewed && <><div role={previewReasons.length ? 'alert' : 'status'} className={`mb-3 rounded-xl p-3 text-sm ${previewReasons.length ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800'}`}>{previewReasons.length ? previewReasons.map((item, i) => <p key={i}>{item}</p>) : <p>پیش‌نمایش بررسی شد؛ معلومات را یک‌بار دیگر تأیید کنید.</p>}</div>

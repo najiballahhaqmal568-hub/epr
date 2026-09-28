@@ -121,3 +121,20 @@ All four findings from `final-review.md` are implemented: authoritative signed c
 Fresh final-tree evidence: receipt UI `PASS 41 checks`; receipt core `PASS 120 checks`; TypeScript build graph exit `0`; full `npm test` `PASS 1130 checks / 111 scenarios`; production build exit `0` with 209 modules and PWA output. Existing Vite mixed-import/chunk-size warnings only. Localhost-only synthetic profiles and disposable IndexedDB were used; prohibited cloud two-device scripts, live Supabase/business data, push, merge, publish and deployment were not used. Three unrelated QA PNGs remain untracked and untouched.
 
 Final fix implementation/verification is complete and awaiting scoped re-review. Full handoff: `final-fix-report.md`. Controller bookkeeping above is preserved.
+
+## Final scoped re-review — 2026-09-28
+
+Reviewer: Claude Code (cloud session), read-only review of net diff `2466432..1603a35`, then one minor fix.
+
+Verdict: all four final-review findings ADDRESSED; no new Critical/Important breakage.
+
+1. Correction preview (Important): ADDRESSED. The modal retains the authoritative `previewCustomerGoodsReceiptCorrection` result, clears it in `invalidate()` and on save failure, and renders it only for an allowed, current preview. Signed net lines come from `CustomerGoodsReceiptPreview.net`, not UI arithmetic.
+2. Validation (Minor): ADDRESSED. Field-linked `aria-invalid`/`aria-describedby` errors and one deduplicated summary appear only after preview is requested; the save path still requires a validated summary, and core ops re-check all rules.
+3. Ledger destination (Minor): ADDRESSED. Destination is prepended to note/correction text; negative-amount and shipping branches unchanged.
+4. Audit navigation (Minor): ADDRESSED. Nested detail uses the same dedicated read-only-safe receipt view; `<dialog>.showModal()` stacks in the top layer and the existing back-button stack handles nesting.
+
+Minor fixed during re-review: in correction mode the replacement-totals block still read `موجودی گدام: +3 جوره` beside the net `+1`, which reads as two contradictory stock changes. It now reads `جوره‌های سند جایگزین: ۳`; `signedPairs` uses `fmtNum` instead of stripping the currency sign from `fmtMoney`. RED: new `doesNotMatch` assertion in `tests/customer-goods-receipt-ui.mjs` failed before the change, passes after.
+
+Evidence (Linux, headless Chromium, synthetic IndexedDB only): `npx tsc -b` exit 0; `npm run build` exit 0 (15 precache entries); receipt core PASS 120; receipt UI PASS 41; receipt sync/backup PASS; sync-safety PASS; `npm test` 1130 checks / 111 scenarios PASS; `npm run fuzz -- 10 200` no rule broken. Cloud two-device scripts not run; no live data, merge to main, or deployment.
+
+Branch is ready to land pending owner approval of publication.
