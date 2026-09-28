@@ -3745,8 +3745,8 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       try {
         root.render(createElement(LendersView))
         await waitUntil(() => host.textContent?.includes('حاجی قدیمی') === true)
-        const lenderName = Array.from(host.querySelectorAll('p')).find((node) => node.textContent?.includes('حاجی قدیمی'))
-        ;(lenderName?.parentElement?.parentElement?.parentElement as HTMLElement | null)?.click()
+        const lenderRow = Array.from(host.querySelectorAll('button')).find((node) => node.textContent?.includes('حاجی قدیمی'))
+        lenderRow?.click()
         await waitUntil(() => host.textContent?.includes('سند قبلی — قبل از استفاده از اپ') === true)
         const openingButton = Array.from(host.querySelectorAll('button')).find((button) =>
           button.textContent?.includes('سند قبلی — قبل از استفاده از اپ')
@@ -3784,8 +3784,8 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       try {
         root.render(createElement(LendersView))
         await waitUntil(() => host.textContent?.includes('نورالله') === true)
-        const lenderName = Array.from(host.querySelectorAll('p')).find((node) => node.textContent?.includes('نورالله'))
-        ;(lenderName?.parentElement?.parentElement?.parentElement as HTMLElement | null)?.click()
+        const lenderRow = Array.from(host.querySelectorAll('button')).find((node) => node.textContent?.includes('نورالله'))
+        lenderRow?.click()
         await waitUntil(() => host.textContent?.includes('سند قبلی — قبل از استفاده از اپ') === true)
         Array.from(host.querySelectorAll('button'))
           .find((button) => button.textContent?.includes('سند قبلی — قبل از استفاده از اپ'))
