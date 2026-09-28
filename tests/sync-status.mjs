@@ -148,7 +148,7 @@ try {
   await page.route('**/*', route => ['localhost', '127.0.0.1'].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort())
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('http://localhost:5193/?ui-preview')
-  await page.getByRole('heading', { name: 'میز فروش' }).waitFor()
+  await page.getByRole('heading', { name: 'خانه' }).waitFor()
   await page.getByRole('button', { name: /^وضعیت همگام‌سازی:/ }).click()
   await page.getByRole('heading', { name: 'وضعیت همگام‌سازی', exact: true }).waitFor()
   await page.screenshot({ path: 'qa-sync-status-in-app.png', fullPage: true })
