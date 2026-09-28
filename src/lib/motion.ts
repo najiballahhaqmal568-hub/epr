@@ -64,3 +64,29 @@ export function saleCheck(): void {
   show.onfinish = () => mark.remove()
   show.oncancel = () => mark.remove()
 }
+
+/** Target reached: a short burst of paper from the card. Once, small, and gone in a second. */
+export function celebrate(from: Element): void {
+  haptic('success')
+  if (reducedMotion()) return
+  const r = from.getBoundingClientRect()
+  const colors = ['var(--success)', 'var(--action)', 'var(--warning)', 'var(--danger)']
+  for (let i = 0; i < 22; i++) {
+    const bit = document.createElement('span')
+    bit.className = 'confetti-bit'
+    bit.setAttribute('aria-hidden', 'true')
+    bit.style.left = `${r.left + r.width / 2}px`
+    bit.style.top = `${r.top + r.height / 3}px`
+    bit.style.background = colors[i % colors.length]
+    document.body.appendChild(bit)
+    const angle = (Math.PI * 2 * i) / 22 + Math.random() * 0.4
+    const dist = 70 + Math.random() * 90
+    const fly = bit.animate([
+      { transform: 'translate(-50%, -50%) rotate(0deg)', opacity: 1 },
+      { transform: `translate(calc(-50% + ${Math.cos(angle) * dist}px), calc(-50% + ${Math.sin(angle) * dist - 30}px)) rotate(${200 + i * 20}deg)`, opacity: 1, offset: 0.6 },
+      { transform: `translate(calc(-50% + ${Math.cos(angle) * dist * 1.1}px), calc(-50% + ${Math.sin(angle) * dist + 60}px)) rotate(${320 + i * 25}deg)`, opacity: 0 }
+    ], { duration: 1100 + Math.random() * 300, easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)' })
+    fly.onfinish = () => bit.remove()
+    fly.oncancel = () => bit.remove()
+  }
+}

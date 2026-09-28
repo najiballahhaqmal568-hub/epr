@@ -147,7 +147,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
 .modal-dialog::backdrop { background: rgb(0 0 0 / 34%); }
 .modal-dialog[open] { opacity: 1; transform: translateY(0); transition: opacity var(--motion-panel) var(--ease-out), transform var(--motion-panel) var(--ease-out); }
 @starting-style { .modal-dialog[open] { opacity: 0; transform: translateY(12px); } }
-.modal-body { padding: 1.25rem max(1.25rem, env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
+.modal-body { position: relative; padding: 1.25rem max(1.25rem, env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
 .modal-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
 .modal-heading h2 { min-width: 0; font-size: 1.25rem; font-weight: 700; line-height: 1.6; overflow-wrap: anywhere; }
 .modal-heading button { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 50%; background: var(--surface-grouped); }
@@ -511,3 +511,20 @@ input[type='number'] {
   .modal-dialog[open] { transition: opacity var(--motion-panel) var(--ease-out), transform var(--motion-slow) var(--ease-spring); }
   @starting-style { .modal-dialog[open] { opacity: 0; transform: translateY(40%); } }
 }
+
+/* Profit: the target bar fills as it appears; reaching it is marked once. */
+.profit-target-bar > span { transform-origin: right; animation: bar-fill 700ms var(--ease-out); }
+@keyframes bar-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.target-reached { display: inline-block; margin-top: 0.375rem; padding: 0.125rem 0.625rem; border-radius: 999px; background: var(--color-teal-50); color: var(--success); font-size: 0.75rem; font-weight: 700; }
+.confetti-bit { position: fixed; z-index: 60; width: 8px; height: 12px; border-radius: 2px; pointer-events: none; }
+
+/* Daily close: rows come out like a printed receipt, then a stamp. */
+.receipt-reveal > * { animation: receipt-line var(--motion-slow) var(--ease-out) both; }
+.receipt-reveal > :nth-child(2) { animation-delay: 60ms; }
+.receipt-reveal > :nth-child(3) { animation-delay: 120ms; }
+.receipt-reveal > :nth-child(4) { animation-delay: 180ms; }
+.receipt-reveal > :nth-child(5) { animation-delay: 240ms; }
+.receipt-reveal > :nth-child(n+6) { animation-delay: 300ms; }
+@keyframes receipt-line { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.day-stamp { position: absolute; inset-inline: 0; top: 38%; margin-inline: auto; width: max-content; z-index: 5; padding: 0.5rem 1.25rem; border: 3px solid var(--success); border-radius: 0.75rem; color: var(--success); background: var(--surface); font-size: 1.5rem; font-weight: 700; transform: rotate(-8deg); animation: stamp 420ms var(--ease-spring) both; pointer-events: none; }
+@keyframes stamp { from { opacity: 0; transform: rotate(-8deg) scale(1.8); } to { opacity: 1; transform: rotate(-8deg) scale(1); } }

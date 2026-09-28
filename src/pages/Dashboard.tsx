@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, saleCashPaid, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
@@ -13,6 +13,7 @@ import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTr
 import { commercialSaleLines } from '../lib/commercialLines'
 import { Icon } from '../components/Icon'
 import { RollingNumber } from '../components/RollingNumber'
+import { celebrate } from '../lib/motion'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import ExplainModal, { type ExplainKind } from './dashboard/ExplainModal'
 import TodaySalesModal from './dashboard/TodaySalesModal'
@@ -116,7 +117,8 @@ export default function Dashboard({
   // تنظیمات همین دستگاه: آخرین روز بسته‌شده و هدف مفاد ماهانه
   const prefs = useLiveQuery(async () => ({
     dayClosed: Number((await db.settings.get('dayClosed'))?.value ?? 0),
-    target: Number((await db.settings.get('monthlyProfitTarget'))?.value ?? 0)
+    target: Number((await db.settings.get('monthlyProfitTarget'))?.value ?? 0),
+    celebrated: Number((await db.settings.get('targetCelebrated'))?.value ?? 0)
   }), [])
   const nowTs = Date.now()
   const prevEnd = Math.min(monthStart, prevStart + (nowTs - monthStart))
@@ -142,6 +144,14 @@ export default function Dashboard({
       : hour < 12 && prefs.dayClosed < yesterday && yesterdaySold ? yesterday : null
   const target = prefs?.target ?? 0
   const targetPct = target > 0 ? Math.max(0, Math.round((thisMonth.netProfit / target) * 100)) : 0
+  const reached = !isStaff && target > 0 && thisMonth.netProfit >= target
+  const monthCard = useRef<HTMLButtonElement>(null)
+  // Target reached: one small celebration per month on this device, never again that month.
+  useEffect(() => {
+    if (!reached || !prefs || prefs.celebrated >= monthStart) return
+    void db.settings.put({ key: 'targetCelebrated', value: monthStart })
+    if (monthCard.current) celebrate(monthCard.current)
+  }, [reached, prefs, monthStart])
   const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0 || Boolean(monthAlert) || closeDay !== null
 
   return (
@@ -164,7 +174,7 @@ export default function Dashboard({
         </div>
       </button>
 
-      {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} className="surface explain-card mb-4 block w-full p-5 text-right">
+      {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} ref={monthCard} className="surface explain-card mb-4 block w-full p-5 text-right">
         <p className="text-sm text-slate-500">مفاد خالص این ماه <span className="text-xs">(از {fmtDateShort(monthStart)})</span> <span className="explain-hint">از کجا آمد ←</span></p>
         <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}><RollingNumber value={thisMonth.netProfit} /></p>
         <p className="mt-2 text-sm text-slate-600">مفاد فروش {fmtMoney(thisMonth.grossProfit)} − مصارف {fmtMoney(thisMonth.businessExpenses)}</p>
@@ -174,6 +184,7 @@ export default function Dashboard({
         {target > 0 && <span className="mt-3 block" aria-label="هدف ماه">
           <span className="profit-target-bar"><span style={{ width: `${Math.min(100, targetPct)}%` }} /></span>
           <span className="mt-1 block text-xs text-slate-600">هدف {fmtMoney(target)} — {fmtNum(targetPct)}٪ رسیده · {fmtNum(daysLeftInMonth())} روز مانده</span>
+          {reached && <span className="target-reached">🎉 هدف این ماه رسید</span>}
         </span>}
       </button>}
 
