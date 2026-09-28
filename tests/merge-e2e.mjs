@@ -12,7 +12,7 @@ const fail = (m) => {
 }
 
 await page.goto(URL)
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
 
 // دو جنس تکراری با موجودی
 await page.evaluate(async () => {
@@ -45,8 +45,9 @@ await page.evaluate(async () => {
   await mk(pB, '44', 7)
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 await page.waitForTimeout(800)
 
 const banner = page.locator('text=/جنس چند بار ثبت شده/')
@@ -98,15 +99,17 @@ await page.evaluate(async () => {
   await mk(p2, '42', 25)
 })
 await page.reload()
-await page.waitForSelector('text=داشبورد', { timeout: 30000 })
-await page.click('nav >> text=گدام')
+await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 })
+await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
+await page.getByRole('button', { name: /گدام و خرید/ }).click()
 // بنر تکراری این‌جا نمی‌آید چون نام‌ها فرق دارد — باید دکمهٔ همیشگی باشد
-await page.click('button:has-text("🔗 یکجا کردن")')
+await page.getByRole('button', { name: 'ابزارها' }).click()
+await page.getByRole('button', { name: 'یکجا کردن جنس تکراری' }).click()
 await page.waitForSelector('text=یکجا کردن اجناس تکراری')
 await page.click('button:has-text("انتخاب دستی")')
 await page.waitForSelector('text=دو یا چند جنس را خودتان انتخاب کنید')
-await page.click('button:has-text("بامیان"):not(:has-text("بوجی"))')
-await page.click('button:has-text("بوجی بامیان کلان")')
+await page.locator('dialog[open]').last().locator('button:has-text("بامیان"):not(:has-text("بوجی"))').click()
+await page.locator('dialog[open]').last().locator('button:has-text("بوجی بامیان کلان")').click()
 const cont = page.locator('button:has-text("ادامه (۲ جنس)")')
 if (!(await cont.count())) fail('دکمهٔ «ادامه» با ۲ انتخاب نیامد — انتخاب دستی باز هم خراب است')
 await cont.click()

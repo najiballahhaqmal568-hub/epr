@@ -158,6 +158,10 @@ The IndexedDB name is `shoeErp`. Nav buttons need `nav >> text=فروش` — a b
 
 ## Traps that have already cost time
 
+- E2E tests that open `localhost:4173/?ui-preview` need a build made with
+  `VITE_UI_PREVIEW=1 npm run build`; a normal build shows the login page and
+  every such test times out. Tests using `tests/local-app.mjs` start their own
+  dev server. Set `CHROMIUM_PATH=/opt/pw-browsers/chromium` on Linux.
 - **Never `git clean -fd` in this repo** — it deletes `node_modules`.
 - **Never commit `dist/` to `main`.** Use `&&`, not `;`, when chaining a
   `git checkout` with anything destructive — a failed checkout followed by `;`
