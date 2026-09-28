@@ -389,3 +389,4 @@ input[type='number'] {
 .party-promise.is-overdue { background: #FEE2E2; color: var(--danger); }
 .party-action { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); padding: 0.75rem 0.5rem; color: var(--text-primary); font-size: 0.875rem; font-weight: 700; }
 .party-action:disabled { color: var(--text-secondary); background: var(--surface-grouped); }
+.customer-row small.purchase-link { color: var(--action); font-weight: 700; }

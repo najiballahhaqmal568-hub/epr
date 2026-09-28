@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Purchase, type Supplier } from '../db'
 import { receivePurchase, payLanding, landingUnpaidOf } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
-import { inputCls, Fab, Empty, Card } from '../components/ui'
+import { inputCls, Empty } from '../components/ui'
 import { Icon } from '../components/Icon'
 import { reorderProducts } from '../lib/reorder'
 import CandidatesView from './purchases/Candidates'
@@ -95,9 +95,6 @@ export default function Purchases({
     return true
   })
 
-  const tabCls = (v: string) =>
-    `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-600'}`
-
   return (
     <div className="p-4">
       {(view === 'history' || view === 'candidates') && (
@@ -117,18 +114,14 @@ export default function Purchases({
 
       {(view === 'suppliers' || view === 'sarrafs' || view === 'lenders') && (
         <>
-          <div className="mb-3 flex items-center gap-2">
-            {onBack && (
-              <button onClick={onBack} className="rounded-full bg-slate-100 px-3 py-1 text-slate-600" aria-label="برگشت">
-                برگشت
-              </button>
-            )}
-            <h1 className="text-xl font-bold text-slate-800">حساب‌های خرید</h1>
+          <div className="page-heading">
+            <div><h1>حساب‌های خرید</h1><p>تأمین‌کنندگان، صراف‌ها و قرض‌دهنده‌ها</p></div>
+            {onBack && <button onClick={onBack} className="customers-back" aria-label="برگشت">برگشت</button>}
           </div>
-          <div className="mb-3 flex gap-2">
-            <button onClick={() => setView('suppliers')} className={tabCls('suppliers')}>تأمین‌کنندگان</button>
-            <button onClick={() => setView('sarrafs')} className={tabCls('sarrafs')}>صراف‌ها</button>
-            <button onClick={() => setView('lenders')} className={tabCls('lenders')}>قرض‌دهنده‌ها</button>
+          <div className="segmented mb-4" role="group" aria-label="نوع حساب خرید">
+            <button onClick={() => setView('suppliers')} aria-pressed={view === 'suppliers'}>تأمین‌کنندگان</button>
+            <button onClick={() => setView('sarrafs')} aria-pressed={view === 'sarrafs'}>صراف‌ها</button>
+            <button onClick={() => setView('lenders')} aria-pressed={view === 'lenders'}>قرض‌دهنده‌ها</button>
           </div>
         </>
       )}
@@ -272,80 +265,52 @@ export default function Purchases({
 
       {view === 'suppliers' && (
         <>
+          <button onClick={() => setShowNewSupplier('supplier')} className="primary-button mb-3">＋ تأمین‌کنندهٔ جدید</button>
           {vendors?.length === 0 && <Empty text="تأمین‌کننده‌ای ثبت نشده." />}
-          {vendors?.map((s) => (
-            <Card key={s.id} onClick={() => setDetail(s)}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-slate-800">{s.name}</p>
-                  {s.phone && <p className="text-sm text-slate-500" dir="ltr">{s.phone}</p>}
-                </div>
-                <div className="text-left">
-                  <p className={`font-bold ${s.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(s.balance))}</p>
-                  <p className={`text-xs ${s.balance < 0 ? 'font-bold text-teal-700' : 'text-slate-400'}`}>
-                    {s.balance > 0 ? 'قرض ما' : s.balance < 0 ? 'طلب ما' : 'تصفیه'}
-                  </p>
+          {!!vendors?.length && <section className="surface customers-list" aria-label="فهرست تأمین‌کنندگان">
+            {vendors.map((s) => (
+              <div key={s.id} className="customer-row">
+                <button className="customer-row-main text-start" onClick={() => setDetail(s)}>
+                  <span className="customer-row-name">{s.name}</span>
+                  {s.phone && <small dir="ltr" className="customer-row-phone">{s.phone}</small>}
+                  <small className="purchase-link">جزئیات ←</small>
+                </button>
+                <span className="customer-row-amount">
+                  <strong className={`inventory-money ${s.balance > 0 ? 'text-red-700' : s.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(s.balance))}</strong>
+                  <small>{s.balance > 0 ? 'قرض ما' : s.balance < 0 ? 'طلب ما' : 'تصفیه'}</small>
+                </span>
+                <div className="purchase-row-actions w-full">
+                  <button onClick={() => setPayingSupplier(s.id!)}>{s.balance > 0 ? 'پرداخت قرض' : 'پیشکی'}</button>
+                  <button className="text-amber-800" onClick={() => setReturningTo(s)}>مرجوعی جنس</button>
                 </div>
               </div>
-              <div className="mt-2 flex gap-4">
-                <button
-                  className="text-sm font-bold text-teal-700"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setPayingSupplier(s.id!)
-                  }}
-                >
-                  {s.balance > 0 ? 'پرداخت قرض' : 'پیشکی'}
-                </button>
-                <button
-                  className="text-sm font-bold text-amber-700"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setReturningTo(s)
-                  }}
-                >
-                  مرجوعی جنس
-                </button>
-                <span className="mr-auto text-xs text-slate-400">جزئیات ←</span>
-              </div>
-            </Card>
-          ))}
-          <Fab onClick={() => setShowNewSupplier('supplier')} label="تأمین‌کننده" />
+            ))}
+          </section>}
         </>
       )}
 
       {view === 'sarrafs' && (
         <>
+          <button onClick={() => setShowNewSupplier('sarraf')} className="primary-button mb-3">＋ صراف جدید</button>
           {sarrafs?.length === 0 && <Empty text="صرافی ثبت نشده. صراف کسی است که برای شما حواله می‌کند." />}
-          {sarrafs?.map((s) => (
-            <Card key={s.id} onClick={() => setDetail(s)}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-slate-800">💱 {s.name}</p>
-                  {s.phone && <p className="text-sm text-slate-500" dir="ltr">{s.phone}</p>}
-                </div>
-                <div className="text-left">
-                  <p className={`font-bold ${s.balance > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(s.balance))}</p>
-                  <p className={`text-xs ${s.balance < 0 ? 'font-bold text-teal-700' : 'text-slate-400'}`}>
-                    {s.balance > 0 ? 'قرض ما به صراف' : s.balance < 0 ? 'طلب ما از صراف' : 'تصفیه'}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-2 flex gap-4">
-                <button
-                  className="text-sm font-bold text-teal-700"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setPayingSupplier(s.id!)
-                  }}
-                >
-                  {s.balance > 0 ? 'پرداخت به صراف' : 'پیشکی به صراف'}
+          {!!sarrafs?.length && <section className="surface customers-list" aria-label="فهرست صراف‌ها">
+            {sarrafs.map((s) => (
+              <div key={s.id} className="customer-row">
+                <button className="customer-row-main text-start" onClick={() => setDetail(s)}>
+                  <span className="customer-row-name">{s.name}</span>
+                  {s.phone && <small dir="ltr" className="customer-row-phone">{s.phone}</small>}
+                  <small className="purchase-link">جزئیات ←</small>
                 </button>
-                <span className="mr-auto text-xs text-slate-400">جزئیات ←</span>
+                <span className="customer-row-amount">
+                  <strong className={`inventory-money ${s.balance > 0 ? 'text-red-700' : s.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(s.balance))}</strong>
+                  <small>{s.balance > 0 ? 'قرض ما به صراف' : s.balance < 0 ? 'طلب ما از صراف' : 'تصفیه'}</small>
+                </span>
+                <div className="purchase-row-actions w-full">
+                  <button onClick={() => setPayingSupplier(s.id!)}>{s.balance > 0 ? 'پرداخت به صراف' : 'پیشکی به صراف'}</button>
+                </div>
               </div>
-            </Card>
-          ))}
-          <Fab onClick={() => setShowNewSupplier('sarraf')} label="صراف جدید" />
+            ))}
+          </section>}
         </>
       )}
 
