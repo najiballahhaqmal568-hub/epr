@@ -36,7 +36,7 @@ try {
   // Empty customer book: the action opens the new-customer form.
   await nav('حساب‌ها')
   await page.getByText('هنوز هیچ حسابی نیست.', { exact: true }).waitFor()
-  await page.locator('.empty-state').getByRole('button', { name: 'مشتریان' }).click()
+  await page.locator('.empty-state').getByRole('button', { name: 'باز کردن دفتر مشتریان' }).click()
   await page.locator('.empty-state').getByRole('button', { name: '＋ مشتری جدید' }).click()
   await page.getByRole('dialog').waitFor()
   await page.keyboard.press('Escape')
