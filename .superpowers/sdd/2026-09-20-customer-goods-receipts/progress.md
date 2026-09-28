@@ -105,3 +105,19 @@ Final evidence: receipt core `PASS 120 checks`; receipt UI `PASS 29 checks`; rec
 Task 3: minor (deferred): Invalid totals silently disable preview without a visible field-linked reason.
 
 Task 3: minor (deferred): Source ledger omits warehouse/onward destination.
+
+Task 3: fix round 1 scoped re-review — all 3 Important findings ADDRESSED; no new Critical/Important breakage or out-of-scope observations. Evidence: ready-onward printing and history test, ready-UUID settlement filter, transaction-level owner eligibility and role-loss no-write tests.
+Task 3: complete (commits 7f6cf56..2466432, review clean of Critical/Important; 2 Minor findings deferred to final whole-branch review).
+
+## Resumed 2026-09-27
+
+Verified actual worktree remains at 2466432, with only the three preserved QA PNGs untracked. Repository moved to Documents/Codex/shoe app/epr; inherited Documents/ChatGPT path is stale. Scoped escalated commands work; sandbox helper itself still fails with Access denied. No operating-system ACL changes made.
+Final whole-branch read-only review running /root/receipt_whole_branch_review on review-023681b..2466432.diff. No live data, push, merge or deployment.
+
+## Final whole-branch review fix wave — 2026-09-28
+
+All four findings from `final-review.md` are implemented: authoritative signed correction effects, quiet-until-preview field-linked strict validation with an actionable summary, source-ledger destination, and original/replacement audit navigation. Real UI regression coverage compares rendered warehouse/onward correction effects with actual postings and asserts unchanged onward cash as zero.
+
+Fresh final-tree evidence: receipt UI `PASS 41 checks`; receipt core `PASS 120 checks`; TypeScript build graph exit `0`; full `npm test` `PASS 1130 checks / 111 scenarios`; production build exit `0` with 209 modules and PWA output. Existing Vite mixed-import/chunk-size warnings only. Localhost-only synthetic profiles and disposable IndexedDB were used; prohibited cloud two-device scripts, live Supabase/business data, push, merge, publish and deployment were not used. Three unrelated QA PNGs remain untracked and untouched.
+
+Final fix implementation/verification is complete and awaiting scoped re-review. Full handoff: `final-fix-report.md`. Controller bookkeeping above is preserved.

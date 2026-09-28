@@ -58,10 +58,26 @@ try {
   assert.match(await page.getByRole('dialog').last().innerText(), /همهٔ دستگاه‌ها/)
   await page.getByLabel('همهٔ دستگاه‌های فعال را به‌روز کردم').check()
   await page.getByRole('button', { name: 'فعال‌سازی در این دستگاه' }).click()
+  assert.equal(await page.getByText('این موارد را اصلاح کنید:').count(), 0, 'blank initial form does not show noisy validation')
   await page.getByLabel('نام جنس 1').fill('بوت آزمایشی')
   await page.getByLabel('سایز 1').fill('41')
   await page.getByLabel('رنگ 1').fill('سیاه')
+  await page.getByLabel('تعداد 1').fill('2.5')
+  await page.getByLabel('قیمت توافقی 1').fill('1000')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  assert.equal(await page.getByLabel('تعداد 1').getAttribute('aria-invalid'), 'true', 'fractional quantity is linked to its field')
+  await page.getByLabel('جنس 1', { exact: true }).getByText('تعداد باید عدد صحیح مثبت باشد؛ مانند ۲.').waitFor()
+  assert.match(await page.getByRole('alert').innerText(), /این موارد را اصلاح کنید:[\s\S]*تعداد باید عدد صحیح مثبت باشد/, 'invalid form shows an actionable validation summary')
   await page.getByLabel('تعداد 1').fill('2')
+  await page.getByLabel('قیمت توافقی 1').fill('1000abc')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  assert.equal(await page.getByLabel('قیمت توافقی 1').getAttribute('aria-invalid'), 'true', 'numeric prefix cost is rejected and linked to its field')
+  await page.getByLabel('قیمت توافقی 1').fill('0')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  await page.getByLabel('جنس 1', { exact: true }).getByText('قیمت توافقی باید عدد صحیح مثبت باشد؛ مانند ۱۰۰۰.').waitFor()
+  await page.getByLabel('قیمت توافقی 1').fill('6000')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  await page.getByLabel('جنس 1', { exact: true }).getByText('ارزش مجموع جنس از طلب قابل تصفیه بیشتر است؛ تعداد یا قیمت توافقی را کم کنید.').waitFor()
   await page.getByLabel('قیمت توافقی 1').fill('1000')
   await page.getByLabel('فایل گالری').setInputFiles({ name: 'shoe.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64') })
   await page.getByRole('button', { name: 'استفاده از این عکس' }).click()
@@ -72,7 +88,7 @@ try {
   await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
   const saveWarehouse = page.getByRole('button', { name: 'ثبت دریافت' })
   await saveWarehouse.evaluate(button => { button.click(); button.click() })
-  await page.getByText('فعال', { exact: true }).waitFor()
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: 'رسید خریدار' }).count(), 0, 'warehouse receipt has no buyer print action')
   const warehouse = await page.evaluate(async () => {
     const { db, sourceId } = window.testApp
@@ -82,18 +98,22 @@ try {
   })
   assert.deepEqual(warehouse, { source: 8000, stock: 2, payments: 1, photo: true }, 'warehouse UI posts once with synthetic photo and updates debt/stock')
 
+  await page.evaluate(() => window.renderCustomer(window.testApp.sourceId))
+  await page.getByText(/دریافت جنس بابت طلب · مقصد: ورود به گدام/).waitFor()
+  assert.match(await page.getByRole('dialog', { name: 'حساب مشتری منبع' }).innerText(), /بوت آزمایشی[\s\S]*مقصد: ورود به گدام/, 'source ledger names the warehouse destination')
+
   await page.evaluate(() => {
     const { React, CustomerGoodsReceiptDetail, warehouseUuid } = window.testApp
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: warehouseUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
-  await page.getByText('فعال', { exact: true }).waitFor()
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
 
   await page.evaluate(async () => {
     const { db, React, CustomerGoodsReceiptDetail, warehouseUuid } = window.testApp
     await db.settings.put({ key: 'cachedProfile', value: { role: 'staff' } })
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: warehouseUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
-  await page.getByText('فعال', { exact: true }).waitFor()
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
   assert.equal(await page.getByText(/قیمت توافقی/).count(), 0, 'staff receipt detail hides acquisition cost')
   assert.equal(await page.getByRole('button', { name: 'اصلاح سند' }).count(), 0, 'staff receipt detail has no mutation controls')
   await page.evaluate(async () => {
@@ -101,13 +121,16 @@ try {
     await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: warehouseUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
-  await page.getByText('فعال', { exact: true }).waitFor()
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
 
   await page.getByRole('button', { name: 'اصلاح سند' }).click()
   await page.getByLabel('تعداد 1').fill('3')
   await page.getByLabel('دلیل اصلاح').fill('اصلاح تعداد آزمایشی')
   await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
   await page.getByText('پیش‌نمایش بررسی شد؛ معلومات را یک‌بار دیگر تأیید کنید.').waitFor()
+  const warehouseCorrectionPreview = await page.getByRole('dialog').last().innerText()
+  assert.match(warehouseCorrectionPreview, /مجموع‌های سند جایگزین:[\s\S]*3 جوره/, 'warehouse correction labels replacement totals')
+  assert.match(warehouseCorrectionPreview, /تغییر خالص نسبت به سند اصلی:[\s\S]*تغییر طلب مشتری منبع:[\s\S]*−۱٬۰۰۰[\s\S]*تغییر موجودی گدام:[\s\S]*\+۱ جوره/, 'warehouse correction renders authoritative signed debt and stock deltas')
   await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
   await page.evaluate(() => window.testApp.db.customers.update(window.testApp.buyerId, { name: 'مشتری خریدار تازه' }))
   await page.getByRole('button', { name: 'ثبت اصلاح' }).click()
@@ -126,12 +149,26 @@ try {
     const { React, CustomerGoodsReceiptDetail } = window.testApp
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: window.testApp.correctedUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
-  await page.getByText('فعال', { exact: true }).waitFor()
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
+  const replacementDetail = page.getByRole('dialog').last()
+  await replacementDetail.getByRole('button', { name: 'دیدن سند اصلی' }).click()
+  const originalDetail = page.getByRole('dialog').last()
+  await originalDetail.getByText('باطل‌شده', { exact: true }).waitFor()
+  assert.equal(await originalDetail.getByRole('button', { name: 'دیدن سند جایگزین' }).count(), 1, 'replacement links back to its original and original links onward')
+  await originalDetail.getByRole('button', { name: 'دیدن سند جایگزین' }).click()
+  const linkedReplacementDetail = page.getByRole('dialog').last()
+  await linkedReplacementDetail.getByText('فعال', { exact: true }).waitFor()
+  assert.equal(await linkedReplacementDetail.getByRole('button', { name: 'دیدن سند اصلی' }).count(), 1, 'original audit document navigates forward to the active replacement')
+  await page.evaluate(() => {
+    const { React, CustomerGoodsReceiptDetail, correctedUuid } = window.testApp
+    window.root.render(React.createElement(CustomerGoodsReceiptDetail, { key: 'cancel-corrected', receiptUuid: correctedUuid, onClose() {}, syncBeforeMutation: async () => {} }))
+  })
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
   await page.getByLabel('دلیل ابطال دریافت').fill('ابطال آزمایشی سند اصلاح‌شده')
   await page.getByRole('button', { name: 'پیش‌نمایش ابطال' }).click()
   await page.getByText(/ابطال اثر طلب/).waitFor()
   await page.getByRole('button', { name: 'تأیید نهایی ابطال' }).click()
-  await page.getByText('باطل‌شده', { exact: true }).waitFor()
+  await page.getByRole('dialog').last().getByText('باطل‌شده', { exact: true }).waitFor()
   const cancelled = await page.evaluate(async () => ({
     source: (await window.testApp.db.customers.get(window.testApp.sourceId)).balance,
     stock: (await window.testApp.db.variants.toArray()).reduce((sum, row) => sum + row.stockQty, 0),
@@ -160,15 +197,52 @@ try {
   assert.match(await page.getByRole('dialog').last().innerText(), /قرض خریدار:[\s\S]*۲٬۱۰۰/)
   await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
   await page.getByRole('button', { name: 'ثبت دریافت' }).click()
-  await page.getByText('فعال', { exact: true }).waitFor()
-  const onward = await page.evaluate(async () => ({
-    source: (await window.testApp.db.customers.get(window.testApp.onwardSource)).balance,
-    buyer: (await window.testApp.db.customers.get(window.testApp.buyerId)).balance,
-    variants: await window.testApp.db.variants.count(),
-    sales: (await window.testApp.db.sales.toArray()).filter(row => row.goodsReceiptChild).length,
-    cash: await window.testApp.ops.cashBalance()
-  }))
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
+  const onward = await page.evaluate(async () => {
+    const active = (await window.testApp.db.payments.toArray()).find(row => row.goodsReceipt?.status === 'active' && row.partyId === window.testApp.onwardSource)
+    window.testApp.onwardUuid = active.goodsReceipt.receiptUuid
+    return {
+      source: (await window.testApp.db.customers.get(window.testApp.onwardSource)).balance,
+      buyer: (await window.testApp.db.customers.get(window.testApp.buyerId)).balance,
+      variants: await window.testApp.db.variants.count(),
+      sales: (await window.testApp.db.sales.toArray()).filter(row => row.goodsReceiptChild).length,
+      cash: await window.testApp.ops.cashBalance()
+    }
+  })
   assert.deepEqual(onward, { source: 8000, buyer: 2100, variants: 2, sales: 1, cash: 500 }, 'onward UI posts sale/debt/cash without adding stock variants')
+
+  await page.evaluate(() => window.renderCustomer(window.testApp.onwardSource))
+  await page.getByText(/دریافت جنس بابت طلب · مقصد: فروش مستقیم به مشتری دیگر — بدون گدام/).waitFor()
+  assert.match(await page.getByRole('dialog', { name: 'حساب مشتری دوم' }).innerText(), /اسکچرز مستقیم[\s\S]*مقصد: فروش مستقیم به مشتری دیگر — بدون گدام/, 'source ledger names the onward destination')
+  await page.evaluate(() => {
+    const { React, CustomerGoodsReceiptDetail, onwardUuid } = window.testApp
+    window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: onwardUuid, onClose() {}, syncBeforeMutation: async () => {} }))
+  })
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'اصلاح سند' }).click()
+  await page.getByLabel('تعداد 1').fill('3')
+  await page.getByLabel('دلیل اصلاح').fill('اصلاح تعداد فروش مستقیم')
+  await page.getByRole('button', { name: 'پیش‌نمایش و بررسی' }).click()
+  await page.getByText('پیش‌نمایش بررسی شد؛ معلومات را یک‌بار دیگر تأیید کنید.').waitFor()
+  const onwardCorrectionPreview = await page.getByRole('dialog').last().innerText()
+  assert.match(onwardCorrectionPreview, /مجموع‌های سند جایگزین:[\s\S]*3 جوره[\s\S]*فروش:[\s\S]*۳٬۹۰۰/, 'onward correction distinguishes replacement totals')
+  assert.match(onwardCorrectionPreview, /تغییر خالص نسبت به سند اصلی:[\s\S]*تغییر طلب مشتری منبع:[\s\S]*−۱٬۰۰۰[\s\S]*تغییر موجودی گدام:[\s\S]*۰ جوره[\s\S]*تغییر نقد:[\s\S]*۰ ؋[\s\S]*تغییر طلب خریدار:[\s\S]*\+۱٬۳۰۰[\s\S]*تغییر مفاد:[\s\S]*\+۳۰۰/, 'onward correction renders authoritative signed net effects including unchanged cash')
+  await page.getByLabel('معلومات و اثر حسابی این سند را بررسی کردم').check()
+  await page.getByRole('button', { name: 'ثبت اصلاح' }).click()
+  await page.waitForFunction(async () => (await window.testApp.db.customers.get(window.testApp.onwardSource)).balance === 7000)
+  const correctedOnward = await page.evaluate(async () => {
+    const activePayment = (await window.testApp.db.payments.toArray()).find(row => row.goodsReceipt?.status === 'active' && row.partyId === window.testApp.onwardSource)
+    const activeSale = (await window.testApp.db.sales.toArray()).find(row => row.goodsReceiptChild?.receiptUuid === activePayment.goodsReceipt.receiptUuid && !row.deleted)
+    window.testApp.onwardUuid = activePayment.goodsReceipt.receiptUuid
+    return {
+      source: (await window.testApp.db.customers.get(window.testApp.onwardSource)).balance,
+      buyer: (await window.testApp.db.customers.get(window.testApp.buyerId)).balance,
+      cash: await window.testApp.ops.cashBalance(),
+      sale: activeSale?.total,
+      pairs: activeSale?.goodsReceiptLines?.reduce((sum, line) => sum + line.qty, 0)
+    }
+  })
+  assert.deepEqual(correctedOnward, { source: 7000, buyer: 3400, cash: 500, sale: 3900, pairs: 3 }, 'onward correction posting matches the rendered net preview and preserves unchanged cash')
 
   await page.evaluate(() => {
     const { React, Sales } = window.testApp
@@ -257,13 +331,13 @@ try {
     window.testApp.portableUuid = active.goodsReceipt.receiptUuid
     return { status: state.status, sale: state.totals.sale, buyerDebt: state.totals.buyerDebt }
   })
-  assert.deepEqual(portable, { status: 'ready', sale: 2600, buyerDebt: 2100 }, 'backup replay keeps receipt ready and financial totals portable')
+  assert.deepEqual(portable, { status: 'ready', sale: 3900, buyerDebt: 3400 }, 'backup replay keeps receipt ready and financial totals portable')
   await page.evaluate(() => {
     const { React, CustomerGoodsReceiptDetail, portableUuid } = window.testApp
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: portableUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
-  await page.getByText('فعال', { exact: true }).waitFor()
-  assert.match(await page.getByRole('dialog').innerText(), /فروش:[\s\S]*۲٬۶۰۰/)
+  await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
+  assert.match(await page.getByRole('dialog').last().innerText(), /فروش:[\s\S]*۳٬۹۰۰/)
 
   await page.evaluate(async () => {
     const { db, React, CustomerGoodsReceiptDetail } = window.testApp
@@ -273,7 +347,7 @@ try {
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
   await page.getByText('تعارض همگام‌سازی', { exact: true }).waitFor()
-  assert.match(await page.getByRole('dialog').innerText(), /قابل اصلاح یا ابطال نیست/)
+  assert.match(await page.getByRole('dialog').last().innerText(), /قابل اصلاح یا ابطال نیست/)
   assert.equal(await page.getByRole('button', { name: 'رسید خریدار' }).count(), 0, 'conflicted receipt has no buyer print action')
 
   await page.setViewportSize({ width: 1100, height: 900 })
@@ -286,7 +360,7 @@ try {
   })
   assert.equal(await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).count(), 0, 'read-only account has no receipt write action')
   assert.deepEqual(errors, [], `browser errors: ${errors.join('; ')}`)
-  console.log('PASS 29 checks: compatibility, disabled reason, photo, warehouse, staff privacy, stale-preview rejection, authorization loss, correction, cancellation audit, onward, history printing, double-submit, backup replay, conflict, responsive and read-only UI')
+  console.log('PASS 41 checks: compatibility, strict field validation, destination ledger, photo, warehouse/onward correction net effects, audit navigation, staff privacy, stale-preview rejection, authorization loss, cancellation audit, history printing, double-submit, backup replay, conflict, responsive and read-only UI')
 } finally {
   await browser?.close()
   server.kill()

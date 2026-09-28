@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db } from '../../db'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
@@ -18,6 +18,8 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
   const [error, setError] = useState('')
   const [receiptOpen, setReceiptOpen] = useState(false)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
+  const [linkedReceiptUuid, setLinkedReceiptUuid] = useState<string>()
+  useEffect(() => setLinkedReceiptUuid(undefined), [receiptUuid])
   const result = useLiveQuery(async () => {
     try {
       const state = await loadCustomerGoodsReceipt(receiptUuid)
@@ -29,6 +31,7 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
   }, [receiptUuid])
   const state = result?.state
   const snapshot = state?.payment?.goodsReceipt?.snapshot
+  const receiptMeta = state?.payment?.goodsReceipt
   const mutable = state?.status === 'ready' && state.featureEnabled && !accessFlags.readOnly && result?.owner === true
   const buyerPrintReady = state?.status === 'ready' && snapshot?.destination === 'onward' && Boolean(state.sale)
 
@@ -67,6 +70,7 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
       {buyerPrintReady && <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"><button type="button" className="rounded-xl bg-teal-700 p-3 font-bold text-white" onClick={() => setReceiptOpen(true)}>رسید خریدار</button><button type="button" className="rounded-xl bg-slate-100 p-3 font-bold text-slate-700" onClick={() => setInvoiceOpen(true)}>فاکتور خریدار</button></div>}
       {snapshot?.note && <p className="mt-3 text-sm text-slate-600">یادداشت: {snapshot.note}</p>}
       {state.payment?.goodsReceipt?.reason && <p className="mt-2 text-sm text-slate-600">دلیل اصلاح/ابطال: {state.payment.goodsReceipt.reason}</p>}
+      {(receiptMeta?.correctionOfUuid || receiptMeta?.correctedByUuid) && <nav aria-label="پیوندهای اصلاح سند" className="mt-3 rounded-xl border border-slate-200 p-3 text-sm"><p className="mb-2 font-bold">زنجیرهٔ اصلاح سند</p><div className="flex flex-wrap gap-2">{receiptMeta.correctionOfUuid && <button type="button" className="rounded-lg bg-slate-100 px-3 py-2 font-bold text-teal-800" onClick={() => setLinkedReceiptUuid(receiptMeta.correctionOfUuid)}>دیدن سند اصلی</button>}{receiptMeta.correctedByUuid && <button type="button" className="rounded-lg bg-slate-100 px-3 py-2 font-bold text-teal-800" onClick={() => setLinkedReceiptUuid(receiptMeta.correctedByUuid)}>دیدن سند جایگزین</button>}</div></nav>}
       {state.writeBlockReasons.length > 0 && <div role="alert" className="my-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{state.writeBlockReasons.map((reason, index) => <p key={index}>{reason}</p>)}</div>}
       {mutable && <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2"><button type="button" className="rounded-xl bg-slate-100 p-3 font-bold" onClick={() => setCorrecting(true)}>اصلاح سند</button><button type="button" className="rounded-xl bg-red-50 p-3 font-bold text-red-700" onClick={() => { setCancelToken(''); setCancelReasons([]) }}>آماده‌کردن ابطال</button></div>}
       {mutable && <section className="mt-3 rounded-xl border border-red-100 p-3"><Field label="دلیل ابطال"><input aria-label="دلیل ابطال دریافت" className={inputCls} value={cancelReason} onChange={event => { setCancelToken(''); setCancelReasons([]); setCancelReason(event.target.value) }} /></Field>{!cancelToken && <button type="button" disabled={busy || !cancelReason.trim()} className="w-full rounded-xl bg-red-50 p-3 font-bold text-red-700 disabled:opacity-40" onClick={() => void prepareCancel()}>{busy ? 'در حال بررسی…' : 'پیش‌نمایش ابطال'}</button>}{cancelReasons.length > 0 && <div role="alert" className="mt-2 text-sm text-red-700">{cancelReasons.map((reason, index) => <p key={index}>{reason}</p>)}</div>}{cancelToken && cancelReasons.length === 0 && <><p role="status" className="mb-2 text-sm text-red-700">ابطال اثر طلب و موجودی/فروش این سند را برمی‌گرداند. آیا مطمئن هستید؟</p><PrimaryBtn disabled={busy} onClick={() => void cancel()}>{busy ? 'در حال ابطال…' : 'تأیید نهایی ابطال'}</PrimaryBtn></>}</section>}
@@ -76,5 +80,6 @@ export default function CustomerGoodsReceiptDetail({ receiptUuid, onClose, syncB
     {correcting && state && result?.source && <CustomerGoodsReceiptModal customer={result.source} correction={state} syncBeforeMutation={syncBeforeMutation} onClose={() => setCorrecting(false)} onSaved={uuid => { setCorrecting(false); onClose(); void uuid }} />}
     {receiptOpen && state?.sale && <ReceiptModal sale={state.sale} onClose={() => setReceiptOpen(false)} />}
     {invoiceOpen && state?.sale && <InvoiceModal sale={state.sale} onClose={() => setInvoiceOpen(false)} />}
+    {linkedReceiptUuid && <CustomerGoodsReceiptDetail receiptUuid={linkedReceiptUuid} syncBeforeMutation={syncBeforeMutation} onClose={() => setLinkedReceiptUuid(undefined)} />}
   </Modal>
 }
