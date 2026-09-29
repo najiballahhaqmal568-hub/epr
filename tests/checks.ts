@@ -115,6 +115,7 @@ import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpee
 import { saleCustomerCredit, summarizeSales } from '../src/lib/salesFigures'
 import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment } from '../src/lib/checkout'
 import { saleDraftTotal } from '../src/lib/saleDrafts'
+import { kindFigures, per100, salesBuckets, waterfall } from '../src/lib/reportFigures'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -5497,6 +5498,62 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('حذف قرض را برگرداند', (await db.customers.get(customerId))!.balance, 0)
       eq('حذف صندوق را برگرداند', await cashBalance(), 0)
       is('کنترل حساب‌ها بعد از حذف سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'راپور — پرچون و عمده جدا، جمع‌شان برابر همه، مرجوعی بی‌نوع حدس زده نمی‌شود',
+    run: async () => {
+      const day = new Date(2026, 8, 20, 10).getTime()
+      const line = (qty: number, unitPrice: number, unitCost: number) => ({ variantId: 1, productName: 'کوهستان', size: '42', color: 'سیاه', qty, unitPrice, unitCost })
+      const sales = [
+        { id: 1, date: day, saleType: 'retail', lines: [line(2, 900, 500)], discount: 100, total: 1700, paid: 1700 },
+        { id: 2, date: day + 86400000, saleType: 'wholesale', lines: [line(3, 800, 500)], total: 2400, paid: 2400 },
+        { id: 3, date: day + 2 * 86400000, saleType: 'retail', lines: [line(1, 1000, 600)], total: 1000, paid: 1000 }
+      ] as Sale[]
+      const rl = (unitPrice: number, unitCost: number) => ({ variantId: 1, productName: 'کوهستان', size: '42', color: 'سیاه', qty: 1, unitPrice, unitCost, restock: true })
+      const returns = [
+        // سند کهنه بدون نوع — نوعش از فروش اصلی (پرچون) پیدا می‌شود
+        { date: day, kind: 'customer', partyName: 'احمد', refId: 1, lines: [rl(900, 500)], discount: 50, reason: 'سایز', settlement: 'cashRefund', amount: 850 },
+        // نه نوع دارد نه فروش اصلی — نباید به هیچ‌کدام بسته شود
+        { date: day, kind: 'customer', partyName: 'نامعلوم', lines: [rl(800, 500)], reason: 'خرابی', settlement: 'cashRefund', amount: 800 },
+        { date: day, kind: 'customer', partyName: 'کریم', refId: 2, saleType: 'wholesale', lines: [rl(800, 500)], reason: 'سایز', settlement: 'reduceDebt', amount: 800 }
+      ] as ReturnDoc[]
+      const expenses = [{ date: day, categoryName: 'کرایهٔ دکان', amount: 300, type: 'business' }] as Expense[]
+      const input = { sales, returns, expenses, variants: [], salesForLookup: [], readyTradeUuids: new Set<string>(), readyReceiptUuids: new Set<string>() }
+      const all = kindFigures(input, 'all'), retail = kindFigures(input, 'retail'), wholesale = kindFigures(input, 'wholesale')
+
+      // حساب دستی: اجناس ۱٬۸۰۰ + ۲٬۴۰۰ + ۱٬۰۰۰؛ خرید ۱٬۰۰۰ + ۱٬۵۰۰ + ۶۰۰؛ تخفیف ۱۰۰؛ مرجوعی‌ها ۳۵۰ + ۳۰۰ + ۳۰۰
+      eq('همه: مفاد فروش', all.summary.salesProfit, 2000)
+      eq('همه: مفاد از جنس', all.summary.grossProfit, 1050)
+      eq('همه: مفاد خالص = مفاد نشان‌داده‌شده', all.profit, 750)
+      eq('پرچون: مفاد از جنس (مرجوعیِ بی‌نوع از فروش ۱ پیدا شد)', retail.profit, 750)
+      eq('عمده: مفاد از جنس', wholesale.profit, 600)
+      eq('پرچون مصارف ندارد — تقسیم مصارف حدس است', retail.summary.businessExpenses, 0)
+      for (const key of ['goodsValue', 'goodsCost', 'discounts', 'salesProfit'] as const) {
+        eq(`پرچون + عمده = همه: ${key}`, retail.summary[key] + wholesale.summary[key], all.summary[key])
+      }
+      eq('جوړه: پرچون + عمده = همه', retail.pairs + wholesale.pairs, all.pairs)
+      eq('مرجوعی بی‌نوع شمرده شد', retail.unknownReturns.count, 1)
+      eq('تفاوت دو نوع با همه دقیقاً همان مرجوعی بی‌نوع است', retail.summary.grossProfit + wholesale.summary.grossProfit - all.summary.grossProfit, retail.unknownReturns.profit)
+
+      // پله‌ها: هر پله از جایی شروع می‌شود که قبلی تمام شد؛ پلهٔ آخر همان مفاد بالای صفحه است
+      for (const [name, f, kind] of [['همه', all, 'all'], ['پرچون', retail, 'retail'], ['عمده', wholesale, 'wholesale']] as const) {
+        const steps = waterfall(f, kind)
+        const cuts = steps.filter((st) => st.kind === 'cut')
+        for (let i = 1; i < cuts.length; i++) eq(`${name}: پلهٔ ${cuts[i].label} از آخر پلهٔ قبل شروع می‌شود`, cuts[i].from, cuts[i - 1].to)
+        eq(`${name}: پلهٔ آخر = مفاد`, steps[steps.length - 1].to, f.profit)
+        eq(`${name}: پلهٔ آخر = پایان آخرین کم‌شدن`, steps[steps.length - 1].to, cuts[cuts.length - 1].to)
+      }
+      is('همه ۸ پله دارد (با مصارف)', waterfall(all, 'all').length, 8)
+      is('یک نوع جدا پلهٔ مصارف ندارد', waterfall(retail, 'retail').some((st) => st.key === 'expenses'), false)
+      eq('از هر ۱۰۰: ۷۵۰ از ۵٬۱۰۰', per100(750, 5100) ?? -1, 15)
+      is('بدون فروش عدد ساخته نمی‌شود', per100(100, 0), undefined)
+
+      // ستون‌ها: یک ستون برای هر روز دوره، جمع ستون‌ها = جمع فروش، پرچون و عمده جدا
+      const buckets = salesBuckets(sales, day - 3600000, day + 9 * 86400000, (t) => String(new Date(t).getDate()), () => '', (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime() })
+      eq('ده روز = ده ستون', buckets.length, 10)
+      eq('جمع ستون‌های پرچون', buckets.reduce((n, b) => n + b.retail, 0), 2700)
+      eq('جمع ستون‌های عمده', buckets.reduce((n, b) => n + b.wholesale, 0), 2400)
     }
   }
 ]

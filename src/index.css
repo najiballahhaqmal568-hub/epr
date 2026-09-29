@@ -594,3 +594,90 @@ input[type='number'] {
 .sale-quick-secondary { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; }
 .sale-quick-secondary button { min-height: 2.5rem; padding: 0 0.5rem; background: transparent; border: 0; font-size: 0.875rem; font-weight: 700; color: var(--text-secondary); }
 .sale-quick-secondary button:first-child { color: var(--warning-text); }
+
+/* Reports: «مفاد کردم؟ از کجا آمد؟» — bars move (transform only), numbers only appear, never count. */
+.report-story { display: grid; gap: 12px; margin-bottom: 16px; }
+.report-story-body { display: grid; gap: 12px; }
+.report-kinds { display: flex; gap: 6px; }
+.report-kinds button { flex: 1; min-height: 44px; border-radius: 999px; border: 1.5px solid var(--border-subtle); background: var(--surface); color: var(--text-primary); font-weight: 800; font-size: 0.875rem; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background var(--motion-base) var(--ease-out), color var(--motion-base) var(--ease-out); }
+.report-kinds button[aria-pressed="true"] { background: var(--action-fill); border-color: var(--action-fill); color: #fff; }
+.report-kinds button span, .report-compare b span, .report-legend i { width: 10px; height: 10px; border-radius: 999px; display: inline-block; flex-shrink: 0; }
+.report-kinds [data-kind="all"] span { background: var(--warning); }
+.report-kinds [data-kind="retail"] span, .report-compare [data-kind="retail"] b span, .report-legend i[data-kind="retail"] { background: var(--action); }
+.report-kinds [data-kind="wholesale"] span, .report-compare [data-kind="wholesale"] b span, .report-legend i[data-kind="wholesale"] { background: color-mix(in oklab, var(--action) 45%, var(--surface)); }
+.report-kinds button[aria-pressed="true"] span { box-shadow: 0 0 0 2px #fff; }
+
+.report-hero { position: relative; overflow: hidden; border-radius: var(--radius-surface); background: var(--action-fill); color: #fff; padding: 16px 18px; display: grid; gap: 6px; }
+.report-hero-period { font-size: 0.8125rem; opacity: 0.9; }
+.report-hero-figure { display: grid; }
+.report-hero-figure span { font-size: 0.875rem; font-weight: 700; }
+.report-hero-figure strong { font-size: 2.25rem; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; animation: report-in var(--motion-slow) var(--ease-out) both; }
+.report-hero-delta { justify-self: start; padding: 3px 10px; border-radius: 999px; background: var(--surface); color: var(--success); font-size: 0.8125rem; font-weight: 800; animation: report-bump var(--motion-slow) var(--ease-spring) 120ms both; }
+.report-hero-delta[data-up="false"] { color: var(--danger); }
+.report-hero-line { font-size: 0.875rem; line-height: 1.7; }
+.report-hero-note { font-size: 0.8125rem; padding: 6px 10px; border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); }
+
+.report-card { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); padding: 14px; display: grid; gap: 8px; }
+.report-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.report-card-head h2 { font-size: 1.0625rem; font-weight: 800; color: var(--text-primary); }
+.report-card-head > span { font-size: 0.75rem; color: var(--text-secondary); }
+.report-note, .report-insight { font-size: 0.8125rem; line-height: 1.7; color: var(--text-primary); padding: 8px 10px; border-radius: var(--radius-control); background: var(--surface-grouped); }
+
+.report-split { display: flex; gap: 3px; height: 12px; }
+.report-split span { border-radius: 5px; animation: report-grow calc(var(--motion-slow) * 2) var(--ease-out) 200ms both; }
+.report-split span:first-child { background: var(--action); transform-origin: left; }
+.report-split span:last-child { background: color-mix(in oklab, var(--action) 45%, var(--surface)); transform-origin: right; }
+.report-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.report-compare button { text-align: start; border: 1.5px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); padding: 10px 12px; display: grid; gap: 6px; }
+.report-compare b { display: flex; align-items: center; gap: 6px; font-size: 0.9375rem; }
+.report-compare b small { font-weight: 600; color: var(--text-secondary); }
+.report-compare > button > span { display: grid; font-size: 0.9375rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.report-compare small { font-size: 0.6875rem; color: var(--text-secondary); font-weight: 500; }
+.report-compare strong { color: var(--success); }
+.report-compare .report-compare-foot { display: block; font-size: 0.75rem; font-weight: 500; line-height: 1.6; }
+
+.report-step { width: 100%; text-align: start; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-primary); padding: 6px 8px 8px; display: grid; gap: 5px; }
+.report-step[data-step="sub"] { background: var(--surface-grouped); }
+.report-step[data-step="result"] { background: var(--color-teal-50); }
+.report-step-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 0.875rem; }
+.report-step[data-step="sub"] .report-step-row > span, .report-step[data-step="result"] .report-step-row > span { font-weight: 800; }
+.report-step-row b { font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+.report-step[data-step="cut"] .report-step-row b { color: var(--danger); }
+.report-step[data-step="result"] .report-step-row b, .report-step[data-step="result"] .report-step-row > span { color: var(--success); }
+.report-step-track { position: relative; height: 10px; border-radius: 4px; background: var(--surface-grouped); }
+.report-step[data-step="cut"] .report-step-track { background: transparent; }
+.report-step[data-step="result"] .report-step-track { height: 14px; }
+.report-step-track span { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--action); animation: report-grow calc(var(--motion-slow) * 1.4) var(--ease-out) both; }
+.report-step[data-step="sub"] .report-step-track span { background: color-mix(in oklab, var(--action) 45%, var(--surface)); }
+.report-step[data-step="cut"] .report-step-track span { background: color-mix(in oklab, var(--danger) 55%, var(--surface)); }
+.report-step[data-step="result"] .report-step-track span { background: var(--success); }
+
+.report-legend { display: flex; align-items: center; gap: 4px; font-size: 0.75rem; color: var(--text-primary); }
+.report-legend i { border-radius: 3px; margin-inline-start: 6px; }
+.report-readout { display: flex; align-items: center; gap: 8px; }
+.report-readout button { width: 44px; height: 44px; flex-shrink: 0; border-radius: var(--radius-control); border: 1px solid var(--border-subtle); background: var(--surface); color: var(--text-primary); font-size: 1.5rem; font-weight: 700; }
+.report-readout button:disabled { opacity: 0.35; }
+.report-readout p { flex: 1; display: grid; text-align: center; font-variant-numeric: tabular-nums; }
+.report-readout span, .report-readout small { font-size: 0.75rem; color: var(--text-secondary); }
+.report-readout strong { font-size: 1.25rem; color: var(--text-primary); }
+.report-chart { width: 100%; height: 150px; border: 0; padding: 0; background: transparent; display: flex; align-items: flex-end; gap: 6px; }
+.report-chart[data-dense="true"] { gap: 2px; }
+.report-chart > span { flex: 1; height: 100%; min-width: 0; display: flex; align-items: flex-end; transform-origin: bottom; animation: report-rise calc(var(--motion-slow) * 1.4) var(--ease-out) both; }
+.report-chart > span > span { width: 100%; border-radius: 3px 3px 1px 1px; background: var(--action); display: flex; flex-direction: column; overflow: hidden; }
+.report-chart > span > span i { display: block; background: color-mix(in oklab, var(--action) 45%, var(--surface)); }
+.report-chart > span[data-on="true"] > span { box-shadow: 0 4px 0 var(--warning); }
+.report-axis { display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-secondary); }
+
+.report-explain-amount { font-size: 1.75rem; font-weight: 800; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.report-explain-amount[data-step="cut"] { color: var(--danger); }
+.report-explain-amount[data-step="result"] { color: var(--success); }
+.report-explain-text { font-size: 0.9375rem; line-height: 1.8; margin-bottom: 8px; }
+.report-explain-list p { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--border-subtle); font-size: 0.875rem; }
+
+@keyframes report-grow { from { transform: scaleX(0); } }
+@keyframes report-rise { from { transform: scaleY(0); } }
+@keyframes report-in { from { opacity: 0; transform: translateX(-12px); } }
+@keyframes report-bump { 0% { transform: scale(0.7); } 70% { transform: scale(1.05); } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .report-story, .report-story * { animation: none !important; }
+}
