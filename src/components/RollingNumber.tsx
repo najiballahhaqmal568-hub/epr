@@ -13,9 +13,14 @@ export function RollingNumber({ value, format = fmtMoney }: { value: number; for
   const wrap = useRef<HTMLSpanElement>(null)
   const before = last.current
   const dir = before && before.value !== value && !reducedMotion() ? (value > before.value ? 'up' : 'down') : null
+  // Only the number itself is split into digits, inside a left-to-right box. Each digit is an
+  // inline-block, and in the app's right-to-left page loose inline-blocks are laid out right to left:
+  // 13,760 showed as «۰۶۷,۳۱». The «؋» and spaces stay plain text, where the page puts them anyway.
+  const [lead, digits, tail] = splitNumber(text)
+  const oldDigits = before ? splitNumber(before.text)[1] : digits
   // Compare from the end: the units digit is always the last digit, whatever the length.
-  const chars = [...text]
-  const old = before ? [...before.text] : chars
+  const chars = [...digits]
+  const old = [...oldDigits]
   const offset = old.length - chars.length
 
   useEffect(() => {
@@ -29,10 +34,21 @@ export function RollingNumber({ value, format = fmtMoney }: { value: number; for
 
   return (
     <span ref={wrap} className="rolling-number">
-      {chars.map((ch, i) => {
-        const changed = dir !== null && old[i + offset] !== ch
-        return <span key={changed ? `${i}-${ch}-${value}` : `${i}-${ch}`} className={changed ? `roll-${dir}` : undefined}>{ch}</span>
-      })}
+      {lead}
+      <span dir="ltr" className="rolling-digits">
+        {chars.map((ch, i) => {
+          const changed = dir !== null && old[i + offset] !== ch
+          return <span key={changed ? `${i}-${ch}-${value}` : `${i}-${ch}`} className={changed ? `roll-${dir}` : undefined}>{ch}</span>
+        })}
+      </span>
+      {tail}
     </span>
   )
+}
+
+/** Text before the number, the number (sign, digits and separators), and text after it. */
+function splitNumber(text: string): [string, string, string] {
+  const m = /[-−]?[0-9۰-۹][0-9۰-۹٬,٫.]*/.exec(text)
+  if (!m) return [text, '', '']
+  return [text.slice(0, m.index), m[0], text.slice(m.index + m[0].length)]
 }
