@@ -4,7 +4,7 @@ import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
 import { validateCustomerGoodsReceiptBackup, validateCustomerGoodsReceiptConflictEvidence } from './customerGoodsReceiptBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
-import { checkReturn, priorReturnsOf } from './returns'
+import { checkPurchaseReturn, checkReturn, priorReturnsOf, priorSupplierReturnsOf } from './returns'
 import { fmtMoney } from './format'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
@@ -330,6 +330,7 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
   if (purchase.paid + (purchase.sarrafAmount ?? 0) > purchase.total) {
     throw new Error('پرداخت و حواله از مجموع خرید بیشتر است؛ پول اضافه را جداگانه «پرداخت به تأمین‌کننده» ثبت کنید تا طلب شما بماند.')
   }
+  if (purchase.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
   return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     // «رسیده» فقط با receivePurchase ساخته می‌شود، نه در لحظهٔ ثبت خرید.
     // اگر اینجا اجازه داده شود، موجودی‌اش نه از سند خرید می‌آید و نه از سند رسید.
@@ -2813,10 +2814,20 @@ export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
 export async function addSupplierReturn(ret: ReturnDoc): Promise<number> {
   ret.amount = afn(ret.amount)
   ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
+  if (ret.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد برگشتی باید عدد صحیح و بیشتر از صفر باشد')
+  if (ret.amount < 0) throw new Error('پول مرجوعی منفی نمی‌شود')
   return db.transaction('rw', [db.returns, db.purchases, db.variants, db.suppliers, db.cashMovements], async () => {
     if (ret.refId !== undefined) {
       const purchase = await db.purchases.get(ret.refId)
-      if (purchase) assertOrdinaryPurchase(purchase)
+      if (purchase) {
+        assertOrdinaryPurchase(purchase)
+        if (purchase.deleted) throw new Error('این خرید باطل شده است؛ مرجوعی از آن ثبت نمی‌شود')
+        // یک خرید دو بار برنمی‌گردد — ورنه قرض ما به تأمین‌کننده دو بار کم می‌شود
+        const prior = priorSupplierReturnsOf(purchase, await db.returns.filter((r) => r.refId === purchase.id).toArray())
+        const checked = checkPurchaseReturn(purchase, prior, ret.lines)
+        if (typeof checked === 'string') throw new Error(checked)
+        if (ret.amount > checked.value) throw new Error(`پول مرجوعی از قیمت همین جنس در فاکتور خرید بیشتر است — حداکثر ${fmtMoney(checked.value)}`)
+      }
     }
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)

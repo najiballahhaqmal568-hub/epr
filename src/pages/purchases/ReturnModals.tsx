@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Purchase, type Product, type Supplier, type ReturnLine } from '../../db'
 import { addSupplierReturn } from '../../lib/ops'
+import { priorSupplierReturnsOf, purchaseReturnableQtys } from '../../lib/returns'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import QtyControl from '../../components/QtyControl'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
@@ -13,8 +15,13 @@ export function PurchaseReturnModal({ purchase, onClose }: { purchase: Purchase;
   const [settlement, setSettlement] = useState<'reduceDebt' | 'cashRefund'>('reduceDebt')
   const [error, setError] = useState('')
   const supplier = useLiveQuery(() => db.suppliers.get(purchase.supplierId), [purchase.supplierId])
+  const submit = useSubmitOnce()
+  // جنسی که قبلاً از همین خرید برگشت خورده، دوباره برنمی‌گردد
+  const prior = useLiveQuery(async () => priorSupplierReturnsOf(purchase, await db.returns.filter((r) => r.refId === purchase.id).toArray()), [purchase.id])
+  const left = prior ? purchaseReturnableQtys(purchase, prior) : purchase.lines.map(() => 0)
+  const chosen = purchase.lines.map((_, i) => Math.min(qtys[i] ?? 0, left[i]))
 
-  const amount = purchase.lines.reduce((s, l, i) => s + (qtys[i] ?? 0) * l.unitCost, 0)
+  const amount = purchase.lines.reduce((s, l, i) => s + chosen[i] * l.unitCost, 0)
 
   async function save() {
     const lines: ReturnLine[] = purchase.lines
@@ -23,7 +30,7 @@ export function PurchaseReturnModal({ purchase, onClose }: { purchase: Purchase;
         productName: l.productName,
         size: l.size,
         color: l.color,
-        qty: qtys[i] ?? 0,
+        qty: chosen[i],
         unitPrice: l.unitCost,
         restock: false
       }))
@@ -59,18 +66,20 @@ export function PurchaseReturnModal({ purchase, onClose }: { purchase: Purchase;
             <p className="text-slate-500">
               خریده: {fmtNum(l.qty)} × {fmtMoney(l.unitCost)}
             </p>
+            {prior && left[i] < l.qty && <p className="text-slate-500">قبلاً برگشت: {fmtNum(l.qty - left[i])} جوړه</p>}
           </div>
           <div className="flex items-center gap-2">
-            <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
+            <button className="h-8 w-8 rounded-full bg-slate-200 font-bold" aria-label={`کم کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={chosen[i] <= 0} onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, chosen[i] - 1) }))}>
               −
             </button>
             <input
               className="w-14 rounded-lg border border-slate-300 bg-white px-1 py-1 text-center font-bold"
               inputMode="numeric"
-              value={qtys[i] ?? 0}
-              onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
+              aria-label={`تعداد برگشتی ${l.productName} ${l.size} ${l.color}`}
+              value={chosen[i]}
+              onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(left[i], Math.max(0, Math.floor(parseNum(e.target.value) || 0))) }))}
             />
-            <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
+            <button className="h-8 w-8 rounded-full bg-teal-100 font-bold text-teal-800" aria-label={`زیاد کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={chosen[i] >= left[i]} onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(left[i], chosen[i] + 1) }))}>
               ＋
             </button>
           </div>
@@ -92,7 +101,8 @@ export function PurchaseReturnModal({ purchase, onClose }: { purchase: Purchase;
       </Field>
       <p className="mb-3 font-bold text-slate-800">مبلغ مرجوعی: {fmtMoney(amount)}</p>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-      <PrimaryBtn onClick={save} disabled={amount <= 0}>
+      {prior && left.every((n) => n === 0) && <p role="status" className="mb-2 text-sm text-slate-600">همهٔ جنس این خرید قبلاً برگشت خورده است.</p>}
+      <PrimaryBtn onClick={() => void submit.run(save)} disabled={submit.busy || !prior || chosen.every((n) => n === 0)}>
         ثبت مرجوعی
       </PrimaryBtn>
     </Modal>
@@ -105,6 +115,7 @@ export function SupplierReturnModal({ supplier, onClose }: { supplier: Supplier;
   const [reason, setReason] = useState('خرابی جنس')
   const [settlement, setSettlement] = useState<'reduceDebt' | 'cashRefund'>(supplier.balance > 0 ? 'reduceDebt' : 'cashRefund')
   const [error, setError] = useState('')
+  const submit = useSubmitOnce()
 
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
@@ -218,7 +229,7 @@ export function SupplierReturnModal({ supplier, onClose }: { supplier: Supplier;
       </Field>
       <p className="mb-3 font-bold text-slate-800">مبلغ مرجوعی: {fmtMoney(amount)}</p>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-      <PrimaryBtn onClick={save} disabled={!lines.length}>
+      <PrimaryBtn onClick={() => void submit.run(save)} disabled={submit.busy || !lines.length}>
         ثبت مرجوعی
       </PrimaryBtn>
     </Modal>

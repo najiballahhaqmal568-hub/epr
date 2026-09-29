@@ -10,7 +10,7 @@
  *
  * این فایل هیچ دیتابیسی نمی‌خواند؛ هر کس صدا می‌زند، فروش و مرجوعی‌های قبلی را می‌دهد.
  */
-import type { ReturnDoc, ReturnLine, Sale } from '../db'
+import type { Purchase, ReturnDoc, ReturnLine, Sale } from '../db'
 
 const valueOf = (lines: { qty: number; unitPrice: number }[]) => lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
 
@@ -24,13 +24,15 @@ export function priorReturnsOf(sale: Sale, returns: ReturnDoc[]): ReturnDoc[] {
  * جای دادن یک خط برگشتی در خطوط فروش — اول خطی با همان قیمت، بعد هر خطِ همان جنس.
  * تعدادی که جا نشد برگردانده می‌شود.
  */
-function take(sale: Sale, left: number[], line: { variantId: number; unitPrice: number; qty: number }): number {
+type PricedLine = { variantId: number; unitPrice: number }
+
+function take(docLines: PricedLine[], left: number[], line: { variantId: number; unitPrice: number; qty: number }): number {
   let rest = line.qty
-  const same = (i: number) => (sale.lines[i].unitPrice === line.unitPrice ? 0 : 1)
-  const order = sale.lines.map((_, i) => i).sort((a, b) => same(a) - same(b) || a - b)
+  const same = (i: number) => (docLines[i].unitPrice === line.unitPrice ? 0 : 1)
+  const order = docLines.map((_, i) => i).sort((a, b) => same(a) - same(b) || a - b)
   for (const i of order) {
     if (rest <= 0) break
-    if (sale.lines[i].variantId !== line.variantId) continue
+    if (docLines[i].variantId !== line.variantId) continue
     const n = Math.min(rest, left[i])
     left[i] -= n
     rest -= n
@@ -41,7 +43,7 @@ function take(sale: Sale, left: number[], line: { variantId: number; unitPrice: 
 /** برای هر خط فروش (به همان ترتیب)، چند جوړه هنوز قابل برگشت است */
 export function returnableQtys(sale: Sale, prior: ReturnDoc[]): number[] {
   const left = sale.lines.map((l) => l.qty)
-  for (const r of prior) for (const l of r.lines) take(sale, left, l)
+  for (const r of prior) for (const l of r.lines) take(sale.lines, left, l)
   return left
 }
 
@@ -74,7 +76,7 @@ export function checkReturn(sale: Sale, prior: ReturnDoc[], lines: ReturnLine[])
   const start = [...left]
   for (const l of lines) {
     if (!Number.isInteger(l.qty) || l.qty <= 0) return 'تعداد برگشتی باید عدد صحیح و بیشتر از صفر باشد'
-    if (take(sale, left, l) > 0) return `${l.productName} ${l.size}: بیشتر از آنچه فروخته شده (یا قبلاً برگشت خورده) پس گرفته نمی‌شود`
+    if (take(sale.lines, left, l) > 0) return `${l.productName} ${l.size}: بیشتر از آنچه فروخته شده (یا قبلاً برگشت خورده) پس گرفته نمی‌شود`
   }
   const qtys = start.map((n, i) => n - left[i])
   const refund = returnRefund(sale, prior, qtys)
@@ -109,10 +111,46 @@ export function overReturnedSales(sales: Sale[], returns: ReturnDoc[]): OverRetu
     if (!prior.length) continue
     const left = sale.lines.map((l) => l.qty)
     let extraPairs = 0
-    for (const r of prior) for (const l of r.lines) extraPairs += take(sale, left, l)
+    for (const r of prior) for (const l of r.lines) extraPairs += take(sale.lines, left, l)
     const fair = returnRefund(sale, [], sale.lines.map((l, i) => l.qty - left[i])).amount
     const extraMoney = Math.max(0, prior.reduce((s, r) => s + r.amount, 0) - fair)
     if (extraPairs > 0 || extraMoney > 0) out.push({ id: sale.id, date: sale.date, customerName: sale.customerName, extraPairs, extraMoney })
   }
   return out.sort((a, b) => b.date - a.date)
+}
+
+// ── مرجوعی به تأمین‌کننده از روی یک خرید ─────────────────────────────
+
+const purchaseLines = (purchase: Purchase): PricedLine[] => purchase.lines.map((l) => ({ variantId: l.variantId, unitPrice: l.unitCost }))
+
+/** مرجوعی‌های زندهٔ همین خرید */
+export function priorSupplierReturnsOf(purchase: Purchase, returns: ReturnDoc[]): ReturnDoc[] {
+  if (purchase.id === undefined) return []
+  return returns.filter((r) => !r.deleted && r.kind === 'supplier' && r.refId === purchase.id)
+}
+
+/** برای هر خط خرید (به همان ترتیب)، چند جوړه هنوز به تأمین‌کننده برگشتنی است */
+export function purchaseReturnableQtys(purchase: Purchase, prior: ReturnDoc[]): number[] {
+  const docLines = purchaseLines(purchase)
+  const left = purchase.lines.map((l) => l.qty)
+  for (const r of prior) for (const l of r.lines) take(docLines, left, l)
+  return left
+}
+
+/**
+ * بررسی مرجوعی به تأمین‌کننده از روی یک خرید: بیشتر از خریده (منهای برگشت‌های قبلی) برنمی‌گردد
+ * و ارزشش به قیمت همان فاکتور است. خرید در راه هنوز در گدام نیست، پس از آن چیزی برنمی‌گردد.
+ */
+export function checkPurchaseReturn(purchase: Purchase, prior: ReturnDoc[], lines: ReturnLine[]): { value: number } | string {
+  if (purchase.received === false) return 'این خرید هنوز نرسیده است؛ اول «رسید» را ثبت کنید، بعد مرجوعی'
+  const docLines = purchaseLines(purchase)
+  const left = purchaseReturnableQtys(purchase, prior)
+  let value = 0
+  for (const l of lines) {
+    if (!Number.isInteger(l.qty) || l.qty <= 0) return 'تعداد برگشتی باید عدد صحیح و بیشتر از صفر باشد'
+    const before = [...left]
+    if (take(docLines, left, l) > 0) return `${l.productName} ${l.size}: بیشتر از آنچه از این خرید آمده (یا قبلاً برگشت خورده) پس داده نمی‌شود`
+    value += docLines.reduce((s, d, i) => s + (before[i] - left[i]) * d.unitPrice, 0)
+  }
+  return { value }
 }

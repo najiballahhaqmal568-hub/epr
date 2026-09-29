@@ -13,6 +13,7 @@ import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
 import AdjustModal from '../src/pages/inventory/AdjustModal'
 import ReturnModal from '../src/pages/sales/ReturnModal'
+import { PurchaseReturnModal } from '../src/pages/purchases/ReturnModals'
 import { overReturnedSales } from '../src/lib/returns'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
 import PartnersCard from '../src/pages/reports/PartnersCard'
@@ -264,6 +265,53 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازبینی کامل — مرجوعی به تأمین‌کننده: یک خرید دو بار برنمی‌گردد و جوړه نصف نمی‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 10)
+      const sId = await newSupplier()
+      const pId = await addPurchase(buy(sId, vId, 4, 500, { paid: 0 }))
+      const owed = async () => (await db.suppliers.get(sId))!.balance
+      eq('قرض ما به تأمین‌کننده ۲٬۰۰۰', await owed(), 2000)
+      const purchase = (await db.purchases.get(pId))!
+      const back = (qty: number, amount: number) => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', refId: pId, lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount })
+
+      // صفحهٔ مرجوعی: دو لمس پشت‌سرهم فقط یک سند
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(PurchaseReturnModal, { purchase, onClose: () => undefined }))
+        // تا برگشت‌های قبلی خوانده نشده، دکمهٔ زیاد بسته است
+        await waitUntil(() => Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.trim() === '＋' && !b.disabled))
+        const plus = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === '＋')!
+        for (let i = 0; i < 4; i++) { plus.click(); await new Promise((r) => setTimeout(r, 30)) }
+        const save = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ثبت مرجوعی')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      } finally { root.unmount(); host.remove() }
+      eq('یک مرجوعی ثبت شد، نه دو', (await db.returns.toArray()).filter((r) => !r.deleted).length, 1)
+      eq('قرض ما صفر، نه منفی', await owed(), 0)
+
+      await throws('همان چهار جوړه دوباره برنمی‌گردد', () => back(4, 2000))
+      await throws('حتی یک جوړه بیشتر از خرید برنمی‌گردد', () => back(1, 500))
+      eq('قرض ما هنوز صفر', await owed(), 0)
+      eq('گدام: ۱۰ + ۴ − ۴', await stockOf(vId), 10)
+
+      const p2 = await addPurchase(buy(sId, vId, 4, 500, { paid: 0 }))
+      await throws('برگشت به قیمت بالاتر از خرید رد می‌شود', () => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', refId: p2, lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount: 900 }))
+      await throws('نیم جوړه برنمی‌گردد', () => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 0.5, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount: 250 }))
+      await throws('نیم جوړه خریده نمی‌شود', () => addPurchase(buy(sId, vId, 1.5, 500, { paid: 0 })))
+      eq('گدام: ۱۴، بدون نیم جوړه', await stockOf(vId), 14)
+      eq('قرض ما فقط خرید دوم', await owed(), 2000)
+
+      // خرید در راه هنوز در گدام نیست — از آن چیزی به تأمین‌کننده برنمی‌گردد
+      const p3 = await addPurchase(buy(sId, vId, 2, 500, { paid: 0, received: false }))
+      await throws('از خرید در راه مرجوعی ثبت نمی‌شود', () => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', refId: p3, lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount: 1000 }))
+      eq('گدام دست نخورد', await stockOf(vId), 14)
+    }
+  },
   {
     name: 'بازبینی کامل — مرجوعی: بیشتر از فروخته یا بیشتر از پولِ گرفته‌شده پس داده نمی‌شود',
     run: async () => {
