@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
 import { addSale, addSaleWithShipping, type SaleShippingInput } from '../../lib/ops'
-import { calculateShipping } from '../../lib/shipping'
 import { ShippingEditor } from './SaleShipping'
-import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
+import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { lossPerPair } from '../../lib/profit'
 import { flyToCart, saleCheck } from '../../lib/motion'
 import { keypadPress, quickCashOptions } from '../../lib/quickCash'
+import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment, saleSubtotal, stockProblem, type PaymentMode } from '../../lib/checkout'
 import { MoneyKeypad } from '../../components/MoneyKeypad'
 import { RollingNumber } from '../../components/RollingNumber'
 import { useFlipList } from '../../lib/useFlipList'
@@ -106,10 +106,7 @@ export function NewSaleModal({
   for (const line of lines) reserved.set(line.variantId, (reserved.get(line.variantId) ?? 0) + line.qty)
   const selectedQty = (id: number) => reserved.get(id) ?? 0
   const remainingQty = (v: Variant) => Math.max(0, v.stockQty - selectedQty(v.id!))
-  const stockInvalid = !variants || lines.some(line => {
-    const v = variants.find(item => item.id === line.variantId)
-    return !v || !Number.isInteger(line.qty) || line.qty <= 0 || selectedQty(line.variantId) > v.stockQty
-  })
+  const stockInvalid = stockProblem(lines, variants)
   // فروش‌های ۳۰ روز اخیر برای کاشی‌های «پرفروش‌ها»
   const recentSales = useLiveQuery(
     () => db.sales.where('date').aboveOrEqual(Date.now() - 30 * 86400000).filter((s) => !s.deleted).toArray(),
@@ -223,12 +220,8 @@ export function NewSaleModal({
     if (lines.length && startedAt.current === null) { startedAt.current = Date.now(); taps.current = 1 }
     if (!lines.length) startedAt.current = null
   }, [lines.length])
-  const subtotal = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
-  const discount = Math.min(parseNum(discountStr), subtotal)
-  const total = subtotal - discount
-  const paid = paidTouched ? parseNum(paidStr) : total
-  const remainder = total - paid
-  const paymentMode = paidTouched && !paidStr.trim() ? 'mixed' : !paidTouched || paid >= total ? 'cash' : paid === 0 ? 'credit' : 'mixed'
+  const subtotal = saleSubtotal(lines)
+  const { discount, total, paid, remainder, mode: paymentMode } = readPayment({ subtotal, discountStr, paidStr, paidTouched })
 
   useEffect(() => {
     if (!embedded || completedRef.current) return
@@ -293,35 +286,14 @@ export function NewSaleModal({
 
   async function save(cashOnly = false) {
     if (pendingRef.current) return
-    const paidNow = cashOnly ? total : paid
-    const remainderNow = total - paidNow
-    if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
-    if (shipping && (saleType !== 'wholesale' || !customerId)) return setError('کرایه به مشتری عمده مربوط است؛ مشتری را انتخاب کنید یا کرایه را بردارید')
-    if (shipping) {
-      try { calculateShipping(shipping) }
-      catch { return setError('معلومات کرایه درست نیست؛ کرایه را باز و اصلاح کنید') }
-    }
-    if (stockInvalid) return setError('موجودی بعضی سایزها کافی نیست یا تعداد درست نیست؛ سبد را اصلاح کنید')
-    if (!cashOnly && paidTouched && !paidStr.trim()) return setError('مبلغ نقد دریافتی را وارد کنید؛ اگر هیچ نقد نگرفته‌اید، گزینهٔ قرض را انتخاب کنید.')
-    if (remainderNow > 0 && !customerId) {
-      setShowCust(true)
-      return setError('برای فروش قرضی باید مشتری انتخاب شود')
+    const form = { lines, variants, saleType, customerId, shipping, subtotal, discountStr, paidStr, paidTouched, cashOnly }
+    const refusal = checkoutRefusal(form)
+    if (refusal) {
+      if (refusal.needsCustomer) setShowCust(true)
+      return setError(refusal.message)
     }
     const customer = customers?.find((c) => c.id === customerId)
-    const sale: Sale = {
-      date: Date.now(),
-      customerId: customerId || undefined,
-      customerName: customer?.name,
-      saleType,
-      lines,
-      total,
-      // پول اضافه همان لحظه به مشتری پس داده می‌شود؛ صندوق فقط مجموع را می‌گیرد
-      paid: Math.min(paidNow, total),
-      discount: discount > 0 ? discount : undefined,
-      promiseDate: remainderNow > 0 && promise ? fromDateInput(promise) : undefined,
-      // صفحه فقط برای فروش قرضی معنا دارد — فروش نقدی در دفتر قرض نمی‌نشیند
-      bookPage: remainderNow > 0 && bookPage.trim() ? bookPage.trim() : undefined
-    }
+    const sale: Sale = buildSale(form, { customer, promise, bookPage })
     pendingRef.current = true
     setPending(true)
     setError('')
@@ -697,9 +669,10 @@ export function NewSaleModal({
           </button>
         )}
         <div role="group" aria-label="روش پرداخت" className="segmented my-4">
-          {(['cash', 'credit', 'mixed'] as const).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} onClick={() => {
-            setPaidTouched(mode !== 'cash')
-            setPaidStr(mode === 'credit' ? '0' : '')
+          {(['cash', 'credit', 'mixed'] as PaymentMode[]).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} onClick={() => {
+            const fields = paymentFieldsFor(mode)
+            setPaidTouched(fields.paidTouched)
+            setPaidStr(fields.paidStr)
             if (mode !== 'cash') setShowCust(true)
           }}>{mode === 'cash' ? 'نقد' : mode === 'credit' ? 'قرض' : 'نقد و قرض'}</button>)}
         </div>

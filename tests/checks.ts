@@ -113,6 +113,8 @@ import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHist
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
 import { saleCustomerCredit, summarizeSales } from '../src/lib/salesFigures'
+import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment } from '../src/lib/checkout'
+import { saleDraftTotal } from '../src/lib/saleDrafts'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -5405,6 +5407,65 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('قرض مشتری فقط ۱٬۳۰۰ احمد است', f.credit, 1300)
       eq('جوړه: ۱ + ۲ + ۲', f.pairs, 5)
       eq('قرض ثبت‌شدهٔ احمد با همین عدد برابر است', (await db.customers.get(customerId))!.balance, f.credit)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'میز فروش — قواعد پرداخت و ثبت بدون صفحه',
+    run: async () => {
+      const variantId = await makeVariant({ purchasePrice: 500, retailPrice: 900 })
+      await setOpeningStock(variantId, 5, 'اسپرتکس')
+      const variants = await db.variants.toArray()
+      const line = (qty: number) => ({ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 900 })
+      const base = { lines: [line(2)], variants, saleType: 'retail' as const, customerId: '' as number | '', subtotal: 1800, discountStr: '', paidStr: '', paidTouched: false }
+
+      // خواندن پول: دست‌نخورده = پوره؛ صفر = قرض؛ بین این دو = نیمه‌نقد؛ خالیِ لمس‌شده = نیمه‌کاره
+      const mode = (over: Partial<typeof base>) => readPayment({ ...base, ...over }).mode
+      is('دست‌نخورده نقد است', mode({}), 'cash')
+      is('صفر قرض است', mode({ paidTouched: true, paidStr: '0' }), 'credit')
+      is('۵۰۰ از ۱٬۸۰۰ نیمه‌نقد است', mode({ paidTouched: true, paidStr: '500' }), 'mixed')
+      is('بیشتر از مجموع هم نقد است (باقی پس داده می‌شود)', mode({ paidTouched: true, paidStr: '2000' }), 'cash')
+      is('خالیِ لمس‌شده نیمه‌کاره است', mode({ paidTouched: true, paidStr: ' ' }), 'mixed')
+      for (const m of ['cash', 'credit'] as const) is(`دکمهٔ «${m}» همان حالت را می‌خواند`, mode({ ...paymentFieldsFor(m) }), m)
+
+      // تخفیف: نه منفی (قیمت را بالا می‌برد) و نه بیشتر از اجناس
+      eq('تخفیف ۳۰۰', readPayment({ ...base, discountStr: '300' }).total, 1500)
+      eq('تخفیف منفی قیمت را بالا نمی‌برد', readPayment({ ...base, discountStr: '-300' }).total, 1800)
+      eq('تخفیف بیشتر از اجناس مجموع را صفر می‌کند', readPayment({ ...base, discountStr: '99999' }).total, 0)
+      eq('مجموع پیش‌نویس همان عدد را می‌دهد', saleDraftTotal({ lines: [line(2)], discountStr: '300' }), 1500)
+
+      // رد کردن: به ترتیبی که فروشنده باید درست کند
+      is('سبد خالی', checkoutRefusal({ ...base, lines: [], subtotal: 0 })?.message, 'حداقل یک جنس انتخاب کنید')
+      is('بیشتر از گدام', checkoutRefusal({ ...base, lines: [line(6)] })?.message?.slice(0, 11), 'موجودی بعضی')
+      is('نیم‌جوړه', checkoutRefusal({ ...base, lines: [line(1.5)] })?.message?.slice(0, 11), 'موجودی بعضی')
+      is('دو خط یک سایز روی هم از گدام بیشتر می‌شود', checkoutRefusal({ ...base, lines: [line(3), line(3)] })?.message?.slice(0, 11), 'موجودی بعضی')
+      is('خالیِ لمس‌شده رد می‌شود', checkoutRefusal({ ...base, paidTouched: true, paidStr: '' })?.message?.slice(0, 12), 'مبلغ نقد دری')
+      is('«نقد» به خانهٔ خالی کاری ندارد', checkoutRefusal({ ...base, paidTouched: true, paidStr: '', cashOnly: true }), null)
+      const credit = checkoutRefusal({ ...base, paidTouched: true, paidStr: '0' })
+      is('قرض بدون مشتری رد می‌شود و خانهٔ مشتری را می‌خواهد', credit?.needsCustomer, true)
+      is('قرض با مشتری قبول است', checkoutRefusal({ ...base, paidTouched: true, paidStr: '0', customerId: 7 }), null)
+      is('کرایه برای پرچون رد می‌شود', checkoutRefusal({ ...base, customerId: 7, shipping: { total: 100, customerShare: 100, received: 0 } as never })?.message?.slice(0, 8), 'کرایه به')
+
+      // ساختن سند: پولِ اضافه نگه داشته نمی‌شود؛ وعده و صفحه فقط برای قرض
+      const cash = buildSale({ ...base, paidTouched: true, paidStr: '2000' }, { promise: '2026-10-10', bookPage: '12' })
+      eq('پول اضافه: paid = مجموع', cash.paid, 1800)
+      is('فروش نقد وعده ندارد', cash.promiseDate, undefined)
+      is('فروش نقد صفحه ندارد', cash.bookPage, undefined)
+      const part = buildSale({ ...base, customerId: 7, paidTouched: true, paidStr: '500', discountStr: '300' }, { customer: { id: 7, name: 'احمد' }, promise: '2026-10-10', bookPage: ' 12 ' })
+      eq('نیمه‌نقد: مجموع بعد از تخفیف', part.total, 1500)
+      eq('نیمه‌نقد: paid', part.paid, 500)
+      eq('تخفیف در سند', part.discount ?? 0, 300)
+      is('صفحه بی‌فاصله', part.bookPage, '12')
+      is('وعده ثبت شد', typeof part.promiseDate, 'number')
+      const viaButton = buildSale({ ...base, paidTouched: true, paidStr: '0', cashOnly: true }, { promise: '', bookPage: '' })
+      eq('«نقد» همیشه پوره می‌گیرد', viaButton.paid, 1800)
+
+      // و سندِ ساخته‌شده واقعاً ثبت می‌شود: گدام و صندوق درست، قرض احمد ۱٬۰۰۰
+      const customerId = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, createdAt: Date.now() })) as number
+      const saleId = await addSale(buildSale({ ...base, customerId, paidTouched: true, paidStr: '500' }, { customer: { id: customerId, name: 'احمد' }, promise: '', bookPage: '' }))
+      eq('گدام ۲ کم شد', await stockOf(variantId), 3)
+      eq('قرض احمد', (await db.customers.get(customerId))!.balance, 1300)
+      is('فروش ثبت شد', typeof saleId, 'number')
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   }

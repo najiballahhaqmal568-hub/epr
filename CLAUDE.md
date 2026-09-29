@@ -107,6 +107,13 @@ reports all import it. Never write `total - saleCashPaid(sale)` on a screen: for
 or expense creditor the till gets nothing (`saleCashPaid` = 0) but nobody owes the shop either, so that formula
 showed the whole total as customer debt. `saleCreditAmount` (db.ts) stays the one rule underneath.
 
+### The sale desk's rules are in `src/lib/checkout.ts`
+
+What the customer owes after a discount, how the money handed over reads (cash / credit / part), when a sale is
+refused and what the Sale document says are `readPayment`, `checkoutRefusal` and `buildSale` — the screen only
+collects the form. `ops.addSale` stays the authority that writes. A new way to sell (a button, a barcode) calls
+these; it must not re-derive `paid` / `remainder` in a component. A discount is never negative.
+
 ### Change is never kept in the till
 
 A customer who hands over 1,000 for a 900 sale gets 100 back — the till gains 900. The sale screen
@@ -138,7 +145,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1383 checks in 143 scenarios
+npm test          # tests/checks.ts — currently 1416 checks in 144 scenarios
 ```
 
 ```bash
