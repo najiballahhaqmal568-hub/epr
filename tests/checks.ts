@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, accessFlags, syncFlags, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, syncFlags, saleCashPaid, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -112,6 +112,7 @@ import { ordinaryCustomerCollections } from '../src/lib/directTradeReports'
 import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
+import { saleCustomerCredit, summarizeSales } from '../src/lib/salesFigures'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -5373,6 +5374,37 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // قرض نهایی: ۱٬۰۰۰ + ۱٬۸۰۰ + ۵۰۰ − ۷۰۰
       eq('قرض نهایی دفتر', rows[rows.length - 1].balance, 2600)
       eq('با عدد ذخیره‌شده هم برابر است', (await db.customers.get(cId))!.balance, 2600)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'ارقام فروش — قرض، نقد و جوړه در همهٔ صفحه‌ها یک جواب دارد',
+    run: async () => {
+      const variantId = await makeVariant({ purchasePrice: 500, retailPrice: 900 })
+      await setOpeningStock(variantId, 10, 'اسپرتکس')
+      const customerId = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, createdAt: Date.now() })) as number
+      const lenderId = (await db.suppliers.add({ name: 'حاجی عبدالکریم', balance: 0, kind: 'lender' })) as number
+      await addLoan(lenderId, 'حاجی عبدالکریم', 5000, Date.now(), 'قرض پیشین', 'opening')
+      const line = (qty: number) => ({ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 900 })
+
+      // ۱) نقد کامل، ۲) نیمه‌نقد به مشتری، ۳) کفش بابت تسویهٔ قرض‌دهنده (پول نمی‌آید و کسی قرض نیست)
+      await addSale({ date: Date.now(), saleType: 'retail', lines: [line(1)], total: 900, paid: 900 })
+      await addSale({ date: Date.now(), customerId, customerName: 'احمد', saleType: 'retail', lines: [line(2)], total: 1800, paid: 500 })
+      await giveGoodsToLender(lenderId, 'حاجی عبدالکریم', [line(2)], Date.now(), 'بابت قسط', 'goodsSettlement')
+      const sales = await db.sales.filter((x) => !x.deleted).toArray()
+      const settlement = sales.find((x) => x.lenderAction)!
+
+      // نشان می‌دهد که فرمول قدیمی صفحه‌ها (کل − نقد) برای فروش تسویه عدد غلط می‌داد
+      eq('فرمول قدیمی برای فروش تسویه «قرض ۱٬۸۰۰» نشان می‌داد', settlement.total - saleCashPaid(settlement), 1800)
+      eq('قرض واقعی مشتری برای فروش تسویه صفر است', saleCustomerCredit(settlement), 0)
+
+      const f = summarizeSales(sales)
+      eq('تعداد فروش', f.count, 3)
+      eq('مجموع فروش', f.total, 4500)
+      eq('نقد گرفته‌شده: ۹۰۰ + ۵۰۰، نه کفش تسویه', f.cash, 1400)
+      eq('قرض مشتری فقط ۱٬۳۰۰ احمد است', f.credit, 1300)
+      eq('جوړه: ۱ + ۲ + ۲', f.pairs, 5)
+      eq('قرض ثبت‌شدهٔ احمد با همین عدد برابر است', (await db.customers.get(customerId))!.balance, f.credit)
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   }

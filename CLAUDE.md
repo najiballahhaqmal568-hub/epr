@@ -99,6 +99,14 @@ products) must write **two adjustment documents** — negative at the source,
 positive at the destination. Otherwise `runIntegrityCheck()` will flag the
 result and a second device will rebuild different numbers.
 
+### Sales figures are read from one place
+
+Cash, customer credit and pairs of a sale are read through `src/lib/salesFigures.ts` (`saleCashReceived`,
+`saleCustomerCredit`, `salePairs`, `summarizeSales`) — home, «بستن روز», today's list, the sales stats and the
+reports all import it. Never write `total - saleCashPaid(sale)` on a screen: for a shoe settlement to a lender
+or expense creditor the till gets nothing (`saleCashPaid` = 0) but nobody owes the shop either, so that formula
+showed the whole total as customer debt. `saleCreditAmount` (db.ts) stays the one rule underneath.
+
 ### Change is never kept in the till
 
 A customer who hands over 1,000 for a 900 sale gets 100 back — the till gains 900. The sale screen
@@ -130,7 +138,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1374 checks in 142 scenarios
+npm test          # tests/checks.ts — currently 1383 checks in 143 scenarios
 ```
 
 ```bash

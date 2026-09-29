@@ -1,4 +1,5 @@
-import { accessFlags, saleCashPaid, type Sale } from '../../db'
+import { accessFlags, type Sale } from '../../db'
+import { salePairs, saleCustomerCredit } from '../../lib/salesFigures'
 import { commercialSaleLines } from '../../lib/commercialLines'
 import { fmtClock, fmtMoney, fmtNum } from '../../lib/format'
 
@@ -17,10 +18,10 @@ export default function RecentSales({ sales, goTo }: { sales: Sale[]; goTo: (tar
         <div className="surface overflow-hidden">
           {rows.map((sale) => {
             const lines = commercialSaleLines(sale)
-            const pairs = lines.reduce((sum, l) => sum + l.qty, 0)
+            const pairs = salePairs(sale)
             const first = lines[0]
             const more = lines.length > 1 ? ` و ${fmtNum(lines.length - 1)} جنس دیگر` : ''
-            const credit = sale.directTrade ? 0 : sale.total - saleCashPaid(sale)
+            const credit = saleCustomerCredit(sale)
             const name = sale.customerName || 'مشتری نقدی'
             return (
               <button

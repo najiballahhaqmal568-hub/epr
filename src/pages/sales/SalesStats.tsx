@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, saleCashPaid, saleCreditAmount } from '../../db'
+import { db } from '../../db'
+import { summarizeSales } from '../../lib/salesFigures'
 import { fmtNum, fmtMoney } from '../../lib/format'
 import { Card } from '../../components/ui'
 import { STATS_PERIODS, periodBounds, periodLabel, type StatsPeriod } from '../../lib/period'
@@ -41,11 +42,8 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
 
   const confirmedSales = sales?.filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))
   const total = confirmedSales?.reduce((s, x) => s + x.total, 0) ?? 0
-  const cash = confirmedSales?.filter(s => !s.directTrade).reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
-  const directTotal = confirmedSales?.filter(s => Boolean(s.directTrade)).reduce((s, x) => s + x.total, 0) ?? 0
-  const pairs = confirmedSales?.reduce((s, x) => s + commercialSaleLines(x).reduce((a, l) => a + l.qty, 0), 0) ?? 0
-  // تسویه با کفش فروش است و مفاد دارد، اما قرض مشتری نیست.
-  const credit = confirmedSales?.filter(s => !s.directTrade).reduce((sum, sale) => sum + saleCreditAmount(sale), 0) ?? 0
+  const figures = summarizeSales(confirmedSales ?? [])
+  const { cash, directTotal, pairs, credit } = figures
 
   const soldBy = new Map<string, { qty: number; revenue: number }>()
   confirmedSales?.forEach((s) =>
