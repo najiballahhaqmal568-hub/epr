@@ -3,8 +3,8 @@ import ExpenseStats from './expenses/ExpenseStats'
 import ExpenseList from './expenses/ExpenseList'
 import CashView from './expenses/CashView'
 
-export default function Expenses({ onBack, openNew = false }: { onBack?: () => void; openNew?: boolean }) {
-  const [view, setView] = useState<'expenses' | 'cash' | 'stats'>('expenses')
+export default function Expenses({ onBack, openNew = false, start = 'expenses' }: { onBack?: () => void; openNew?: boolean; start?: 'expenses' | 'cash' | 'reconcile' }) {
+  const [view, setView] = useState<'expenses' | 'cash' | 'stats'>(start === 'expenses' ? 'expenses' : 'cash')
   return (
     <div className="p-4">
       <div className="page-heading">
@@ -17,7 +17,7 @@ export default function Expenses({ onBack, openNew = false }: { onBack?: () => v
       {view === 'expenses' ? (
         <ExpenseList openNew={openNew} onOpenCash={() => setView('cash')} onOpenStats={() => setView('stats')} />
       ) : view === 'cash' ? (
-        <CashView />
+        <CashView startReconcile={start === 'reconcile'} />
       ) : (
         <ExpenseStats />
       )}

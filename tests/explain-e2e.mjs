@@ -51,10 +51,12 @@ try {
     ['طلب از مشتریان', 'طلب از مشتریان از کجا آمد', /احمد[\s\S]*۳٬۵۰۰ ؋/],
     ['صندوق', 'صندوق از کجا آمد', /خانه[\s\S]*۵٬۰۰۰ ؋/],
     ['موجودی گدام', 'موجودی گدام از کجا آمد', /کوهستان[\s\S]*۱۸ جوړه[\s\S]*بامیان[\s\S]*۳ جوړه/],
-    ['قرض ما', 'قرض ما از کجا آمد', /قرض از اشخاص: ۳۰٬۰۰۰ ؋[\s\S]*حاجی/]
+    ['قرض ما — تأمین‌کنندگان', 'قرض ما از کجا آمد', /قرض از اشخاص: ۳۰٬۰۰۰ ؋[\s\S]*حاجی/],
+    ['قرض ما — اشخاص', 'قرض از اشخاص از کجا آمد', /حاجی/]
   ]) {
     const tile = page.getByRole('button').filter({ hasText: tileLabel }).last()
-    const tileNumber = digits((await tile.innerText()).replace(tileLabel, ''))
+    // the amount is the last number in the tile (a count such as «۱ مشتری» may sit under the name)
+    const tileNumber = digits(((await tile.innerText()).replace(tileLabel, '').match(/[۰-۹٬]+/g) ?? []).at(-1) ?? '')
     await tile.click()
     const sheet = page.getByRole('dialog', { name: title })
     await sheet.getByText(/مجموع/).first().waitFor()
@@ -62,7 +64,7 @@ try {
     const total = digits(text.match(/مجموع[^:]*: ([^\n—·]+)/)[1])
     assert.equal(total, tileNumber, `${tileLabel}: breakdown total equals the tile`)
     assert.match(text, extra)
-    await page.screenshot({ path: `${shots}/${['receivables', 'cash', 'stock', 'payables'][['طلب از مشتریان', 'صندوق', 'موجودی گدام', 'قرض ما'].indexOf(tileLabel)]}-390.png`, fullPage: true })
+    await page.screenshot({ path: `${shots}/${['receivables', 'cash', 'stock', 'payables', 'loans'][['طلب از مشتریان', 'صندوق', 'موجودی گدام', 'قرض ما — تأمین‌کنندگان', 'قرض ما — اشخاص'].indexOf(tileLabel)]}-390.png`, fullPage: true })
     await page.keyboard.press('Escape')
     await sheet.waitFor({ state: 'detached' })
   }

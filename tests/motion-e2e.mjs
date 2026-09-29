@@ -21,7 +21,7 @@ try {
   })
   await page.getByRole('heading', { name: 'خانه' }).waitFor()
   const card = page.getByRole('button', { name: /فروش امروز .* از کجا آمد/ })
-  await card.getByText('۹۰۰ ؋', { exact: true }).waitFor()
+  await card.getByText('۹۰۰ ؋', { exact: true }).first().waitFor()
 
   // 1) Rolling number: record the text on every frame while it changes 900 → 2,700.
   const seen = await page.evaluate(async () => {
@@ -85,9 +85,9 @@ try {
   // 5) Reduced motion: numbers still correct, no rolled digits.
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.locator('nav').getByRole('button', { name: 'خانه', exact: true }).click()
-  await card.getByText('۲٬۷۰۰ ؋', { exact: true }).waitFor()
+  await card.getByText('۲٬۷۰۰ ؋', { exact: true }).first().waitFor()
   await page.evaluate(() => window.sell(1))
-  await card.getByText('۳٬۶۰۰ ؋', { exact: true }).waitFor()
+  await card.getByText('۳٬۶۰۰ ؋', { exact: true }).first().waitFor()
   const anims = await page.evaluate(() => document.getAnimations().filter(a => a.playState === 'running' && a.effect?.target?.closest?.('.explain-card')).length)
   assert.equal(anims, 0, 'no running animation under reduced motion')
   assert.deepEqual(errors, [])

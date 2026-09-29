@@ -82,6 +82,29 @@ columns line up. The money amount is the largest thing on its card. Font size is
 - Speed numbers (`lib/saleSpeed.ts`), targets, the first-day guide and display modes live in per-device
   settings and are never part of the accounts.
 
+## Home screen (`pages/Dashboard.tsx` + `pages/dashboard/*`)
+
+The owner opens the app standing at the counter, so the page answers three questions in this order:
+*how is the month*, *what do I do now*, *where is my money*.
+
+- **`HomeHero`** — the dark lapis card. Always the month («▲ مفاد» / «▼ زیان») with two bars (sales profit vs
+  expenses on one scale) and the same `expenseAlert` text the reports use. Staff see only today's sales. It
+  never disappears at any hour: a hidden number is worse than an extra one.
+- **`TimePrompt`** — a separate light card with a gold border, only in the morning («صندوق را بشمارید» with the
+  till figure the app expects; «بعداً» is remembered for the day in the `homeMorningSkip` setting) and in the
+  evening («روز را ببندید»). It states one fact and offers one button.
+- **Quick actions** — دریافت پول (picks a customer, then opens the account with the payment form open),
+  مصرف, خرید, شمارش نقد (opens the count window itself). Hidden for the read-only role.
+- **«پول شما کجاست»** (`MoneyMap`) — cash, receivables, stock and debts as rows; every bar shares ONE scale (the
+  largest amount). Each row opens its own «از کجا آمد» sheet whose total equals the row. While the numbers
+  load it shows a skeleton, never «۰».
+- **«فروش‌های آخر»** — the last three sales today; a tap opens that sale's document (receipt, return,
+  exchange) through `goTo('sale:<id>')`.
+- **Navigation** — five tabs: خانه · حساب‌ها · **فروش** (raised circle, centre) · گدام · بیشتر. On wide screens
+  the same five are a side column and «فروش» becomes a filled row.
+- Colour on the home is meaning, not decoration: lapis = the month card, gold = the one action to take,
+  blue = money owed to us, amber = money we owe, red = loss.
+
 ## Checks
 
 | Test | Proves |
@@ -92,3 +115,4 @@ columns line up. The money amount is the largest thing on its card. Font size is
 | `tests/sale-design-e2e.mjs` | size grid, keypad, quick cash, change not kept, speed card |
 | `tests/documents-e2e.mjs` | who saved it, sale/expense history, branded receipt |
 | `tests/first-day-e2e.mjs` | guide ticks from data, empty screens act |
+| `tests/home-e2e.mjs` | month card and bars, morning/evening card, money map on one scale, recent sale opens, 5-tab nav, receive money, staff view |

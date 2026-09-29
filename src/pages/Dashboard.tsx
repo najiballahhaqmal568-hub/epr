@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { accessFlags, db, saleCashPaid, type Sale, type Variant } from '../db'
+import { accessFlags, db, saleCashPaid, type Customer, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
-import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
+import { addCalendarDays, fmtDayLabel, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
 import { daysLeftInMonth, expenseAlert, profitSummary } from '../lib/profit'
 import MonthProfitModal from './dashboard/MonthProfitModal'
 import DailyCloseModal from './dashboard/DailyCloseModal'
@@ -12,13 +12,18 @@ import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
 import { returnProfit } from '../lib/returns'
-import { Icon } from '../components/Icon'
+import { Icon, type IconName } from '../components/Icon'
 import { RollingNumber } from '../components/RollingNumber'
 import { celebrate } from '../lib/motion'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import ExplainModal, { type ExplainKind } from './dashboard/ExplainModal'
 import TodaySalesModal from './dashboard/TodaySalesModal'
 import FirstDayGuide from './dashboard/FirstDayGuide'
+import HomeHero, { TimePrompt, type HeroState } from './dashboard/HomeHero'
+import MoneyMap from './dashboard/MoneyMap'
+import RecentSales from './dashboard/RecentSales'
+import ReceivePicker from './dashboard/ReceivePicker'
+import CustomerDetail from './customers/CustomerDetail'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -49,18 +54,21 @@ function SyncChip() {
   )
 }
 
+const ACTIONS: { key: string; label: string; aria: string; icon: IconName; tint: string }[] = [
+  { key: 'receive', label: 'دریافت پول', aria: 'دریافت پول از مشتری', icon: 'wallet', tint: 'bg-teal-50 text-teal-700' },
+  { key: 'expense', label: 'مصرف', aria: 'مصرف جدید', icon: 'receipt', tint: 'bg-red-50 text-red-700' },
+  { key: 'purchase', label: 'خرید', aria: 'خرید جدید', icon: 'stock', tint: 'bg-blue-50 text-blue-700' },
+  { key: 'count', label: 'شمارش نقد', aria: 'شمارش نقد صندوق', icon: 'coins', tint: 'bg-amber-100 text-amber-800' }
+]
+
 export default function Dashboard({
   goTo,
   isStaff,
-  pendingExpenseCount,
-  debtCount,
-  debtTotal
+  pendingExpenseCount
 }: {
   goTo: (tab: string) => void
   isStaff?: boolean
   pendingExpenseCount: number
-  debtCount: number
-  debtTotal: number
 }) {
   const dayStart = startOfDay()
   const directReview = useDirectTradeReview()
@@ -76,7 +84,9 @@ export default function Dashboard({
   const variants = useLiveQuery(() => db.variants.filter((row) => !row.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((row) => !row.deleted).toArray(), [])
   const customers = useLiveQuery(() => db.customers.filter((row) => !row.deleted).toArray(), [])
-  const payments = useLiveQuery(() => db.payments.where('date').aboveOrEqual(dayStart).filter(row => !row.deleted).toArray(), [dayStart])
+  const suppliers = useLiveQuery(() => db.suppliers.filter((row) => !row.deleted).toArray(), [])
+  // امروز صندوق شمرده شده؟ (برای کارت صبح)
+  const countedToday = useLiveQuery(() => db.reconciliations.where('date').aboveOrEqual(dayStart).filter((row) => !row.deleted).count(), [dayStart])
   const worth = useLiveQuery(() => netWorth(), [])
   // مفاد خالص این ماه و همین وقت ماه گذشته — همان فورمول راپورها (lib/profit.ts)
   const monthStart = startOfMonth()
@@ -105,7 +115,7 @@ export default function Dashboard({
   const todaySales = (sales ?? []).filter(sale => (!sale.directTrade || directReview.readyTradeUuids.has(sale.directTrade.uuid)) && (!sale.goodsReceiptChild || receiptReview.readyReceiptUuids.has(sale.goodsReceiptChild.receiptUuid)))
   const todayTotal = todaySales.reduce((sum, row) => sum + row.total, 0)
   const todayCash = todaySales.filter(row => !row.directTrade).reduce((sum, row) => sum + saleCashPaid(row), 0)
-  const todayDirectReceipts = payments?.filter(row => row.directPayment?.route === 'customerCash').reduce((sum, row) => sum + row.amount, 0) ?? 0
+  const todayPairs = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + line.qty, 0), 0)
   const todayProfit = grossProfit(todaySales) - returnedProfit
   // Same numbers as todayProfit, split into steps for «از کجا آمد».
   const goodsValue = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + line.unitPrice * line.qty, 0), 0)
@@ -113,11 +123,14 @@ export default function Dashboard({
   const discounts = todaySales.reduce((sum, sale) => sum + (sale.discount ?? 0), 0)
   const [explain, setExplain] = useState<ExplainKind | 'sales' | 'month' | null>(null)
   const [closingDay, setClosingDay] = useState<number | null>(null)
-  // تنظیمات همین دستگاه: آخرین روز بسته‌شده و هدف مفاد ماهانه
+  const [picking, setPicking] = useState(false)
+  const [receiving, setReceiving] = useState<Customer | null>(null)
+  // تنظیمات همین دستگاه: آخرین روز بسته‌شده، هدف مفاد ماهانه و «بعداً»ی کارت صبح
   const prefs = useLiveQuery(async () => ({
     dayClosed: Number((await db.settings.get('dayClosed'))?.value ?? 0),
     target: Number((await db.settings.get('monthlyProfitTarget'))?.value ?? 0),
-    celebrated: Number((await db.settings.get('targetCelebrated'))?.value ?? 0)
+    celebrated: Number((await db.settings.get('targetCelebrated'))?.value ?? 0),
+    morningSkip: Number((await db.settings.get('homeMorningSkip'))?.value ?? 0)
   }), [])
   const nowTs = Date.now()
   const prevEnd = Math.min(monthStart, prevStart + (nowTs - monthStart))
@@ -131,9 +144,6 @@ export default function Dashboard({
   const monthAlert = !isStaff && month ? expenseAlert(thisMonth, lastMonthSoFar, fmtMoney) : null
   const monthChange = thisMonth.netProfit - lastMonthSoFar.netProfit
   const lowStock = reorderProducts(products ?? [], variants ?? [])
-  const overdueCount = (customers ?? []).filter(
-    (row) => row.balance > 0 && Boolean(row.promiseDate) && row.promiseDate! < dayStart
-  ).length
   // «بستن روز»: شب‌ها امروز؛ صبح‌ها اگر دیروز فروش داشت و بسته نشد، دیروز
   const hour = new Date().getHours()
   const yesterday = addCalendarDays(dayStart, -1)
@@ -151,133 +161,137 @@ export default function Dashboard({
     void db.settings.put({ key: 'targetCelebrated', value: monthStart })
     if (monthCard.current) celebrate(monthCard.current)
   }, [reached, prefs, monthStart])
-  const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0 || Boolean(monthAlert) || closeDay !== null
+
+  const canAct = !accessFlags.readOnly
+  // کدام خبر بالای صفحه بیاید: شب ← بستن روز، صبح ← شمارش صندوق، وگرنه حساب این ماه.
+  // کارگر مفاد نمی‌بیند؛ تا حساب ماه نخوانده، جای خالیِ خاکستری می‌آید نه «۰».
+  const evening = canAct && closeDay === dayStart
+  const morning = canAct && !isStaff && !evening && hour < 12 && countedToday === 0 && Boolean(prefs) && (prefs?.morningSkip ?? 0) < dayStart && worth !== undefined
+  const heroState: HeroState = isStaff ? 'today' : !month || !prefs ? 'loading' : 'month'
+  const yesterdayPending = closeDay !== null && closeDay !== dayStart
+  const debtors = (customers ?? []).filter((c) => c.balance > 0).length
+  const owedSuppliers = (suppliers ?? []).filter((x) => x.kind !== 'partner' && x.kind !== 'lender' && x.balance > 0).length
+  const owedLenders = (suppliers ?? []).filter((x) => x.kind === 'lender' && x.balance > 0).length
+  const actionFor = (key: string) => () => {
+    if (key === 'receive') setPicking(true)
+    else if (key === 'expense') goTo('expenses-new')
+    else if (key === 'purchase') goTo('purchases-new')
+    else goTo('cash-count')
+  }
 
   return (
     <div className="p-4">
-      <div className="page-heading">
-        <div><h1>خانه</h1><p>خلاصهٔ امروز دکان</p></div>
+      <header className="mb-4 flex items-center justify-between gap-3">
+        <h1 className="sr-only">خانه</h1>
+        <p className="text-[0.9375rem] font-bold text-slate-600">{fmtDayLabel(Date.now())}</p>
         <SyncChip />
-      </div>
+      </header>
       {!isStaff && !accessFlags.readOnly && <FirstDayGuide goTo={goTo} />}
       <DirectTradeWarning review={directReview} />
       <CustomerGoodsReceiptWarning review={receiptReview} />
 
-      <button type="button" aria-label={`فروش امروز ${fmtMoney(todayTotal)} — از کجا آمد`} onClick={() => setExplain('sales')} className="surface explain-card mb-4 block w-full p-5 text-right">
-        <p className="text-sm text-slate-500">فروش امروز <span className="explain-hint">از کجا آمد ←</span></p>
-        <p className="mt-2 text-4xl font-bold text-slate-900"><RollingNumber value={todayTotal} /></p>
-        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
-          <span>{fmtNum(todaySales.length)} فروش</span>
-          <span>نقد فروش عادی: {fmtMoney(todayCash)}</span>
-          <span>رسید مستقیم: {fmtMoney(todayDirectReceipts)}</span>
-          {!isStaff && <span>مفاد: {fmtMoney(todayProfit)}</span>}
+      {(morning || evening) && (
+        <TimePrompt
+          kind={morning ? 'morning' : 'evening'}
+          cash={worth?.cash ?? 0}
+          noSalesYet={todaySales.length === 0}
+          yesterdayPending={yesterdayPending}
+          onCount={() => goTo('cash-count')}
+          onSkip={() => void db.settings.put({ key: 'homeMorningSkip', value: dayStart })}
+          onCloseDay={() => { if (closeDay !== null) setClosingDay(closeDay) }}
+          onOpenSales={() => setExplain('sales')}
+          onYesterday={() => { if (closeDay !== null) setClosingDay(closeDay) }}
+        />
+      )}
+
+      <HomeHero
+        state={heroState}
+        canAct={canAct}
+        todayTotal={todayTotal}
+        todayCount={todaySales.length}
+        todayCash={todayCash}
+        monthNet={thisMonth.netProfit}
+        monthProfit={thisMonth.grossProfit}
+        monthExpenses={thisMonth.businessExpenses}
+        monthChange={monthChange}
+        topCategory={thisMonth.expenseCategories[0]}
+        alert={monthAlert}
+        pendingExpenses={pendingExpenseCount}
+        target={target}
+        targetPct={targetPct}
+        reached={reached}
+        daysLeft={daysLeftInMonth()}
+        monthRef={monthCard}
+        onOpenMonth={() => setExplain('month')}
+        onOpenSales={() => setExplain('sales')}
+        goTo={goTo}
+      />
+
+      {canAct && (
+        <div role="group" aria-label="کارهای سریع" className="mb-4 grid grid-cols-4 gap-2">
+          {ACTIONS.map((a) => (
+            <button key={a.key} type="button" aria-label={a.aria} onClick={actionFor(a.key)} className="flex min-h-[94px] flex-col items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white px-1 py-2 text-[0.8125rem] font-extrabold text-slate-800">
+              <span className={`flex h-[46px] w-[46px] items-center justify-center rounded-2xl ${a.tint}`}><Icon name={a.icon} /></span>
+              {a.label}
+            </button>
+          ))}
         </div>
-      </button>
+      )}
 
-      {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} ref={monthCard} className="surface explain-card mb-4 block w-full p-5 text-right">
-        <p className="text-sm text-slate-500">مفاد خالص این ماه <span className="text-xs">(از {fmtDateShort(monthStart)})</span> <span className="explain-hint">از کجا آمد ←</span></p>
-        <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}><RollingNumber value={thisMonth.netProfit} /></p>
-        <p className="mt-2 text-sm text-slate-600">مفاد فروش {fmtMoney(thisMonth.grossProfit)} − مصارف {fmtMoney(thisMonth.businessExpenses)}</p>
-        <p className={`mt-1 text-sm font-bold ${monthChange >= 0 ? 'text-teal-700' : 'text-red-700'}`}>
-          {monthChange >= 0 ? '▲' : '▼'} {fmtMoney(Math.abs(monthChange))} {monthChange >= 0 ? 'بیشتر' : 'کمتر'} از همین وقت ماه گذشته
-        </p>
-        {target > 0 && <span className="mt-3 block" aria-label="هدف ماه">
-          <span className="profit-target-bar"><span style={{ width: `${Math.min(100, targetPct)}%` }} /></span>
-          <span className="mt-1 block text-xs text-slate-600">هدف {fmtMoney(target)} — {fmtNum(targetPct)}٪ رسیده · {fmtNum(daysLeftInMonth())} روز مانده</span>
-          {reached && <span className="target-reached">🎉 هدف این ماه رسید</span>}
-        </span>}
-      </button>}
-
-      <button
-        onClick={() => goTo('sales-new')}
-        className="primary-button mb-3 flex items-center justify-center gap-2 py-4 text-lg"
-      >
-        <Icon name="plus" /> فروش جدید
-      </button>
-      <div className="mb-4 grid grid-cols-2 gap-2">
-        <button onClick={() => goTo('purchases-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
-          <Icon name="stock" className="mx-auto mb-1" /> خرید جدید
-        </button>
-        <button onClick={() => goTo('expenses-new')} className="rounded-2xl border border-slate-200 bg-white py-3 font-bold text-slate-700">
-          <Icon name="wallet" className="mx-auto mb-1" /> مصرف جدید
-        </button>
-      </div>
-
-      <section className="mb-4">
-        {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
-          <div className="surface mb-4 p-4 text-sm text-slate-600">
-            <p className="mb-2 font-bold text-slate-800">برای شروع فروشگاه:</p>
-            <p>۱. اجناس و قیمت‌ها را در گدام ثبت کنید.</p>
-            <p>۲. موجودی صندوق را در مصارف و صندوق تصفیه کنید.</p>
-            <p>۳. حساب‌های قبلی مشتریان و تأمین‌کنندگان را ثبت کنید.</p>
+      {!isStaff && (
+        <section aria-label="امروز تا حالا" className="mb-4">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="text-lg font-bold text-slate-800">امروز تا حالا</h2>
+            {yesterdayPending && canAct && <button type="button" onClick={() => setClosingDay(closeDay)} className="min-h-[44px] px-1 text-sm font-bold text-[var(--action)]">خلاصهٔ دیروز را ببینید ‹</button>}
           </div>
-        )}
-        <h2 className="mb-2 text-lg font-bold text-slate-800">کارهای امروز</h2>
-        {!hasTasks && <div className="rounded-2xl bg-teal-50 p-3 text-sm font-bold text-teal-700">کار ضروری ثبت‌نشده ندارید.</div>}
-        <div className="space-y-2">
-          {closeDay !== null && (
-            <button onClick={() => setClosingDay(closeDay)} className="w-full rounded-2xl bg-[var(--action-tint)] p-3 text-right text-[var(--action)]">
-              <span className="block font-bold">{closeDay === dayStart ? 'بستن امروز' : 'خلاصهٔ دیروز را ببینید'}</span>
-              <span className="text-xs">فروش، مفاد، مصرف و صندوق روز — یک نگاه، بعد بسته کنید.</span>
-            </button>
-          )}
-          {monthAlert && (
-            <button onClick={() => setExplain('month')}
-              className={`w-full rounded-2xl p-3 text-right ${monthAlert.level === 'danger' ? 'bg-red-50 text-red-800' : 'bg-amber-100 text-amber-900'}`}>
-              <span className="block font-bold">{monthAlert.level === 'danger' ? 'مصرف از مفاد بیشتر شده' : 'مصرف این ماه بالا رفته'}</span>
-              <span className="text-xs">{monthAlert.text}</span>
-            </button>
-          )}
-          {pendingExpenseCount > 0 && (
-            <button onClick={() => goTo('expenses')} className="w-full rounded-2xl bg-amber-100 p-3 text-right text-amber-900">
-              <span className="block font-bold">{fmtNum(pendingExpenseCount)} مصرف روزانه ثبت نشده</span>
-              <span className="text-xs">برای ثبت، اینجا بزنید.</span>
-            </button>
-          )}
-          {lowStock.length > 0 && (
-            <button onClick={() => goTo('inventory')} className="w-full rounded-2xl bg-red-50 p-3 text-right text-red-700">
-              <span className="block font-bold">{fmtNum(lowStock.length)} جنس برای خرید مجدد</span>
-              <span className="text-xs">موجودی آن‌ها به حد تعیین‌شده رسیده است.</span>
-            </button>
-          )}
-          {debtCount > 0 && (
-            <button onClick={() => goTo('accounts')} className="w-full rounded-2xl bg-blue-50 p-3 text-right text-blue-800">
-              <span className="block font-bold">{fmtNum(debtCount)} مشتری قرضدار — {fmtMoney(debtTotal)}</span>
-              <span className="text-xs">{overdueCount > 0 ? `${fmtNum(overdueCount)} وعده گذشته است.` : 'حساب‌های مشتریان را ببینید.'}</span>
-            </button>
-          )}
-        </div>
-      </section>
+          <button type="button" aria-label={`فروش امروز ${fmtMoney(todayTotal)} — از کجا آمد`} onClick={() => setExplain('sales')} className="surface explain-card grid w-full grid-cols-3 p-4 text-right">
+            <span className="flex flex-col gap-0.5 border-l border-slate-200 pl-2.5">
+              <span className="text-[0.8125rem] text-slate-500">فروش</span>
+              <span className="text-[1.0625rem] font-extrabold text-slate-900"><RollingNumber value={todayTotal} /></span>
+            </span>
+            <span className="flex flex-col gap-0.5 border-l border-slate-200 px-2.5">
+              <span className="text-[0.8125rem] text-slate-500">جوړه</span>
+              <span className="text-[1.0625rem] font-extrabold text-slate-900">{fmtNum(todayPairs)}</span>
+            </span>
+            <span className="flex flex-col gap-0.5 pr-2.5">
+              <span className="text-[0.8125rem] text-slate-500">نقد فروش</span>
+              <span className="text-[1.0625rem] font-extrabold text-teal-700"><RollingNumber value={todayCash} /></span>
+            </span>
+            <span className="col-span-3 mt-3 border-t border-slate-200 pt-2 text-sm text-slate-600">مفاد: {fmtMoney(todayProfit)}</span>
+          </button>
+        </section>
+      )}
 
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-800">خلاصهٔ حساب</h2>
-          {!isStaff && (
-            <button onClick={() => goTo('reports')} className="text-sm font-bold text-teal-700">
-              راپور کامل
-            </button>
-          )}
+      {sales !== undefined && variants !== undefined && sales.length === 0 && variants.length === 0 && (
+        <div className="surface mb-4 p-4 text-sm text-slate-600">
+          <p className="mb-2 font-bold text-slate-800">برای شروع فروشگاه:</p>
+          <p>۱. اجناس و قیمت‌ها را در گدام ثبت کنید.</p>
+          <p>۲. موجودی صندوق را در مصارف و صندوق تصفیه کنید.</p>
+          <p>۳. حساب‌های قبلی مشتریان و تأمین‌کنندگان را ثبت کنید.</p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => setExplain('receivables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
-            <span className="block text-sm text-slate-500">طلب از مشتریان</span>
-            <span className="block text-lg font-bold text-red-600"><RollingNumber value={worth?.receivables ?? 0} /></span>
-          </button>
-          <button onClick={() => setExplain('cash')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
-            <span className="block text-sm text-slate-500">صندوق</span>
-            <span className="block text-lg font-bold text-slate-800"><RollingNumber value={worth?.cash ?? 0} /></span>
-          </button>
-          <button onClick={() => setExplain('stock')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
-            <span className="block text-sm text-slate-500">موجودی گدام</span>
-            <span className="block text-lg font-bold text-teal-700">{fmtNum(worth?.pairs ?? 0)} جوړه</span>
-          </button>
-          <button onClick={() => setExplain('payables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
-            <span className="block text-sm text-slate-500">قرض ما</span>
-            <span className="block text-lg font-bold text-amber-700"><RollingNumber value={worth?.payables ?? 0} /></span>
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-slate-500">هر عدد را بزنید تا ببینید از کدام حساب‌ها ساخته شده است.</p>
-      </section>
+      )}
+
+      <MoneyMap worth={worth} debtors={debtors} suppliers={owedSuppliers} lenders={owedLenders} onOpen={(kind) => setExplain(kind)} />
+
+      <RecentSales sales={todaySales} goTo={goTo} />
+
+      {lowStock.length > 0 && (
+        <button type="button" onClick={() => goTo('inventory')} className="mb-4 flex min-h-[68px] w-full items-center gap-3 rounded-[20px] border border-slate-200 bg-white px-3.5 py-3 text-right">
+          <span className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700"><Icon name="stock" /></span>
+          <span className="flex flex-1 flex-col">
+            <span className="text-[0.9375rem] font-bold text-slate-800">{fmtNum(lowStock.length)} جنس برای خرید مجدد</span>
+            <span className="text-[0.8125rem] text-slate-500">موجودی آن‌ها به حد تعیین‌شده رسیده است.</span>
+          </span>
+          <Icon name="chevron" className="text-slate-400" />
+        </button>
+      )}
+
+      {!isStaff && (
+        <button type="button" onClick={() => goTo('reports')} className="min-h-[44px] px-1 text-sm font-bold text-teal-700">راپور کامل ‹</button>
+      )}
+
+      {picking && <ReceivePicker onClose={() => setPicking(false)} onPick={(c) => { setPicking(false); setReceiving(c) }} />}
+      {receiving && <CustomerDetail customer={receiving} startPay onClose={() => setReceiving(null)} />}
       {explain === 'sales' && <TodaySalesModal sales={todaySales} isStaff={isStaff} goTo={goTo} onClose={() => setExplain(null)}
         parts={{ goods: goodsValue, cost: goodsCost, discount: discounts, returned: returnedProfit, profit: todayProfit }} />}
       {explain === 'month' && <MonthProfitModal current={thisMonth} previous={lastMonthSoFar} from={monthStart} goTo={goTo} onClose={() => setExplain(null)}

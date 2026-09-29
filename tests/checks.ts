@@ -103,7 +103,7 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
-import { parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
+import { fmtClock, fmtDayLabel, parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
@@ -270,6 +270,15 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'خانهٔ نو — ساعت و روزِ هفته درست خوانده می‌شود',
+    run: async () => {
+      const t = new Date(2026, 8, 29, 14, 5).getTime() // ۷ میزان ۱۴۰۵
+      is('ساعت ۲۴ ساعته با صفر پیش‌رو', fmtClock(t), '۱۴:۰۵')
+      is('صبح زود', fmtClock(new Date(2026, 8, 29, 7, 30).getTime()), '۰۷:۳۰')
+      is('روز هفته و تاریخ هجری', fmtDayLabel(t), 'سه‌شنبه ۷ میزان ۱۴۰۵')
+    }
+  },
   {
     name: 'بازبینی کامل — عدد غلتان در صفحهٔ راست‌به‌چپ برعکس دیده نمی‌شود',
     run: async () => {
