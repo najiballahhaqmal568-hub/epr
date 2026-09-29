@@ -7,6 +7,8 @@ import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { CorrectSupplierPaymentModal, PaySupplierModal } from './SupplierModals'
 import CorrectOpeningDebtModal from './CorrectOpeningDebtModal'
 import DirectTradeDetail from '../sales/direct/DirectTradeDetail'
+import { HistoryToggle } from '../../components/HistoryToggle'
+import { PaymentTimeline } from '../../components/PaymentTimeline'
 
 /** تاریخچهٔ کامل حساب یک تأمین‌کننده یا صراف */
 export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
@@ -55,7 +57,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
     return <CorrectOpeningDebtModal payment={editingOpening} onClose={() => setEditingOpening(null)} />
   }
 
-  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment; ret?: ReturnDoc; directUuid?: string }
+  type Ev = { date: number; label: string; sub?: string; amount: number; plus: boolean; payment?: Payment; ret?: ReturnDoc; directUuid?: string; history?: Payment }
   const events: Ev[] = []
   purchases?.forEach((p) => {
     if (p.directTrade?.status === 'cancelled') {
@@ -91,7 +93,8 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
         sub: p.correctionReason ? `اصلاح‌شده — ${p.correctionReason}` : undefined,
         amount: -p.amount,
         plus: true,
-        payment: p.via === 'opening' && !p.lenderAction && !p.groupUuid ? p : undefined
+        payment: p.via === 'opening' && !p.lenderAction && !p.groupUuid ? p : undefined,
+        history: p.directPayment ? undefined : p
       })
     } else {
       const sarrafAmount = p.via === 'sarraf' ? (p.sarrafAmount ?? p.amount) : 0
@@ -110,7 +113,8 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
         amount: p.amount,
         plus: false,
         payment: p.directPayment || p.lenderAction || p.groupUuid ? undefined : p,
-        directUuid: p.directPayment?.tradeUuid
+        directUuid: p.directPayment?.tradeUuid,
+        history: p.directPayment ? undefined : p
       })
     }
   })
@@ -203,6 +207,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
               </button>
             )}
             {e.directUuid && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(e.directUuid!)}>جزئیات فروش مستقیم</button>}
+            {e.history && <HistoryToggle label={e.label}>{() => <PaymentTimeline payment={e.history!} created={e.history!.amount < 0 ? 'قرض قبلی نوشته شد' : 'پول پرداخت شد'} />}</HistoryToggle>}
             {!accessFlags.readOnly && e.payment?.id && (
               <div className="mt-2 flex gap-2">
                 <button

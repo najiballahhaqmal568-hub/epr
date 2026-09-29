@@ -8,6 +8,9 @@ import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
 import CustomerModal from './CustomerModal'
 import CorrectCustomerPaymentModal from './CorrectCustomerPaymentModal'
+import { HistoryToggle } from '../../components/HistoryToggle'
+import { PaymentTimeline } from '../../components/PaymentTimeline'
+import SaleTimeline from '../sales/SaleTimeline'
 import CancelLedgerSaleModal from './CancelLedgerSaleModal'
 import DirectTradeDetail from '../sales/direct/DirectTradeDetail'
 import CustomerGoodsReceiptEnable from './CustomerGoodsReceiptEnable'
@@ -271,6 +274,20 @@ export function CustomerDetail({ customer, onClose }: { customer: Customer; onCl
               )}
             </div>
           </div>
+          {(() => {
+            // «تاریخچه»: کی ثبت شد، چه کسی، و هر اصلاح با دلیلش — فقط برای سندهای عادی
+            if (r.source?.table === 'payments') {
+              const p = (payments ?? []).find((x) => x.id === r.source!.id)
+              if (!p || p.directPayment || p.goodsReceipt || p.shipping) return null
+              return <HistoryToggle label={r.label}>{() => <PaymentTimeline payment={p} created={p.amount < 0 ? 'قرض قبلی نوشته شد' : 'پول دریافت شد'} />}</HistoryToggle>
+            }
+            if (r.source?.table === 'sales') {
+              const s = sales?.find((x) => x.id === r.source!.id)
+              if (!s || s.directTrade || s.goodsReceiptChild) return null
+              return <HistoryToggle label={r.label}>{() => <SaleTimeline sale={s} />}</HistoryToggle>
+            }
+            return null
+          })()}
         </div>
       ))}
       {ledger.length === 0 && <p className="text-sm text-slate-400">هنوز سندی نیست.</p>}

@@ -564,3 +564,5 @@ input[type='number'] {
 .error-screen-mark { display: grid; place-items: center; width: 4rem; height: 4rem; margin: 0 auto 1rem; border-radius: 999px; background: var(--warning-tint); color: var(--warning-text); font-size: 2rem; font-weight: 700; }
 .error-screen details { margin-top: 1.5rem; color: var(--text-secondary); font-size: 0.75rem; text-align: start; }
 .error-screen pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-toggle > button { min-height: 40px; padding-inline: 0.5rem; color: var(--action); font-size: 0.75rem; font-weight: 700; }
+.history-toggle .doc-timeline { margin-top: 0.25rem; text-align: start; }
