@@ -121,6 +121,21 @@ Busy-shop rule: a normal cash sale is **two touches** — a size, then «نقد�
 - «نقد» goes through the same `save()` guards as the payment page (stock, shipping needs a customer, `paid = min(…, total)`).
 - Wholesale cartons: the card has a «کارتن» button that opens the carton / half-carton window.
 
+## Reports (`pages/reports/ReportStory.tsx` + `lib/reportFigures.ts`)
+
+The top of «راپورها» answers, in order: «مفاد کردم؟» (hero), «از کجا آمد؟» (steps), «پرچون یا عمده؟», «فروش کی بود؟».
+
+- **همه · پرچون · عمده.** Every figure comes from `profitSummary` on the filtered sales/returns, so retail +
+  wholesale = all. A return's kind is its own `saleType`, else its sale's; a return with neither is **not guessed** —
+  it counts only in «همه» and the screen says so. Shop expenses belong to both, so a single kind stops at
+  «مفاد از جنس» (no net profit, no expenses step) and says why on screen.
+- **Steps**: each step starts where the previous one ended and the last equals the hero number; one scale fits a
+  loss. Tap a step → a sheet explains it in plain words (expenses list their categories).
+- **Motion**: only bars, columns and the split bar move (`transform`), staggered in the order the money is counted.
+  Text and numbers are on screen at once — nothing waits and no number counts (`tests/report-story-e2e.mjs` samples
+  every frame). Changing kind or period replays it (the body is keyed). Reduced motion: no keyframes at all.
+- **Chart**: one large button (tap picks the column under the finger) plus ‹ › for keyboards and screen readers.
+
 ## Checks
 
 | Test | Proves |

@@ -4,14 +4,14 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../db'
 import { summarizeSales } from '../lib/salesFigures'
 import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
-import { inputCls, Card } from '../components/ui'
-import { ColumnChart } from '../components/charts'
+import { inputCls, Card, Skeleton } from '../components/ui'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialPurchaseLines, commercialSaleLines } from '../lib/commercialLines'
-import { returnProfit } from '../lib/returns'
 import { customerGoodsReceiptSettlements, ordinaryCustomerCollections } from '../lib/directTradeReports'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import Row from './reports/Row'
+import ReportStory from './reports/ReportStory'
+import type { SaleKind } from '../lib/reportFigures'
 import PartnersCard from './reports/PartnersCard'
 import {
   RetailWholesaleCard,
@@ -34,6 +34,7 @@ const PERIODS: { id: Period; label: string }[] = [
 export default function Reports({ onBack }: { onBack: () => void }) {
   const [period, setPeriod] = useState<Period>('month')
   const [showDetails, setShowDetails] = useState(false)
+  const [kind, setKind] = useState<SaleKind>('all')
   const [fromStr, setFromStr] = useState(toDateInput(startOfMonth()))
   const [toStr, setToStr] = useState(toDateInput(Date.now()))
 
@@ -75,6 +76,9 @@ export default function Reports({ onBack }: { onBack: () => void }) {
     const span = Math.min(to, Date.now()) - from
     return db.sales.where('date').between(from - span, from, true, false).filter((s) => !s.deleted).toArray()
   }, [from, to])
+  const prevSpan = Math.max(1, Math.min(to, now) - from)
+  const prevReturns = useLiveQuery(() => db.returns.where('date').between(from - prevSpan, from, true, false).filter((r) => !r.deleted).toArray(), [from, prevSpan])
+  const prevExpenses = useLiveQuery(() => db.expenses.where('date').between(from - prevSpan, from, true, false).filter((e) => !e.deleted && !e.shopClosed).toArray(), [from, prevSpan])
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((v) => variantMap.set(v.id!, v))
@@ -128,7 +132,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   )
   const topProducts = [...soldBy.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 8)
   const topProfitProduct = [...soldBy.entries()].sort((a, b) => b[1].profit - a[1].profit)[0]
-  const productRows = productProfits({ sales: sales ?? [], variants: variants ?? [], readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids })
+  const productRows = productProfits({ sales: (sales ?? []).filter((s) => kind === 'all' || s.saleType === kind), variants: variants ?? [], readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids })
 
   // خرید از هر تأمین‌کننده در دوره
   const bySupplier = new Map<string, { total: number; pairs: number; count: number }>()
@@ -159,36 +163,6 @@ export default function Reports({ onBack }: { onBack: () => void }) {
     .sort((a, b) => (a.v.lastPurchaseAt ?? Infinity) - (b.v.lastPurchaseAt ?? Infinity))
     .slice(0, 10)
 
-  const trendEnd = Math.max(from + 1, Math.min(to, Date.now() + 1))
-  const trendCount = period === 'week' ? 7 : 4
-  const trendSpan = Math.max(1, trendEnd - from)
-  const trendLabels =
-    period === 'today'
-      ? ['صبح', 'چاشت', 'عصر', 'شب']
-      : period === 'week'
-        ? ['۱', '۲', '۳', '۴', '۵', '۶', '۷']
-        : period === 'month'
-          ? ['هفتهٔ اول', 'هفتهٔ دوم', 'هفتهٔ سوم', 'این هفته']
-          : period === 'year'
-            ? ['بهار', 'تابستان', 'خزان', 'زمستان']
-            : ['بخش ۱', 'بخش ۲', 'بخش ۳', 'بخش ۴']
-  const trendRows = Array.from({ length: trendCount }, (_, index) => ({
-    label: trendLabels[index] ?? String(index + 1),
-    value: 0,
-    second: 0
-  }))
-  const trendIndex = (date: number) => Math.min(trendCount - 1, Math.max(0, Math.floor(((date - from) / trendSpan) * trendCount)))
-  confirmedSales?.forEach((sale) => {
-    const row = trendRows[trendIndex(sale.date)]
-    row.value += sale.total
-    row.second += commercialSaleLines(sale).reduce((sum, line) => sum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0)
-  })
-  returns?.filter((row) => row.kind === 'customer').forEach((returned) => {
-    const row = trendRows[trendIndex(returned.date)]
-    row.value -= returned.amount
-    row.second -= returnProfit(returned)
-  })
-  const shortMoney = (amount: number) => (Math.abs(amount) >= 1000 ? `${fmtNum(Math.round(amount / 1000))}هـ` : fmtNum(Math.round(amount)))
 
   return (
     <div className="p-4">
@@ -220,36 +194,16 @@ export default function Reports({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-          <p className="text-xs text-slate-500">فروش</p>
-          <p className="mt-1 text-lg font-bold text-slate-800">{fmtMoney(salesTotal)}</p>
-          <p className="text-[11px] text-slate-400">{fmtNum(sales?.length ?? 0)} فروش</p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-          <p className="text-xs text-slate-500">مفاد خالص</p>
-          <p className={`mt-1 text-lg font-bold ${netProfit >= 0 ? 'text-teal-700' : 'text-red-600'}`}>{fmtMoney(netProfit)}</p>
-          <p className="text-[11px] text-slate-400">بعد از مصارف تجارت</p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-          <p className="text-xs text-slate-500">مصارف تجارت</p>
-          <p className="mt-1 text-lg font-bold text-red-600">{fmtMoney(businessExpenses)}</p>
-          <p className="text-[11px] text-slate-400">در همین دوره</p>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-          <p className="text-xs text-slate-500">جوړهٔ فروخته</p>
-          <p className="mt-1 text-lg font-bold text-slate-800">{fmtNum(pairsSold)}</p>
-          <p className="text-[11px] text-slate-400">مجموع تعداد</p>
-        </div>
-      </div>
-
-      <Card>
-        <p className="mb-1 font-bold text-slate-800">روند فروش و مفاد</p>
-        <p className="mb-2 text-xs text-slate-400">سبز: فروش · بنفش: مفاد</p>
-        <div dir="ltr" className="overflow-hidden">
-          <ColumnChart rows={[...trendRows].reverse()} fmt={shortMoney} compact />
-        </div>
-      </Card>
+      {sales && returns && expenses && variants && allSales && prevSales && prevReturns && prevExpenses
+        ? <ReportStory
+            data={{ sales, returns, expenses, prevSales, prevReturns, prevExpenses, salesForLookup: allSales, variants,
+              readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids }}
+            from={from} to={to} periodKey={`${period}-${from}-${to}`}
+            periodTitle={PERIODS.find((item) => item.id === period)?.label ?? ''}
+            prevName={period === 'today' ? 'دیروز' : 'دورهٔ قبل با همین طول'}
+            onKindChange={setKind}
+          />
+        : <Skeleton rows={5} label="در حال آماده کردن راپور…" />}
 
       <div className="mb-2 flex items-center justify-between">
         <p className="font-bold text-slate-800">مهم‌ترین نتیجه‌ها</p>
@@ -263,7 +217,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
       </div>
 
       {productRows.length > 0 && <section aria-label="مفاد هر جنس" className="surface mb-4 p-4">
-        <p className="mb-1 font-bold text-slate-800">مفاد هر جنس</p>
+        <p className="mb-1 font-bold text-slate-800">مفاد هر جنس{kind === 'all' ? '' : ` · ${kind === 'retail' ? 'پرچون' : 'عمده'}`}</p>
         <p className="mb-3 text-xs text-slate-500">کدام جنس بیشتر پول می‌آورد و کدام کمتر (پس از تخفیف).</p>
         {productRows.slice(0, 5).map(row => <Row key={row.name} label={row.name} value={fmtMoney(row.profit)} sub={`${fmtNum(row.qty)} جوړه · مفاد ${fmtNum(row.margin)}٪`} teal={row.profit > 0} red={row.profit < 0} />)}
         {productRows.length > 5 && <>
