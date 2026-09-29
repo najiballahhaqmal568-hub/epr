@@ -194,6 +194,7 @@ export function CashView() {
   const [counted, setCounted] = useState('')
   const [note, setNote] = useState('')
   const [result, setResult] = useState<string>('')
+  const [reconcileError, setReconcileError] = useState('')
   const [shortMode, setShortMode] = useState<'expense' | 'debt' | 'adjust'>('expense')
   const [debtCustomer, setDebtCustomer] = useState<number | ''>('')
   const [box, setBox] = useState(SHOP_BOX)
@@ -353,9 +354,12 @@ export function CashView() {
             </div>
           )}
           {result && <p className="mb-2 text-sm font-bold">{result}</p>}
+          {reconcileError && <p role="alert" className="mb-2 text-sm font-bold text-red-700">{reconcileError}</p>}
           <PrimaryBtn
-            disabled={counted.trim() !== '' && parseNum(counted) - balance < 0 && shortMode === 'debt' && !debtCustomer}
+            // خانهٔ خالی «۰» خوانده می‌شد: یک لمس تمام صندوق را «کسر صندوق» ثبت می‌کرد و موجودی را صفر
+            disabled={counted.trim() === '' || (parseNum(counted) - balance < 0 && shortMode === 'debt' && !debtCustomer)}
             onClick={async () => {
+              setReconcileError('')
               const c = parseNum(counted)
               const diff = c - balance
               const cust = customers?.find((x) => x.id === debtCustomer)
@@ -367,7 +371,12 @@ export function CashView() {
                       ? ({ mode: 'debt', customerId: cust.id!, customerName: cust.name } as const)
                       : ({ mode: 'adjust' } as const)
                   : undefined
-              await reconcile(c, note.trim() || undefined, shortage, box)
+              try {
+                await reconcile(c, note.trim() || undefined, shortage, box)
+              } catch (e) {
+                setReconcileError(e instanceof Error ? e.message : String(e))
+                return
+              }
               setResult(
                 diff === 0
                   ? '✅ صندوق برابر است.'

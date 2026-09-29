@@ -2994,6 +2994,7 @@ export type ShortageAction =
  * برای کمبود سه راه: مصرف «کسر صندوق» (از مفاد کم می‌شود)، قرض شخص مسئول، یا فقط تنظیم.
  */
 export async function reconcile(counted: number, note?: string, shortage?: ShortageAction, box = SHOP_BOX): Promise<number> {
+  if (!Number.isFinite(counted) || counted < 0) throw new Error('نقد شمارش‌شده باید صفر یا بیشتر باشد')
   counted = afn(counted)
   return db.transaction(
     'rw',

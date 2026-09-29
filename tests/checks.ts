@@ -15,6 +15,7 @@ import AdjustModal from '../src/pages/inventory/AdjustModal'
 import ReturnModal from '../src/pages/sales/ReturnModal'
 import CustomerDetail from '../src/pages/customers/CustomerDetail'
 import LandingCostModal from '../src/pages/purchases/LandingCostModal'
+import CashView from '../src/pages/expenses/CashView'
 import { PurchaseReturnModal } from '../src/pages/purchases/ReturnModals'
 import { overReturnedSales } from '../src/lib/returns'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
@@ -267,6 +268,30 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازبینی کامل — «ثبت تصفیه» با خانهٔ خالی تمام صندوق را کسر حساب نمی‌کند',
+    run: async () => {
+      await seedCash(5000)
+      const button = (text: string) => Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith(text))
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(CashView))
+        await waitUntil(() => Boolean(button('تصفیه «دکان»')))
+        button('تصفیه «دکان»')!.click()
+        await waitUntil(() => Boolean(button('ثبت تصفیه')))
+        // هیچ عددی ننوشته — دکمه نباید کار کند
+        button('ثبت تصفیه')!.click()
+        await new Promise((r) => setTimeout(r, 300))
+      } finally { root.unmount(); host.remove() }
+      eq('صندوق ۵٬۰۰۰ ماند، نه صفر', await cashBalance(), 5000)
+      eq('هیچ مصرف «کسر صندوق» ساخته نشد', (await db.expenses.toArray()).filter((e) => !e.deleted).length, 0)
+      eq('هیچ تصفیه‌ای ثبت نشد', await db.reconciliations.count(), 0)
+      await throws('شمارش منفی رد می‌شود', () => reconcile(-500))
+      eq('صندوق هنوز ۵٬۰۰۰', await cashBalance(), 5000)
+    }
+  },
   {
     name: 'بازبینی کامل — دو لمس «ثبت دریافت» و «ثبت مصارف رسیدن» فقط یک سند می‌سازد',
     run: async () => {
