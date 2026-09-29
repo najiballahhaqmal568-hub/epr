@@ -25,6 +25,7 @@ try {
   // 1) Sizes sit open on the model card: one row per colour, tiles with what is left; sold-out tile disabled.
   const card = page.locator('.sale-product-card').filter({ hasText: 'کوهستان' })
   const black = card.getByRole('group', { name: 'رنگ سیاه' })
+  await black.getByRole('button', { name: /43 سیاه/ }).waitFor() // the card fills in once the stock query answers
   assert.equal(await black.getByRole('button').count(), 3)
   assert.equal(await card.getByRole('group', { name: 'رنگ قهوه‌ای' }).getByRole('button').count(), 1)
   assert.equal(await black.getByRole('button', { name: /43 سیاه — ختم شده/ }).isDisabled(), true)

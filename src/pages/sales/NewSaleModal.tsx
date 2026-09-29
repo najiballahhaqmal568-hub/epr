@@ -801,7 +801,7 @@ export function NewSaleModal({
             </button>
             <div className="sale-quick-secondary">
               <button type="button" onClick={hold} disabled={!lines.length || pending}>معطل</button>
-              <button type="button" onClick={() => { setPaidTouched(false); setPaidStr(''); changeStage('payment') }} disabled={!lines.length || pending || stockInvalid}>ادامه به پرداخت</button>
+              <button type="button" onClick={() => changeStage('payment')} disabled={!lines.length || pending || stockInvalid}>ادامه به پرداخت</button>
             </div>
           </div>
         ) : (

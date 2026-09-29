@@ -585,7 +585,7 @@ input[type='number'] {
 .sale-size-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr)); gap: 6px; }
 .sale-size-tile { min-height: 3.5rem; padding: 0.25rem; }
 .sale-size-tile .size-tile-size { font-size: 1.25rem; }
-.sale-size-tile[data-low="true"] .size-tile-stock { color: #8A4B00; }
+.sale-size-tile[data-low="true"] .size-tile-stock { color: var(--warning-text); }
 .sale-size-tile[data-in-cart="true"] { border: 2px solid var(--action); background: var(--action-tint); }
 .sale-quick-actions { display: grid; grid-template-columns: minmax(0, 1fr) 5rem; gap: 8px; width: 100%; flex-basis: 100%; }
 .sale-cash-button { min-height: 3.5rem; border: 0; border-radius: var(--radius-control); background: #0E7A55; color: #fff; font-size: 1.25rem; font-weight: 800; }
@@ -593,4 +593,4 @@ input[type='number'] {
 .sale-quick-actions button:disabled { opacity: 0.4; }
 .sale-quick-secondary { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; }
 .sale-quick-secondary button { min-height: 2.5rem; padding: 0 0.5rem; background: transparent; border: 0; font-size: 0.875rem; font-weight: 700; color: var(--text-secondary); }
-.sale-quick-secondary button:first-child { color: #8A4B00; }
+.sale-quick-secondary button:first-child { color: var(--warning-text); }

@@ -59,7 +59,7 @@ try {
   await page.getByText(/فروش ثبت شد/).first().waitFor()
   assert.deepEqual(await state(), { stock: [5, 3, 0], cash: 2700, sales: [{ total: 2700, paid: 2700, customer: null }, { total: 900, paid: 0, customer: 'مشتری آزمایشی' }], debt: [900] })
 
-  // 4) «ادامه به پرداخت» is still the way to a discount: it starts as cash, not as the earlier credit choice.
+  // 4) «ادامه به پرداخت» is still the way to a discount; a fresh cart starts as cash.
   await card.getByRole('button', { name: /41 سیاه/ }).click()
   await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
   assert.equal(await page.getByLabel('مبلغ دریافتی (نقد)', { exact: true }).inputValue(), '900')
