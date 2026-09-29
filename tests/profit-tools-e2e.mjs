@@ -41,6 +41,7 @@ try {
   assert.match(await close.getByRole('region', { name: 'قرض امروز' }).innerText(), /قرض تازه به مشتریان\s*۸۰۰ ؋/)
   await page.screenshot({ path: `${shots}/daily-close-390.png`, fullPage: true })
   await close.getByRole('button', { name: 'دیدم — روز بسته شد' }).click()
+  await close.getByRole('status').filter({ hasText: 'روز بسته شد ✓' }).waitFor()
   await close.waitFor({ state: 'detached' })
   await page.getByRole('button').filter({ hasText: 'بستن امروز' }).waitFor({ state: 'detached' })
   assert.equal(await page.evaluate(async () => (await (await import('/src/db.ts')).db.settings.get('dayClosed'))?.value), (await page.evaluate(async () => (await import('/src/lib/format.ts')).startOfDay(Date.now()))))
@@ -56,12 +57,33 @@ try {
   await card.getByText(/هدف ۲٬۰۰۰ ؋ — ۳۵٪ رسیده · [۰-۹]+ روز مانده/).waitFor()
   await page.screenshot({ path: `${shots}/target-390.png`, fullPage: true })
 
+  // Reaching the target: one small celebration this month, and a lasting mark on the card.
+  const confetti = () => page.evaluate(() => new Promise(resolve => {
+    let n = 0
+    const obs = new MutationObserver(list => list.forEach(m => m.addedNodes.forEach(x => { if (x.classList?.contains('confetti-bit')) n++ })))
+    obs.observe(document.body, { childList: true })
+    setTimeout(() => { obs.disconnect(); resolve(n) }, 1500)
+  }))
+  const burst = confetti()
+  await page.evaluate(async () => {
+    const { addSale } = await import('/src/lib/ops.ts')
+    await addSale({ date: Date.now(), saleType: 'retail', lines: [{ variantId: window.goodId, productName: 'کوهستان', size: '40', color: 'سیاه', qty: 4, unitPrice: 900 }], total: 3600, paid: 3600 })
+  })
+  assert.ok(await burst > 0, 'confetti once target reached')
+  await card.getByText('🎉 هدف این ماه رسید').waitFor()
+  const again = confetti()
+  await page.evaluate(async () => {
+    const { addSale } = await import('/src/lib/ops.ts')
+    await addSale({ date: Date.now(), saleType: 'retail', lines: [{ variantId: window.goodId, productName: 'کوهستان', size: '40', color: 'سیاه', qty: 1, unitPrice: 900 }], total: 900, paid: 900 })
+  })
+  assert.equal(await again, 0, 'no second celebration in the same month')
+
   // 4) Reports «مفاد هر جنس»: best first, the below-cost product in red.
   await card.click()
   await page.locator('dialog[open]').getByRole('button', { name: 'راپور کامل' }).click()
   await page.getByRole('heading', { name: 'راپورها' }).waitFor()
   const perProduct = await page.getByRole('region', { name: 'مفاد هر جنس' }).innerText()
-  assert.match(perProduct, /کوهستان\s*۱٬۲۰۰ ؋\s*۳ جوړه · مفاد ۴۴٪\s*بامیان\s*[\u200e−-]*۲۰۰ ؋\s*۱ جوړه · مفاد [\u200e−-]*۲۵٪[\s\S]*زیر قیمت خرید فروخته شده/)
+  assert.match(perProduct, /کوهستان\s*۳٬۲۰۰ ؋\s*۸ جوړه · مفاد ۴۴٪\s*بامیان\s*[\u200e−-]*۲۰۰ ؋\s*۱ جوړه · مفاد [\u200e−-]*۲۵٪[\s\S]*زیر قیمت خرید فروخته شده/)
 
   // 5) Sale time: a price under cost warns the owner with the cost and the loss.
   await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()

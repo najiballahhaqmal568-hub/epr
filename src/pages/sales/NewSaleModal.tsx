@@ -6,8 +6,14 @@ import { calculateShipping } from '../../lib/shipping'
 import { ShippingEditor } from './SaleShipping'
 import { fmtNum, fmtMoney, parseNum, fromDateInput } from '../../lib/format'
 import { lossPerPair } from '../../lib/profit'
+import { flyToCart, saleCheck } from '../../lib/motion'
+import { keypadPress, quickCashOptions } from '../../lib/quickCash'
+import { MoneyKeypad } from '../../components/MoneyKeypad'
+import { RollingNumber } from '../../components/RollingNumber'
+import { useFlipList } from '../../lib/useFlipList'
+import { recordSaleTiming } from '../../lib/saleSpeed'
 import { saveSaleDraft, deleteSaleDraft, readWorkingSale, writeWorkingSale, clearWorkingSale, type SaleDraft } from '../../lib/saleDrafts'
-import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
+import { Modal, Field, inputCls, PrimaryBtn, Skeleton } from '../../components/ui'
 import { Icon } from '../../components/Icon'
 import StockSelectionSummary from './StockSelectionSummary'
 import BulkSalePrice from './BulkSalePrice'
@@ -69,6 +75,14 @@ export function NewSaleModal({
   const [discountStr, setDiscountStr] = useState(draft?.discountStr ?? '')
   const [showDiscount, setShowDiscount] = useState(Boolean(draft?.discountStr))
   const [promise, setPromise] = useState(draft?.promise ?? '')
+  const [keypadOpen, setKeypadOpen] = useState(false)
+  // true while the amount field still shows a suggestion: the first key replaces it
+  const freshPaid = useRef(true)
+  const cartRef = useRef<HTMLDivElement>(null)
+  useFlipList(cartRef)
+  // «سرعت فروش»: from the first pair in the cart to «ثبت فروش», and the taps in between
+  const startedAt = useRef<number | null>(null)
+  const taps = useRef(0)
   // صفحهٔ دفتر فزیکی — با انتخاب مشتری، صفحهٔ فعلی خودش پیشنهاد می‌شود
   const [bookPage, setBookPage] = useState(draft?.bookPage ?? '')
   const [pageTouched, setPageTouched] = useState(false)
@@ -202,6 +216,13 @@ export function NewSaleModal({
     setCustSearch('')
   }
 
+  const lineCost = (l: SaleLine) => variants?.find((v) => v.id === l.variantId)?.purchasePrice ?? 0
+  /** Loss per pair when the price is under cost; 0 when cost is unknown. */
+  const lineLoss = (l: SaleLine) => (lineCost(l) > 0 ? lossPerPair(l.unitPrice, lineCost(l)) : 0)
+  useEffect(() => {
+    if (lines.length && startedAt.current === null) { startedAt.current = Date.now(); taps.current = 1 }
+    if (!lines.length) startedAt.current = null
+  }, [lines.length])
   const subtotal = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
   const discount = Math.min(parseNum(discountStr), subtotal)
   const total = subtotal - discount
@@ -292,7 +313,8 @@ export function NewSaleModal({
       saleType,
       lines,
       total,
-      paid,
+      // پول اضافه همان لحظه به مشتری پس داده می‌شود؛ صندوق فقط مجموع را می‌گیرد
+      paid: Math.min(paid, total),
       discount: discount > 0 ? discount : undefined,
       promiseDate: remainder > 0 && promise ? fromDateInput(promise) : undefined,
       // صفحه فقط برای فروش قرضی معنا دارد — فروش نقدی در دفتر قرض نمی‌نشیند
@@ -313,6 +335,8 @@ export function NewSaleModal({
     // The transaction has committed. Ancillary preference/storage errors must
     // never present the sale as failed or offer a retry that duplicates it.
     completedRef.current = true
+    saleCheck()
+    if (startedAt.current !== null) void recordSaleTiming({ at: Date.now(), ms: Date.now() - startedAt.current, taps: taps.current, pairs: lines.reduce((n, l) => n + l.qty, 0) })
     const warnings: string[] = []
     try {
       clearWorkingSale()
@@ -332,6 +356,7 @@ export function NewSaleModal({
 
   return (
     <Shell title="فروش جدید" onClose={() => { if (!pendingRef.current) onClose() }}>
+      <div onPointerDownCapture={() => { if (startedAt.current !== null) taps.current++ }}>
       {error && <p ref={errorRef} role="alert" className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">{error}</p>}
       <div className="sale-draft-status mb-3 flex items-center justify-between gap-3 text-xs text-slate-500">
         <span role="status">{pending ? 'در حال ثبت؛ لطفاً منتظر بمانید' : draftStatus}</span>
@@ -375,7 +400,7 @@ export function NewSaleModal({
           placeholder="نام، سایز، رنگ یا کود..."
         /></div>
       </Field>
-      {products === undefined && <p role="status" className="py-8 text-center text-slate-500">در حال بارگذاری اجناس…</p>}
+      {products === undefined && <Skeleton rows={4} label="در حال بارگذاری اجناس…" />}
       {products?.length === 0 && <p className="py-8 text-center text-slate-500">هنوز جنسی در گدام نیست. نخست جنس اضافه کنید.</p>}
       {search.trim() && products && matches.length === 0 && <p className="py-8 text-center text-slate-500">جنسی با این جستجو پیدا نشد.</p>}
       {quickProducts.length > 0 && !search.trim() && (
@@ -466,7 +491,7 @@ export function NewSaleModal({
             return (
               <div key={v.id} className="sale-search-row flex flex-wrap items-stretch border-b border-slate-100 bg-white last:border-0">
                 <button
-                  onClick={() => addLine(v)}
+                  onClick={(e) => { if (remainingQty(v) > 0) flyToCart(e.currentTarget, v.size); addLine(v) }}
                   disabled={remainingQty(v) <= 0}
                   className="sale-search-choice flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2 px-3 py-3 text-right disabled:opacity-40"
                 >
@@ -482,7 +507,7 @@ export function NewSaleModal({
                 {[2, 3].map((n) => (
                   <button
                     key={n}
-                    onClick={() => addLine(v, n)}
+                    onClick={(e) => { if (remainingQty(v) >= n) flyToCart(e.currentTarget, `×${fmtNum(n)}`); addLine(v, n) }}
                     disabled={remainingQty(v) < n}
                     className="w-10 shrink-0 border-r border-slate-100 text-sm font-bold text-teal-700 active:bg-teal-50 disabled:opacity-30"
                   >
@@ -497,12 +522,12 @@ export function NewSaleModal({
 
       </section>
       <section className="sale-checkout">
-      <div hidden={stage !== 'selection'}>
+      <div ref={cartRef} hidden={stage !== 'selection'}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">سبد فروش</h2><span className="rounded-full bg-teal-50 px-3 py-1 text-sm font-bold text-teal-700">{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه</span></div>
       {!lines.length && <div className="sale-empty-cart rounded-xl border border-dashed border-slate-300 p-8 text-center"><Icon name="sale" className="mx-auto mb-3 text-slate-400" /><p className="font-bold text-slate-600">سبد هنوز خالی است</p><p className="mt-2 text-sm text-slate-500">یک جنس انتخاب کنید تا فروش را شروع کنیم.</p></div>}
       {saleType === 'wholesale' && variants && <BulkSalePrice lines={lines} variants={variants} setLines={setLines} disabled={pending} />}
       {lines.map((l, i) => (
-        <div key={l.variantId} className="sale-cart-line">
+        <div key={l.variantId} data-flip-key={l.variantId} className="sale-cart-line">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold">
               {l.productName} {l.size} {l.color}
@@ -511,14 +536,15 @@ export function NewSaleModal({
               className="sale-line-price mt-2 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
               inputMode="numeric"
               aria-label={`قیمت ${l.productName} ${l.size}`}
+              aria-invalid={lineLoss(l) > 0}
               value={l.unitPrice}
               onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(e.target.value) } : x)))}
             />
             <span className="mr-1 text-xs text-slate-500">قیمت فی جوړه</span>
             {(() => {
               // هشدار فروش زیر قیمت خرید — کارگر قیمت خرید را نمی‌بیند، فقط هشدار را
-              const cost = variants?.find(v => v.id === l.variantId)?.purchasePrice ?? 0
-              const loss = cost > 0 ? lossPerPair(l.unitPrice, cost) : 0
+              const cost = lineCost(l)
+              const loss = lineLoss(l)
               if (!loss) return null
               return <p role="alert" className="sale-loss-warning">
                 {isStaff ? 'این قیمت از قیمت خرید کمتر است — پیش از فروش با مالک مشوره کنید.' : `زیر قیمت خرید (${fmtMoney(cost)}) — زیان ${fmtMoney(loss * l.qty)}`}
@@ -652,17 +678,40 @@ export function NewSaleModal({
         <Field label="مبلغ دریافتی (نقد)">
           <input
             className={inputCls}
-            inputMode="numeric"
+            inputMode="none"
             value={paidTouched ? paidStr : String(total)}
             onFocus={() => {
               if (!paidTouched) {
                 setPaidTouched(true)
                 setPaidStr(String(total))
               }
+              freshPaid.current = true
+              setKeypadOpen(true)
             }}
-            onChange={(e) => setPaidStr(e.target.value)}
+            onChange={(e) => { freshPaid.current = false; setPaidStr(e.target.value) }}
           />
         </Field>
+        {paymentMode === 'cash' && total > 0 && (
+          <div className="quick-cash" role="group" aria-label="پول دریافتی آماده">
+            {quickCashOptions(total).map((amount, i) => (
+              <button key={amount} type="button" aria-pressed={paid === amount}
+                onClick={() => { setPaidTouched(true); setPaidStr(String(amount)); freshPaid.current = true }}>
+                {i === 0 && <small>پوره</small>}{fmtMoney(amount)}
+              </button>
+            ))}
+          </div>
+        )}
+        {keypadOpen && (
+          <MoneyKeypad
+            onKey={(key) => {
+              const fresh = freshPaid.current
+              freshPaid.current = false
+              setPaidTouched(true)
+              setPaidStr((prev) => keypadPress(prev, key, fresh))
+            }}
+            onDone={() => setKeypadOpen(false)}
+          />
+        )}
         {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض مشتری): {fmtMoney(remainder)}</p>}
         {remainder > 0 && customerId !== '' && (
           <Field label="صفحهٔ دفتر (این قرض در کدام ورق نوشته شد)">
@@ -682,7 +731,7 @@ export function NewSaleModal({
             <input type="date" className={inputCls} value={promise} onChange={(e) => setPromise(e.target.value)} />
           </Field>
         )}
-        {remainder < 0 && <p className="text-sm font-bold text-amber-600">بازگشت به مشتری: {fmtMoney(-remainder)}</p>}
+        {remainder < 0 && <p className="sale-change" role="status"><span>بازگشت به مشتری</span><strong>{fmtMoney(-remainder)}</strong></p>}
       </div>
       </div>
 
@@ -698,10 +747,10 @@ export function NewSaleModal({
       </div>}
       {showShipping && <ShippingEditor sale={{ date: Date.now(), saleType, customerId: customerId || undefined, customerName: customers?.find(c => c.id === customerId)?.name, lines, total, paid }} prepared={shipping} onPrepared={setShipping} onClose={() => setShowShipping(false)} />}
       </div>
-      <div data-empty={!lines.length} className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
+      <div data-empty={!lines.length} data-cart-target className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
           <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : 'قابل پرداخت'}</p>
-          <p className="text-2xl font-bold text-teal-700">{fmtMoney(total)}</p>
+          <p className="text-2xl font-bold text-teal-700"><RollingNumber value={total} /></p>
           {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
         </div>
         <button
@@ -859,30 +908,52 @@ export function NewSaleModal({
               </Modal>
             )
           }
+          const priceOf = (v: Variant) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)
+          const byColor = new Map<string, Variant[]>()
+          for (const v of vs) byColor.set(v.color, [...(byColor.get(v.color) ?? []), v])
           return (
             <Modal title={`انتخاب سایز — ${p.name}`} onClose={() => setPickerFor(null)}>
-              {vs.map((v) => (
-                <button
-                  key={v.id}
-                  disabled={remainingQty(v) <= 0}
-                  onClick={() => {
-                    addLine(v)
-                    setPickerFor(null)
-                  }}
-                  className="mb-2 flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-right disabled:opacity-40"
-                >
-                  <span className="text-lg font-bold text-slate-800">
-                    {v.size} <span className="text-sm font-normal text-slate-500">{v.color}</span>
-                  </span>
-                  <span className="text-left text-sm">
-                    <StockSelectionSummary stock={v.stockQty} selected={selectedQty(v.id!)} />
-                    <span className="text-slate-500">{fmtMoney(saleType === 'retail' ? v.retailPrice : v.wholesalePrice)}</span>
-                  </span>
-                </button>
-              ))}
+              <div className="size-grid-head">
+                {p.photo && <img src={p.photo} alt="" />}
+                <span>یک لمس = یک جوړه در سبد. خانهٔ خط‌خورده ختم شده است.</span>
+              </div>
+              {[...byColor].map(([color, list]) => {
+                const prices = new Set(list.map(priceOf))
+                return (
+                  <section key={color} className="size-grid-group" aria-label={`رنگ ${color || 'بی‌رنگ'}`}>
+                    <h3 className="size-grid-color"><span>{color || 'بی‌رنگ'}</span>{prices.size === 1 && <span>{fmtMoney([...prices][0])}</span>}</h3>
+                    <div className="size-grid">
+                      {list.map((v) => {
+                        const left = remainingQty(v)
+                        const inCart = selectedQty(v.id!)
+                        return (
+                          <button
+                            key={v.id}
+                            disabled={left <= 0}
+                            aria-label={`${v.size} ${v.color} — ${left > 0 ? `${fmtNum(left)} جوړه باقی` : 'ختم شده'} — ${fmtMoney(priceOf(v))}${inCart ? ` — ${fmtNum(inCart)} در سبد` : ''}`}
+                            onClick={(e) => {
+                              flyToCart(e.currentTarget, v.size)
+                              addLine(v)
+                              setPickerFor(null)
+                            }}
+                            className="size-tile"
+                          >
+                            {inCart > 0 && <span className="size-tile-in-cart">{fmtNum(inCart)}</span>}
+                            <b className="size-tile-size">{v.size}</b>{' '}
+                            <span className="size-tile-color">{v.color}</span>{' '}
+                            <span className="size-tile-stock">{left > 0 ? `${fmtNum(left)} مانده` : 'ختم'}</span>
+                            {prices.size > 1 && <span className="size-tile-price">{fmtMoney(priceOf(v))}</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )
+              })}
             </Modal>
           )
         })()}
+      </div>
     </Shell>
   )
 }

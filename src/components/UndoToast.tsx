@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { dismissUndo, runUndo, subscribeUndo, type UndoOffer } from '../lib/undo'
+import { dismissUndo, runUndo, subscribeUndo, UNDO_SECONDS, type UndoOffer } from '../lib/undo'
 import { fmtNum } from '../lib/format'
 
 /** The topmost open window; outside it the page is inert, so the bar must live inside it. */
@@ -54,6 +54,7 @@ export function UndoToast() {
           برگرداندن ({fmtNum(left)})
         </button>
         <button type="button" className="undo-toast-close" aria-label="بستن" onClick={dismissUndo}>×</button>
+        <span className="undo-progress" aria-hidden="true" style={{ transform: `scaleX(${Math.max(0, Math.min(1, (offer.expiresAt - now) / (UNDO_SECONDS * 1000)))})` }} />
       </> : <span className="min-w-0 flex-1">{message?.text}</span>}
     </div>
   )

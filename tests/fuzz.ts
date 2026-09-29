@@ -14,7 +14,7 @@
  *
  * با seed اجرا می‌شود، پس هر شکست دقیقاً قابل تکرار است.
  */
-import { db, type Sale, type Purchase, type Variant } from '../src/db'
+import { db, accessFlags, type Sale, type Purchase, type Variant } from '../src/db'
 import {
   addSale,
   addPurchase,
@@ -80,6 +80,8 @@ export interface FuzzFailure {
 const BOXES = [SHOP_BOX, 'خانه', 'صراف']
 
 export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure | null> {
+  // مهر «چه کسی ثبت کرد» روشن است؛ هیچ عددی نباید از آن اثر بگیرد
+  accessFlags.actor = 'آزمایش'
   const rand = rng(seed)
   const pick = <T>(xs: T[]): T => xs[Math.floor(rand() * xs.length)]
   const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1))

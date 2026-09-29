@@ -39,7 +39,8 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
   const diff = newTotal - returnAmount
   const cashIn = cashTouched ? parseNum(cashStr) : Math.max(0, diff)
   // اگر جنس جدید ارزان‌تر است، تفاوت نقد به مشتری برمی‌گردد (اثر خالص صندوق = تفاوت)
-  const paid = diff >= 0 ? returnAmount + cashIn : newTotal
+  // نقد اضافه بر تفاوت، همان لحظه به مشتری پس داده می‌شود؛ صندوق فقط تفاوت را می‌گیرد
+  const paid = diff >= 0 ? Math.min(newTotal, returnAmount + cashIn) : newTotal
   const remainder = newTotal - paid
 
   function addLine(v: Variant) {

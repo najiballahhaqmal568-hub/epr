@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, syncFlags, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -96,6 +96,12 @@ import { explainCash, explainPayables, explainReceivables, explainStock } from '
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
 import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
+import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
+import { overpaidSales } from '../src/lib/overpaid'
+import { documentHistory, saleHistory } from '../src/lib/docHistory'
+import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
+import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
+import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
@@ -254,6 +260,138 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'مهر «چه کسی ثبت کرد» — فقط اسناد عادی، نه همگام‌سازی',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 5)
+      const saleId = await addSale(sell(vId, 1, 900))
+      is('فروش نام ثبت‌کننده دارد', (await db.sales.get(saleId))!.by, 'آزمایش')
+      is('تعدیل گدام مهر نمی‌خورد (سند فروش/مصرف/پرداخت/مرجوعی نیست)', (await db.adjustments.toArray())[0].by, undefined)
+      await deleteSale(saleId)
+      const gone = (await db.sales.get(saleId))!
+      is('حذف: چه کسی', gone.deletedBy, 'آزمایش')
+      is('حذف: کی', typeof gone.deletedAt, 'number')
+      eq('حذف اثر پول را برگرداند', await cashBalance(), 0)
+      // سندی که از دستگاه دیگر می‌آید، همان‌طور که هست می‌ماند
+      syncFlags.applyingRemote = true
+      try { await db.sales.add({ date: 1, saleType: 'retail', lines: [], total: 0, paid: 0, uuid: '00000000-0000-4000-8000-000000000001' }) }
+      finally { syncFlags.applyingRemote = false }
+      is('سند همگام‌شده مهر این دستگاه را نمی‌گیرد', (await db.sales.where('uuid').equals('00000000-0000-4000-8000-000000000001').first())!.by, undefined)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      // سند معاملهٔ مستقیم مقایسهٔ دقیق دارد — مهر نمی‌خورد
+      const directId = await db.sales.add({ date: 2, saleType: 'retail', lines: [], total: 0, paid: 0, directTrade: { uuid: 'x' } } as unknown as Sale)
+      is('معاملهٔ مستقیم بدون مهر', (await db.sales.get(directId))!.by, undefined)
+    }
+  },
+  {
+    name: 'سرعت فروش — میانهٔ ثانیه و لمس، این هفته در برابر هفتهٔ گذشته',
+    run: async () => {
+      const now = 100 * 86_400_000
+      const t = (daysAgo: number, seconds: number, taps: number): SaleTiming => ({ at: now - daysAgo * 86_400_000, ms: seconds * 1000, taps, pairs: 1 })
+      const list = [t(1, 20, 6), t(2, 30, 8), t(3, 25, 7), t(1, 40 * 60, 50), t(9, 40, 11), t(10, 50, 13)]
+      const s = speedSummary(list, now)
+      eq('این هفته: سه فروش (سبد ۴۰ دقیقه‌ای حساب نمی‌شود)', s.thisWeek.count, 3)
+      eq('میانهٔ ثانیه: ۲۵', s.thisWeek.seconds, 25)
+      eq('میانهٔ لمس: ۷', s.thisWeek.taps, 7)
+      eq('هفتهٔ گذشته: میانهٔ دو عدد ۴۰ و ۵۰ = ۴۵', s.lastWeek.seconds, 45)
+      eq('هفتهٔ گذشته لمس: (۱۱+۱۳)/۲', s.lastWeek.taps, 12)
+      let many: SaleTiming[] = []
+      for (let i = 0; i < 305; i++) many = appendTiming(many, t(0, i, 1))
+      eq('فقط ۳۰۰ ثبت آخر نگه داشته می‌شود', many.length, 300)
+      eq('کهنه‌ترین‌ها می‌روند', many[0].ms, 5000)
+    }
+  },
+  {
+    name: 'راهنمای روز اول و صفحهٔ خطا',
+    run: async () => {
+      const fresh = firstDaySteps({ cashMoves: 0, products: 0, productsWithPhoto: 0, parties: 0, sales: 0 })
+      is('دکان تازه: هر سه قدم باقی', fresh.map(s => s.done).join(','), 'false,false,false')
+      is('دکانی که کار می‌کند راهنما نمی‌بیند', firstDayDone(firstDaySteps({ cashMoves: 40, products: 12, productsWithPhoto: 0, parties: 0, sales: 30 })), true)
+      is('بعد از شمارش صندوق و جنس، فقط قرض‌ها', firstDaySteps({ cashMoves: 1, products: 3, productsWithPhoto: 1, parties: 0, sales: 0 }).filter(s => !s.done).map(s => s.id).join(','), 'debts')
+      // صفحه‌ای که می‌شکند صفحهٔ سفید نمی‌شود
+      const Broken = () => { throw new Error('آزمایش شکستن') }
+      const host = document.createElement('div')
+      document.body.appendChild(host)
+      const root = createRoot(host)
+      const quiet = console.error
+      console.error = () => {}
+      try {
+        root.render(createElement(ErrorBoundary, null, createElement(Broken)))
+        await waitUntil(() => host.textContent?.includes('یک صفحه درست باز نشد') === true)
+        is('پیام آرام‌کننده', host.textContent?.includes('هیچ فروش، پول یا قرضی گم نشده') === true, true)
+        is('راه پیش رو', host.querySelector('button')?.textContent, 'دوباره باز کردن')
+      } finally { console.error = quiet; root.unmount(); host.remove() }
+    }
+  },
+  {
+    name: 'تاریخچهٔ سند — فقط آنچه اسناد ثبت کرده‌اند، به ترتیب وقت',
+    run: async () => {
+      const sale = { id: 7, uuid: 's-7', date: 100, by: 'کارمند', saleType: 'retail', lines: [{ variantId: 1, productName: 'کوهستان', size: '40', color: 'سیاه', qty: 2, unitPrice: 900 }], total: 1800, paid: 800 } as unknown as Sale
+      const returns = [
+        { id: 1, date: 300, kind: 'customer', refId: 7, partyName: 'احمد', lines: [{ qty: 1 }], reason: 'اندازه خورد نبود', settlement: 'reduceDebt', amount: 900, by: 'مالک' },
+        { id: 2, date: 200, kind: 'customer', refId: 7, partyName: 'احمد', lines: [{ qty: 1 }], reason: 'تبادله', settlement: 'cashRefund', amount: 900, deleted: true, cancelledAt: 250, cancelledReason: 'اشتباه' },
+        { id: 3, date: 150, kind: 'customer', refId: 99, partyName: 'دیگر', lines: [{ qty: 1 }], reason: 'x', settlement: 'none', amount: 1 }
+      ] as unknown as ReturnDoc[]
+      const events = saleHistory(sale, returns, [])
+      is('ترتیب وقت', events.map(e => e.title).join(' | '), 'فروش ثبت شد | تبادله | لغو شد | مرجوعی')
+      is('فروش: جوړه و نقد/قرض', events[0].detail, '۲ جوړه · نقد ۸۰۰ ؋ و قرض ۱٬۰۰۰ ؋')
+      is('چه کسی ثبت کرد', events[0].by, 'کارمند')
+      is('دلیل لغو', events[2].detail, 'دلیل: اشتباه')
+      is('دلیل مرجوعی', events[3].detail, '۱ جوړه — ۹۰۰ ؋ — دلیل: اندازه خورد نبود')
+      eq('مرجوعی فروش دیگر نیامد', events.length, 4)
+      const fixed = documentHistory({ date: 10, correctionOfUuid: 'old', correctionReason: 'رقم اشتباه' }, { title: 'مصرف ثبت شد', detail: '۵۰۰ ؋' })
+      is('سند اصلاحی دلیلش را می‌گوید', fixed[0].detail, '۵۰۰ ؋ — دلیل: رقم اشتباه')
+      const gone = documentHistory({ date: 10, deleted: true }, { title: 'مصرف ثبت شد' })
+      is('حذف بی‌وقت: وقت ساخته نمی‌شود', gone[1].at, undefined)
+    }
+  },
+  {
+    name: 'پول اضافه در فروش — صندوق فقط مجموع را می‌گیرد',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 5)
+      // مشتری ۱٬۰۰۰ داد برای فروش ۹۰۰ و ۱۰۰ پس گرفت — ثبت ۱٬۰۰۰ صندوق را ۱۰۰ بیشتر از پول واقعی نشان می‌داد
+      await throws('فروش با پول بیشتر از مجموع رد می‌شود', () => addSale(sell(vId, 1, 900, { paid: 1000 })))
+      eq('فروش ردشده گدام را کم نکرد', await stockOf(vId), 5)
+      eq('فروش ردشده صندوق را تغییر نداد', await cashBalance(), 0)
+      eq('هیچ فروشی ثبت نشد', await db.sales.count(), 0)
+      await addSale(sell(vId, 1, 900, { paid: 900 }))
+      eq('پول پوره: صندوق ۹۰۰', await cashBalance(), 900)
+      eq('گدام یک جوره کم شد', await stockOf(vId), 4)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      // فروش‌های قدیمی که پیش از این قانون ثبت شده‌اند فقط نشان داده می‌شوند
+      const old = [
+        { id: 1, date: 1, total: 900, paid: 1000, customerName: 'احمد' },
+        { id: 2, date: 2, total: 900, paid: 900 },
+        { id: 3, date: 3, total: 500, paid: 2000, deleted: true },
+        { id: 4, date: 4, total: 0, paid: 700, lenderAction: 'x' }
+      ] as unknown as Sale[]
+      const found = overpaidSales(old)
+      eq('فقط یک فروش قدیمی پول اضافه دارد', found.length, 1)
+      eq('اضافه = ثبت‌شده − مجموع', found[0].extra, 100)
+    }
+  },
+  {
+    name: 'پول آماده و صفحه‌کلید پول',
+    run: async () => {
+      // پوره، بعد نوت‌های گرد بعدی — هیچ‌کدام کمتر از مجموع نیست
+      is('۹۰۰ → پوره، ۱٬۰۰۰، ۲٬۰۰۰', quickCashOptions(900).join(','), '900,1000,2000')
+      is('۱٬۲۵۰ → ۱٬۳۰۰، ۱٬۵۰۰، ۲٬۰۰۰', quickCashOptions(1250).join(','), '1250,1300,1500,2000')
+      is('گرد تکراری فقط یک بار', quickCashOptions(3800).join(','), '3800,4000,5000')
+      is('مجموع گرد: فقط هزار بعدی', quickCashOptions(1000).join(','), '1000,2000')
+      is('مجموع صفر: هیچ پیشنهاد', quickCashOptions(0).length, 0)
+      is('افغانی صحیح', quickCashOptions(899.6)[0], 900)
+      // اولین کلید پیشنهاد را عوض می‌کند؛ بعد رقم‌ها پشت هم می‌آیند
+      is('کلید اول جای پیشنهاد را می‌گیرد', keypadPress('900', '1', true), '1')
+      is('۰۰۰', keypadPress('1', '000', false), '1000')
+      is('پاک کردن یک رقم', keypadPress('1000', 'back', false), '100')
+      is('پاک کردن روی پیشنهاد همه را پاک می‌کند', keypadPress('900', 'back', true), '')
+      is('صفر اول حذف می‌شود', keypadPress('0', '5', false), '5')
+      is('بیشتر از ۹ رقم پذیرفته نمی‌شود', keypadPress('123456789', '1', false), '123456789')
+      is('رقم دری موجود هم رقم حساب می‌شود', keypadPress('۹۰۰', '1', false), '9001')
+    }
+  },
   {
     name: 'مفاد هر جنس، زیان فروش زیر قیمت و روزهای باقی ماه',
     run: async () => {
@@ -2477,7 +2615,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const supId = await newSupplier()
       const sarrafId = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
       const vId = await makeVariant()
-      await addSale(sell(vId, 0, 0, { lines: [], total: 0, paid: 20000 })) // پر کردن صندوق
+      await seedCash(20000) // پر کردن صندوق — فروشِ بی‌جنس با پول اضافه حالا رد می‌شود
       await addPurchase(
         buy(supId, vId, 24, 500, { total: 12000, paid: 2000, sarrafId, sarrafName: 'صراف', sarrafAmount: 10000 })
       )
@@ -2787,7 +2925,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const vId = await makeVariant()
 
       // راه اول: مصرف «کسر صندوق» — از مفاد کم می‌شود
-      await addSale(sell(vId, 0, 0, { lines: [], total: 0, paid: 10000 }))
+      await seedCash(10000)
       await reconcile(9700, 'شمارش شام', { mode: 'expense' })
       eq('صندوق برابر شمارش شد', await cashBalance(), 9700)
       eq('مصرف کسر صندوق ثبت شد', (await db.expenses.toArray()).reduce((s, e) => s + e.amount, 0), 300)
@@ -4667,6 +4805,8 @@ export async function runAll(): Promise<{ pass: number; fail: number; report: st
   let pass = 0
   let fail = 0
 
+  // هر سناریو با نام کاربر اجرا می‌شود تا مهر «چه کسی ثبت کرد» در همهٔ راه‌ها آزموده شود
+  accessFlags.actor = 'آزمایش'
   for (const s of SCENARIOS) {
     current = []
     await fresh()

@@ -7,6 +7,7 @@ import ServerCard from './settings/ServerCard'
 import AccountCard from './settings/AccountCard'
 import PinCard from './settings/PinCard'
 import FontSizeCard from './settings/FontSizeCard'
+import DisplayModeCard from './settings/DisplayModeCard'
 import ReminderCard from './settings/ReminderCard'
 import IntegrityCard from './settings/IntegrityCard'
 import YearStartCard from './settings/YearStartCard'
@@ -111,6 +112,7 @@ export default function Settings({
       {show('account') && !isStaff && <ServerCard />}
       {show('reminders') && <ReminderCard />}
       {show('app') && <FontSizeCard />}
+      {show('app') && <DisplayModeCard />}
       {show('app') && !isStaff && <PinCard />}
       {show('year') && !isStaff && <YearStartCard />}
       {show('integrity') && !isStaff && <IntegrityCard />}

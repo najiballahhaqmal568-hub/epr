@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, type Payment } from '../../../db'
-import { Field, inputCls, Modal, PrimaryBtn } from '../../../components/ui'
+import { Field, inputCls, Modal, PrimaryBtn, Skeleton } from '../../../components/ui'
 import { fmtDate, fmtMoney, fmtNum } from '../../../lib/format'
 import { loadDirectTrade } from '../../../lib/directTradeState'
 import { cancelDirectTrade, previewDirectTradeCancellation, type DirectTradeCancellationPreview } from '../../../lib/directTradeCorrections'
@@ -64,7 +64,7 @@ export default function DirectTradeDetail({ tradeUuid, onClose, isStaff = false 
   }
 
   return <Modal title="جزئیات فروش مستقیم" onClose={onClose}>
-    {!result && <p role="status">در حال خواندن معامله…</p>}
+    {!result && <Skeleton rows={4} label="در حال خواندن معامله…" />}
     {result?.error && <p role="alert">{result.error}</p>}
     {state && <>
       <p className="mb-2 font-bold">{state.sale?.customerName} ← {state.purchase?.supplierName}</p>

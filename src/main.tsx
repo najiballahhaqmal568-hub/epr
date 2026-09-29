@@ -3,13 +3,16 @@ import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { db } from './db'
 import { applyFontScale } from './lib/fontScale'
+import { applyDisplayMode } from './lib/displayMode'
 
 registerSW({ immediate: true })
 
 // اندازهٔ فونت انتخاب‌شده پیش از رسم اپ اعمال شود تا صفحه نپرد
 applyFontScale()
+applyDisplayMode()
 
 // بعد از «ریست این موبایل»، تنظیمات نگه‌داشته‌شده را برگردان
 const restore = localStorage.getItem('restoreSettings')
@@ -25,6 +28,8 @@ if (restore) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>
 )

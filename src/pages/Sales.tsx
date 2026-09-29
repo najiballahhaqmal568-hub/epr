@@ -19,6 +19,7 @@ import ReceiptModal from './sales/Receipt'
 import InvoiceModal from './sales/InvoiceModal'
 import SaleHistory from './sales/SaleHistory'
 import SaleShipping from './sales/SaleShipping'
+import SaleTimeline from './sales/SaleTimeline'
 import CustomerGoodsReceiptDetail from './customers/CustomerGoodsReceiptDetail'
 
 export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
@@ -103,7 +104,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
       {!accessFlags.readOnly && !isStaff && !(view === 'new' && checkoutStage === 'payment') && <button disabled={pending || directEnabled === undefined} className="sale-secondary-action mb-4" onClick={() => directEnabled ? setNewDirect(true) : setEnableDirect(true)}>فروش مستقیم</button>}
       {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {view === 'stats' && <SalesStats isStaff={isStaff} />}
-      {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." />}
+      {view === 'held' && drafts.length === 0 && <Empty text="فروش معطل ندارید." hint="اگر مشتری رفت پول بیاورد، سبدش را با «معطل» نگه دارید و مشتری بعدی را راه بیندازید." />}
       {view === 'held' && drafts.length > 0 && (
         <section className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3">
           <div className="mb-2 flex items-center justify-between">
@@ -246,12 +247,16 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         />
       </div>}
       {detail && <Modal title={`جزئیات فروش ${fmtNum(detail.id ?? 0)}`} onClose={() => setDetail(null)}>
+        <div className="doc-paper">
+        <div className="doc-paper-brand"><b>اتل</b><span>فروشگاه اتل · سند فروش {fmtNum(detail.id ?? 0)}</span></div>
         <div className="sale-document-heading"><strong>{detail.customerName || 'مشتری نقدی'}</strong><p>{fmtDate(detail.date)} · {detail.saleType === 'retail' ? 'پرچون' : 'عمده'}</p></div>
         <section aria-label="اجناس فروش" className="sale-detail-goods">{detail.lines.map((line, index) => <div key={index}><span>{line.productName} {line.size} {line.color}<small>{fmtNum(line.qty)} × {fmtMoney(line.unitPrice)}</small></span><strong>{fmtMoney(line.qty * line.unitPrice)}</strong></div>)}</section>
         <div className="sale-document-totals"><p><span>مجموع اجناس</span><strong>{fmtMoney(detail.total + (detail.discount ?? 0))}</strong></p>{(detail.discount ?? 0) > 0 && <p><span>تخفیف</span><span>{fmtMoney(detail.discount!)}</span></p>}<p className="sale-document-net"><span>قابل پرداخت</span><strong>{fmtMoney(detail.total)}</strong></p><p><span>دریافتی</span><span>{fmtMoney(detail.paid)}</span></p>{detail.total > detail.paid && <p className="sale-status-debt"><span>قرض</span><strong>{fmtMoney(detail.total - detail.paid)}</strong></p>}{detail.bookPage && <p><span>صفحهٔ دفتر</span><span>{detail.bookPage}</span></p>}</div>
+        </div>
         <div className="sale-document-actions"><button className="primary-button" onClick={() => { setReceiptFor(detail); setDetail(null) }}>رسید</button><button className="sale-secondary-action" onClick={() => { setInvoiceFor(detail); setDetail(null) }}>فاکتور</button></div>
         <SaleShipping sale={detail} />
         {!accessFlags.readOnly && <section className="sale-detail-corrections" aria-label="مرجوعی و تغییر فروش"><h3>مرجوعی و تغییر فروش</h3><div className="sale-document-actions"><button className="sale-secondary-action" onClick={() => { setReturning(detail); setDetail(null) }}>مرجوعی</button><button className="sale-secondary-action" onClick={() => { setExchanging(detail); setDetail(null) }}>تبادله</button></div><button disabled={deleting} className="sale-delete-action" onClick={() => void confirmDelete(detail)}>{deleting ? 'در حال بررسی…' : 'حذف فروش'}</button></section>}
+        <SaleTimeline sale={detail} />
       </Modal>}
       {receiptFor && (
         <ReceiptModal sale={receiptFor} onClose={() => setReceiptFor(null)} />

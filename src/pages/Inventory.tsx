@@ -220,7 +220,7 @@ export default function Inventory({
           <h2 className="font-bold text-slate-800">{searching ? 'نتیجهٔ جستجو' : 'موجودی اخیر'}</h2>
           <span className="text-xs text-slate-400">{fmtNum(sorted.length)} جنس</span>
         </div>
-        {sorted.length === 0 && <Empty text={searching ? 'هیچ جنسی با این جستجو پیدا نشد.' : 'هنوز جنسی ثبت نشده. با دکمه + بوت جدید اضافه کنید.'} />}
+        {sorted.length === 0 && <Empty text={searching ? 'هیچ جنسی با این جستجو پیدا نشد.' : 'هنوز جنسی ثبت نشده.'} hint={searching ? 'نام، سایز یا رنگ را کوتاه‌تر بنویسید.' : 'با «＋ افزودن بوت جدید» در بالا، بوت‌ها را با عکس اضافه کنید؛ فروشنده از عکس زودتر پیدا می‌کند.'} />}
         {sorted.map((p) => {
           const vs = byProduct.get(p.id!) ?? []
           const totalStock = vs.reduce((s, v) => s + v.stockQty, 0)

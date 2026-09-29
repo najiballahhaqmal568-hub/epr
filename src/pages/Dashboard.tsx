@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, saleCashPaid, type Sale, type Variant } from '../db'
+import { accessFlags, db, saleCashPaid, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
 import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
 import { daysLeftInMonth, expenseAlert, profitSummary } from '../lib/profit'
@@ -12,9 +12,12 @@ import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
 import { Icon } from '../components/Icon'
+import { RollingNumber } from '../components/RollingNumber'
+import { celebrate } from '../lib/motion'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import ExplainModal, { type ExplainKind } from './dashboard/ExplainModal'
 import TodaySalesModal from './dashboard/TodaySalesModal'
+import FirstDayGuide from './dashboard/FirstDayGuide'
 
 function SyncChip() {
   const status = useSyncStatus()
@@ -115,7 +118,8 @@ export default function Dashboard({
   // تنظیمات همین دستگاه: آخرین روز بسته‌شده و هدف مفاد ماهانه
   const prefs = useLiveQuery(async () => ({
     dayClosed: Number((await db.settings.get('dayClosed'))?.value ?? 0),
-    target: Number((await db.settings.get('monthlyProfitTarget'))?.value ?? 0)
+    target: Number((await db.settings.get('monthlyProfitTarget'))?.value ?? 0),
+    celebrated: Number((await db.settings.get('targetCelebrated'))?.value ?? 0)
   }), [])
   const nowTs = Date.now()
   const prevEnd = Math.min(monthStart, prevStart + (nowTs - monthStart))
@@ -141,6 +145,14 @@ export default function Dashboard({
       : hour < 12 && prefs.dayClosed < yesterday && yesterdaySold ? yesterday : null
   const target = prefs?.target ?? 0
   const targetPct = target > 0 ? Math.max(0, Math.round((thisMonth.netProfit / target) * 100)) : 0
+  const reached = !isStaff && target > 0 && thisMonth.netProfit >= target
+  const monthCard = useRef<HTMLButtonElement>(null)
+  // Target reached: one small celebration per month on this device, never again that month.
+  useEffect(() => {
+    if (!reached || !prefs || prefs.celebrated >= monthStart) return
+    void db.settings.put({ key: 'targetCelebrated', value: monthStart })
+    if (monthCard.current) celebrate(monthCard.current)
+  }, [reached, prefs, monthStart])
   const hasTasks = pendingExpenseCount > 0 || lowStock.length > 0 || debtCount > 0 || overdueCount > 0 || Boolean(monthAlert) || closeDay !== null
 
   return (
@@ -149,12 +161,13 @@ export default function Dashboard({
         <div><h1>خانه</h1><p>خلاصهٔ امروز دکان</p></div>
         <SyncChip />
       </div>
+      {!isStaff && !accessFlags.readOnly && <FirstDayGuide goTo={goTo} />}
       <DirectTradeWarning review={directReview} />
       <CustomerGoodsReceiptWarning review={receiptReview} />
 
       <button type="button" aria-label={`فروش امروز ${fmtMoney(todayTotal)} — از کجا آمد`} onClick={() => setExplain('sales')} className="surface explain-card mb-4 block w-full p-5 text-right">
         <p className="text-sm text-slate-500">فروش امروز <span className="explain-hint">از کجا آمد ←</span></p>
-        <p className="mt-2 text-4xl font-bold text-slate-900">{fmtMoney(todayTotal)}</p>
+        <p className="mt-2 text-4xl font-bold text-slate-900"><RollingNumber value={todayTotal} /></p>
         <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-slate-600">
           <span>{fmtNum(todaySales.length)} فروش</span>
           <span>نقد فروش عادی: {fmtMoney(todayCash)}</span>
@@ -163,9 +176,9 @@ export default function Dashboard({
         </div>
       </button>
 
-      {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} className="surface explain-card mb-4 block w-full p-5 text-right">
+      {!isStaff && month && <button type="button" aria-label={`مفاد خالص این ماه ${fmtMoney(thisMonth.netProfit)} — از کجا آمد`} onClick={() => setExplain('month')} ref={monthCard} className="surface explain-card mb-4 block w-full p-5 text-right">
         <p className="text-sm text-slate-500">مفاد خالص این ماه <span className="text-xs">(از {fmtDateShort(monthStart)})</span> <span className="explain-hint">از کجا آمد ←</span></p>
-        <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}>{fmtMoney(thisMonth.netProfit)}</p>
+        <p className={`mt-2 text-3xl font-bold ${thisMonth.netProfit >= 0 ? 'text-teal-700' : 'text-red-700'}`}><RollingNumber value={thisMonth.netProfit} /></p>
         <p className="mt-2 text-sm text-slate-600">مفاد فروش {fmtMoney(thisMonth.grossProfit)} − مصارف {fmtMoney(thisMonth.businessExpenses)}</p>
         <p className={`mt-1 text-sm font-bold ${monthChange >= 0 ? 'text-teal-700' : 'text-red-700'}`}>
           {monthChange >= 0 ? '▲' : '▼'} {fmtMoney(Math.abs(monthChange))} {monthChange >= 0 ? 'بیشتر' : 'کمتر'} از همین وقت ماه گذشته
@@ -173,6 +186,7 @@ export default function Dashboard({
         {target > 0 && <span className="mt-3 block" aria-label="هدف ماه">
           <span className="profit-target-bar"><span style={{ width: `${Math.min(100, targetPct)}%` }} /></span>
           <span className="mt-1 block text-xs text-slate-600">هدف {fmtMoney(target)} — {fmtNum(targetPct)}٪ رسیده · {fmtNum(daysLeftInMonth())} روز مانده</span>
+          {reached && <span className="target-reached">🎉 هدف این ماه رسید</span>}
         </span>}
       </button>}
 
@@ -249,11 +263,11 @@ export default function Dashboard({
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setExplain('receivables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">طلب از مشتریان</span>
-            <span className="block text-lg font-bold text-red-600">{fmtMoney(worth?.receivables ?? 0)}</span>
+            <span className="block text-lg font-bold text-red-600"><RollingNumber value={worth?.receivables ?? 0} /></span>
           </button>
           <button onClick={() => setExplain('cash')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">صندوق</span>
-            <span className="block text-lg font-bold text-slate-800">{fmtMoney(worth?.cash ?? 0)}</span>
+            <span className="block text-lg font-bold text-slate-800"><RollingNumber value={worth?.cash ?? 0} /></span>
           </button>
           <button onClick={() => setExplain('stock')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">موجودی گدام</span>
@@ -261,7 +275,7 @@ export default function Dashboard({
           </button>
           <button onClick={() => setExplain('payables')} className="explain-card rounded-2xl bg-white p-3 text-right shadow-sm">
             <span className="block text-sm text-slate-500">قرض ما</span>
-            <span className="block text-lg font-bold text-amber-700">{fmtMoney(worth?.payables ?? 0)}</span>
+            <span className="block text-lg font-bold text-amber-700"><RollingNumber value={worth?.payables ?? 0} /></span>
           </button>
         </div>
         <p className="mt-2 text-xs text-slate-500">هر عدد را بزنید تا ببینید از کدام حساب‌ها ساخته شده است.</p>

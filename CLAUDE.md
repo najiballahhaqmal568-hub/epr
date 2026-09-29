@@ -99,6 +99,19 @@ products) must write **two adjustment documents** — negative at the source,
 positive at the destination. Otherwise `runIntegrityCheck()` will flag the
 result and a second device will rebuild different numbers.
 
+### Change is never kept in the till
+
+A customer who hands over 1,000 for a 900 sale gets 100 back — the till gains 900. The sale screen
+records `paid = min(tendered, total)` and `ops.addSale` refuses `paid > total`. (Before this rule the whole
+note was stored as cash; «کنترل حساب‌ها» lists those old sales read-only.)
+
+### Design system
+
+Tokens, display modes, motion rules and the UI checks are in `docs/design-system.md`. Two rules matter for
+correctness: a number on screen is always the true number (no count-through animations), and
+«چه کسی ثبت کرد» (`by`) is stamped by the db hook only on ordinary sales/expenses/payments/returns — never
+on direct-trade or goods-receipt documents, which compare their exact content.
+
 ### Partnership accounting
 
 All of it lives in `src/lib/partnership.ts` — `startYear()`, `addPartner()`,
@@ -117,7 +130,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 371 checks in 52 scenarios
+npm test          # tests/checks.ts — currently 1235 checks in 121 scenarios
 ```
 
 ```bash

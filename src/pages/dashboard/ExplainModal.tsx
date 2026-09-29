@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../db'
-import { Modal } from '../../components/ui'
+import { Modal, Skeleton } from '../../components/ui'
 import { fmtMoney, fmtNum } from '../../lib/format'
 import { explainCash, explainPayables, explainReceivables, explainStock, type SourceRow } from '../../lib/numberSources'
 
@@ -41,7 +41,7 @@ export default function ExplainModal({ kind, isStaff, onClose, goTo }: { kind: E
   }, [])
   const go = () => { onClose(); goTo(GO[kind].target) }
   return <Modal title={TITLES[kind]} onClose={onClose}>
-    {!data && <p role="status">در حال خواندن…</p>}
+    {!data && <Skeleton rows={4} />}
     {data && kind === 'receivables' && (() => {
       const e = explainReceivables(data.customers)
       return <>

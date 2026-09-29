@@ -168,6 +168,8 @@ export async function addSale(sale: Sale): Promise<number> {
   assertOrdinarySale(sale)
   sale.total = afn(sale.total)
   sale.paid = afn(sale.paid)
+  // پول اضافه (بازگشت به مشتری) در صندوق نمی‌ماند؛ اگر ثبت شود، صندوق بیشتر از پول واقعی نشان می‌دهد.
+  if (saleCashPaid(sale) > sale.total) throw new Error('پول دریافتی از مجموع فروش بیشتر است؛ باقی را به مشتری پس بدهید — فقط مجموع در صندوق ثبت می‌شود.')
   if (sale.discount !== undefined) sale.discount = afn(sale.discount)
   sale.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {

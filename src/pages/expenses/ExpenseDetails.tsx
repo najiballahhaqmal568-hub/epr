@@ -5,6 +5,8 @@ import { Modal } from '../../components/ui'
 import { fmtDate, fmtMoney } from '../../lib/format'
 import { deleteExpense, expenseCashPaid, expenseCreditAmount, expenseCorrectionBlockedReason } from '../../lib/ops'
 import { TYPE_LABELS } from './labels'
+import { documentHistory } from '../../lib/docHistory'
+import { DocTimeline } from '../../components/DocTimeline'
 
 /** Shared list/calendar entry; accounting stays in ops, never in the view. */
 export default function ExpenseDetails({ expenseId, onClose, onCorrect }: {
@@ -74,6 +76,7 @@ export default function ExpenseDetails({ expenseId, onClose, onCorrect }: {
           </div>}
           {error && <p role="alert" className="mt-3 text-sm font-bold text-red-700">{error}</p>}
         </>}
+        <DocTimeline events={documentHistory(expense, { title: 'مصرف ثبت شد', detail: `${fmtMoney(expense.amount)} · ${expense.categoryName}` })} />
       </>}
     </Modal>
   )

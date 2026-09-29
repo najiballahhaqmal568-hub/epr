@@ -12,6 +12,7 @@ import {
   PeriodCompareCard
 } from '../../components/AnalyticsCards'
 import SoldListCard from '../../components/SoldListCard'
+import SaleSpeedCard from './SaleSpeedCard'
 import DirectTradeWarning, { useDirectTradeReview } from '../../components/DirectTradeWarning'
 import { commercialSaleLines } from '../../lib/commercialLines'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../../components/CustomerGoodsReceiptWarning'
@@ -66,6 +67,7 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
     <>
       <DirectTradeWarning review={directReview} />
       <CustomerGoodsReceiptWarning review={receiptReview} />
+      <SaleSpeedCard />
       <div className="mb-3 flex gap-1 overflow-x-auto pb-1">
         {STATS_PERIODS.map((p) => (
           <button

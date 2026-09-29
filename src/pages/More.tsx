@@ -34,7 +34,7 @@ export default function More({ goTo, isStaff, pendingExpenseCount = 0 }: { goTo:
         {item('settings:account', 'همگام‌سازی و حساب کاربری', isStaff ? 'حساب کاربری و خروج' : 'وضعیت سرور، حساب و کاربران')}
         {!isStaff && item('settings:backup', 'بکاپ و بازیابی', 'دانلود بکاپ یا برگرداندن معلومات')}
         {item('settings:reminders', 'یادآوری‌ها', 'مصارف روزانه و وعده‌های قرض')}
-        {item('settings:app', 'تنظیمات اپ', isStaff ? 'اندازهٔ نوشته' : 'اندازهٔ نوشته و قفل برنامه')}
+        {item('settings:app', 'تنظیمات اپ', isStaff ? 'اندازهٔ نوشته و نمای روز و شب' : 'اندازهٔ نوشته، نمای روز و شب و قفل برنامه')}
       </div>
 
       {!isStaff && (
