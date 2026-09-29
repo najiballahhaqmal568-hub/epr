@@ -1,5 +1,5 @@
 import type { Payment, ReturnDoc, Sale } from '../db'
-import { fmtMoney, fmtNum } from './format'
+import { fmtDateShort, fmtMoney, fmtNum, startOfDay } from './format'
 
 /**
  * «تاریخچهٔ این سند» — only what the documents themselves record: when, who (if stored), what changed
@@ -60,5 +60,39 @@ export function saleHistory(sale: Sale, returns: ReturnDoc[], payments: Payment[
     if (!p.shipping || !sale.uuid || p.shipping.saleUuid !== sale.uuid) continue
     events.push(...documentHistory(p, { title: 'کرایهٔ بار', detail: `کرایه ${fmtMoney(p.shipping.total)} · سهم مشتری ${fmtMoney(p.shipping.customerShare)}` }))
   }
+  return events.sort(byTime)
+}
+
+/**
+ * A payment and every correction of it, oldest first (`chain` follows correctionOfUuid back as far as the
+ * documents exist on this phone). If the first version is not here, its amount and date still come from
+ * `correctionPrevious`, which each replacement stores.
+ */
+export function paymentHistory(chain: Payment[], created: string): HistoryEvent[] {
+  if (!chain.length) return []
+  const first = chain[0]
+  const amount = (n: number) => fmtMoney(Math.abs(n))
+  const events: HistoryEvent[] = []
+  if (first.correctionOfUuid && first.correctionPrevious) events.push({ at: first.correctionPrevious.date, title: created, detail: amount(first.correctionPrevious.amount), tone: 'good' })
+  else events.push({ at: first.date, title: created, detail: join(amount(first.amount), first.note?.trim()), by: first.by, tone: 'good' })
+  for (const v of chain) {
+    if (!v.correctionOfUuid) continue
+    const prev = v.correctionPrevious
+    events.push({
+      at: v.correctedAt ?? v.date,
+      title: 'اصلاح شد',
+      detail: join(
+        prev ? `${amount(prev.amount)} ← ${amount(v.amount)}` : amount(v.amount),
+        // only a different day is news; a few seconds' difference is not
+        prev && startOfDay(prev.date) !== startOfDay(v.date) ? `تاریخ ${fmtDateShort(prev.date)} ← ${fmtDateShort(v.date)}` : undefined,
+        reason(v.correctionReason)
+      ),
+      by: v.by,
+      tone: 'warn'
+    })
+  }
+  const last = chain[chain.length - 1]
+  if (last.cancelledAt) events.push({ at: last.cancelledAt, title: 'لغو شد', detail: reason(last.cancelledReason), by: last.deletedBy, tone: 'bad' })
+  else if (last.deleted && !last.correctedByUuid) events.push({ at: last.deletedAt, title: 'حذف شد — اثر پول و قرض برعکس شد', by: last.deletedBy, tone: 'bad' })
   return events.sort(byTime)
 }

@@ -35,6 +35,12 @@ try {
     const catId = await db.expenseCategories.add({ name: 'ترانسپورت' })
     const expId = await addExpense({ date: Date.now(), categoryId: catId, categoryName: 'ترانسپورت', amount: 300, type: 'business' })
     await correctExpense(expId, { date: Date.now(), amount: 350, cashPaid: 350, reason: 'رقم رسید اشتباه خوانده شد' })
+    const { addPayment, correctCustomerPayment, addOpeningDebt } = await import('/src/lib/ops.ts')
+    const sup = await db.suppliers.add({ name: 'تأمین‌کنندهٔ آزمایشی', kind: 'supplier', balance: 0, createdAt: Date.now() })
+    await addOpeningDebt('supplier', sup, 'تأمین‌کنندهٔ آزمایشی', 3000, 'قرض قبلی')
+    await addPayment({ date: Date.now(), partyType: 'supplier', partyId: sup, partyName: 'تأمین‌کنندهٔ آزمایشی', amount: 1000, via: 'cash' })
+    const payId = await addPayment({ date: Date.now() - 30000, partyType: 'customer', partyId: c, partyName: 'احمد', amount: 2000 })
+    await correctCustomerPayment(payId, { date: Date.now() - 30000, amount: 1500, reason: 'مشتری ۱٬۵۰۰ داده بود' })
     window.saved = { sale: await db.sales.get(saleId), ret: (await db.returns.toArray())[0] }
   })
   const saved = await page.evaluate(() => window.saved)
@@ -67,7 +73,23 @@ try {
   await page.screenshot({ path: `${shots}/receipt-390.png`, fullPage: true })
   await page.keyboard.press('Escape')
 
-  // 3) Expense correction: the replacement says what it replaced and why.
+  // 3) Customer ledger: a corrected receipt shows first amount, who, and the correction with its reason.
+  await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+  await page.getByRole('button').filter({ hasText: 'احمد' }).first().click()
+  await page.getByRole('button', { name: /^تاریخچهٔ دریافت/ }).first().click()
+  const payHistory = page.getByRole('region', { name: 'تاریخچهٔ این سند' }).first()
+  assert.match((await payHistory.innerText()).replace(/\s+/g, ' '), /پول دریافت شد ۲٬۰۰۰ ؋ .* · مالک آزمایشی اصلاح شد ۲٬۰۰۰ ؋ ← ۱٬۵۰۰ ؋ — دلیل: مشتری ۱٬۵۰۰ داده بود .* · مالک آزمایشی/)
+  await page.screenshot({ path: `${shots}/payment-history-390.png`, fullPage: true })
+  await page.keyboard.press('Escape')
+
+  // Supplier account: the payment's history names who paid it.
+  await page.locator('nav').getByRole('button', { name: 'حساب‌ها', exact: true }).click()
+  await page.getByRole('button').filter({ hasText: 'تأمین‌کنندهٔ آزمایشی' }).first().click()
+  await page.getByRole('button', { name: /^تاریخچهٔ پرداخت نقدی/ }).first().click()
+  assert.match((await page.getByRole('region', { name: 'تاریخچهٔ این سند' }).first().innerText()).replace(/\s+/g, ' '), /پول پرداخت شد ۱٬۰۰۰ ؋ .* · مالک آزمایشی/)
+  await page.keyboard.press('Escape')
+
+  // 4) Expense correction: the replacement says what it replaced and why.
   await page.locator('nav').getByRole('button', { name: 'بیشتر', exact: true }).click()
   await page.getByRole('button').filter({ hasText: 'مصارف و صندوق' }).first().click()
   await page.getByRole('button', { name: 'جزئیات ترانسپورت' }).first().click()

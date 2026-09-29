@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, accessFlags, syncFlags, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, syncFlags, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -98,7 +98,7 @@ import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMont
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
-import { documentHistory, saleHistory } from '../src/lib/docHistory'
+import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
@@ -344,6 +344,21 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('سند اصلاحی دلیلش را می‌گوید', fixed[0].detail, '۵۰۰ ؋ — دلیل: رقم اشتباه')
       const gone = documentHistory({ date: 10, deleted: true }, { title: 'مصرف ثبت شد' })
       is('حذف بی‌وقت: وقت ساخته نمی‌شود', gone[1].at, undefined)
+      // رسید پول: دو بار اصلاح، هر بار مبلغ قبلی ← تازه و دلیل
+      const p1 = { uuid: 'p1', date: 1000, amount: 2000, by: 'کارمند', deleted: true, correctedByUuid: 'p2', correctedAt: 2000 } as unknown as Payment
+      const p2 = { uuid: 'p2', date: 1000, amount: 1500, by: 'مالک', correctionOfUuid: 'p1', correctionReason: 'رقم اشتباه', correctedAt: 2000, correctionPrevious: { date: 1000, amount: 2000, cashDelta: 2000 }, deleted: true, correctedByUuid: 'p3' } as unknown as Payment
+      const p3 = { uuid: 'p3', date: 1000 + 3 * 86_400_000, amount: 1500, by: 'مالک', correctionOfUuid: 'p2', correctionReason: 'تاریخ اشتباه', correctedAt: 6000, correctionPrevious: { date: 1000, amount: 1500, cashDelta: 1500 } } as unknown as Payment
+      const pay = paymentHistory([p1, p2, p3], 'پول دریافت شد')
+      is('زنجیرهٔ اصلاح به ترتیب', pay.map(e => e.title).join(' | '), 'پول دریافت شد | اصلاح شد | اصلاح شد')
+      is('ثبت اول: چه کسی و چقدر', `${pay[0].by} ${pay[0].detail}`, 'کارمند ۲٬۰۰۰ ؋')
+      is('اصلاح اول: مبلغ قبلی ← تازه و دلیل', pay[1].detail, '۲٬۰۰۰ ؋ ← ۱٬۵۰۰ ؋ — دلیل: رقم اشتباه')
+      is('اصلاح دوم: تاریخ عوض شد', pay[2].detail?.includes('تاریخ') && pay[2].detail?.endsWith('دلیل: تاریخ اشتباه'), true)
+      is('اصلاح اول: همان روز — خط تاریخ نمی‌آید', pay[1].detail?.includes('تاریخ'), false)
+      // اگر سند اول در این موبایل نیست، مبلغش از correctionPrevious می‌آید
+      const alone = paymentHistory([p3], 'پول دریافت شد')
+      is('بدون سند قبلی هم مبلغ اول معلوم است', `${alone[0].detail} ${alone[0].at}`, '۱٬۵۰۰ ؋ 1000')
+      const deleted = paymentHistory([{ uuid: 'x', date: 1, amount: 300, deleted: true, deletedAt: 9, deletedBy: 'مالک' } as unknown as Payment], 'پول دریافت شد')
+      is('حذف با چه کسی و کی', `${deleted[1].title} ${deleted[1].by} ${deleted[1].at}`, 'حذف شد — اثر پول و قرض برعکس شد مالک 9')
     }
   },
   {
