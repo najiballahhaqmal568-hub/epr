@@ -189,6 +189,14 @@ export async function addSale(sale: Sale): Promise<number> {
   // جوړه عدد صحیح است؛ نیم جوړه یا تعداد منفی گدام را به عدد ناممکن می‌برد
   if (sale.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
   sale.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
+  // مجموع همیشه «قیمت جنس − تخفیف» است؛ ورنه پولی وارد صندوق یا قرض می‌شود که مفاد آن را نمی‌شناسد.
+  // «−» اشتباهی در خانهٔ نقد، پول را از صندوق بیرون می‌برد و قرض مشتری را بیشتر از فروش می‌کرد.
+  if (sale.lines.some((l) => l.unitPrice < 0)) throw new Error('قیمت جنس منفی نمی‌شود')
+  const gross = sale.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
+  const discount = sale.discount ?? 0
+  if (discount < 0 || discount > gross) throw new Error('تخفیف باید بین صفر و قیمت جنس باشد')
+  if (sale.total !== gross - discount) throw new Error('مجموع فروش با قیمت جنس و تخفیف نمی‌خواند')
+  if (sale.paid < 0 || (sale.cashPaid ?? 0) < 0) throw new Error('پول دریافتی منفی نمی‌شود')
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
     for (const line of sale.lines) {
       const v = await db.variants.get(line.variantId)

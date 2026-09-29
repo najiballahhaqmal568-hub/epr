@@ -266,6 +266,27 @@ async function settlement() {
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
   {
+    name: 'بازبینی کامل — فروش: پول منفی، تخفیف منفی یا مجموعِ نادرست ثبت نمی‌شود',
+    run: async () => {
+      await seedCash(1000)
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 5)
+      const cId = await newCustomer('احمد')
+      // «−۵۰۰» در خانهٔ نقد: صندوق ۵۰۰ کم می‌شد و مشتری ۲٬۳۰۰ قرضدار — برای فروش ۱٬۸۰۰
+      await throws('پول دریافتی منفی رد می‌شود', () => addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'احمد', paid: -500 })))
+      // تخفیف منفی مجموع را از قیمت جنس بیشتر می‌کرد و آن پول در هیچ مفادی نمی‌نشست
+      await throws('تخفیف منفی رد می‌شود', () => addSale(sell(vId, 2, 900, { total: 1900, paid: 1900, discount: -100 })))
+      await throws('تخفیف بیشتر از قیمت جنس رد می‌شود', () => addSale(sell(vId, 2, 900, { total: 0, paid: 0, discount: 2000, customerId: cId, customerName: 'احمد' })))
+      await throws('مجموعی که با جنس و تخفیف نمی‌خواند رد می‌شود', () => addSale(sell(vId, 2, 900, { total: 1500, paid: 1500 })))
+      await throws('قیمت منفی رد می‌شود', () => addSale(sell(vId, 1, -900, { total: -900, paid: 0, customerId: cId, customerName: 'احمد' })))
+      eq('صندوق دست نخورد', await cashBalance(), 1000)
+      eq('گدام دست نخورد', await stockOf(vId), 5)
+      eq('قرض مشتری دست نخورد', (await db.customers.get(cId))!.balance, 0)
+      await addSale(sell(vId, 2, 900, { total: 1700, paid: 1000, discount: 100, customerId: cId, customerName: 'احمد' }))
+      eq('فروش درست هنوز کار می‌کند: قرض ۷۰۰', (await db.customers.get(cId))!.balance, 700)
+    }
+  },
+  {
     name: 'بازبینی کامل — مرجوعی به تأمین‌کننده: یک خرید دو بار برنمی‌گردد و جوړه نصف نمی‌شود',
     run: async () => {
       const vId = await makeVariant({ purchasePrice: 500 })
@@ -2391,8 +2412,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const legacyRoot = createRoot(legacyHost)
       try {
         legacyRoot.render(createElement(PartnersCard, { netProfit: 0 }))
-        await waitUntil(() => legacyHost.textContent?.includes('برداشت/مصرف امسال') === true)
-        const legacyDrawLine = Array.from(legacyHost.querySelectorAll('p')).find((p) => p.textContent?.includes('برداشت/مصرف امسال'))
+        // سطر پیش از خواندن اسناد با «۰ ؋» نشان داده می‌شود — صبر تا عدد واقعی برسد (بدون این، گاهی سرخ می‌شد)
+        const drawLine = () => Array.from(legacyHost.querySelectorAll('p')).find((p) => p.textContent?.includes('برداشت/مصرف امسال'))
+        await waitUntil(() => Boolean(drawLine()) && !drawLine()!.textContent!.includes(': ۰ ؋'))
+        const legacyDrawLine = drawLine()
         is('سند قدیمی بدون نشانگر همراه سند نو یک‌بار حساب می‌شود', legacyDrawLine?.textContent?.includes('۵٬۷۰۰'), true)
       } finally {
         legacyRoot.unmount()
