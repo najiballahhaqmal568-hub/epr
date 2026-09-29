@@ -27,7 +27,7 @@ for (const role of ['staff', 'viewer']) {
       assert.equal(await page.getByRole('button', { name: /^راپورها/ }).count(), 0)
     } else {
       const before = await businessSnapshot(page)
-      await page.getByRole('button', { name: 'فروش جدید', exact: true }).click()
+      await page.getByRole('navigation').getByRole('button', { name: 'فروش', exact: true }).click()
       await page.getByRole('heading', { name: 'میز فروش', exact: true }).waitFor()
       assert.equal(await page.getByRole('button', { name: 'ثبت فروش', exact: true }).count(), 0)
       const denied = await page.evaluate(async () => {

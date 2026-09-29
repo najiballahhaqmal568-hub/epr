@@ -1,4 +1,4 @@
-// Profit tools: below-cost warning at sale time, «مفاد هر جنس» in Reports, monthly target on Home, «بستن امروز» in the evening.
+// Profit tools: below-cost warning at sale time, «مفاد هر جنس» in Reports, monthly target on Home, «بستن روز» in the evening card.
 // Actual App, disposable IndexedDB, external requests blocked by localApp.
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
@@ -34,7 +34,7 @@ try {
   await page.getByRole('heading', { name: 'خانه' }).waitFor()
 
   // 2) «بستن امروز»: numbers, then the task disappears and dayClosed is stored.
-  await page.getByRole('button').filter({ hasText: 'بستن امروز' }).click()
+  await page.getByRole('region', { name: 'پیام این ساعت' }).getByRole('button', { name: 'بستن روز' }).click()
   const close = page.getByRole('dialog', { name: /بستن روز/ })
   const summary = await close.getByRole('region', { name: 'خلاصهٔ روز' }).innerText()
   assert.match(summary, /فروش \(۲\)\s*۳٬۵۰۰ ؋[\s\S]*مفاد فروش\s*۱٬۰۰۰ ؋[\s\S]*مصارف تجارت\s*−۳۰۰ ؋[\s\S]*مفاد خالص امروز\s*۷۰۰ ؋/)
@@ -43,7 +43,7 @@ try {
   await close.getByRole('button', { name: 'دیدم — روز بسته شد' }).click()
   await close.getByRole('status').filter({ hasText: 'روز بسته شد ✓' }).waitFor()
   await close.waitFor({ state: 'detached' })
-  await page.getByRole('button').filter({ hasText: 'بستن امروز' }).waitFor({ state: 'detached' })
+  await page.getByRole('region', { name: 'پیام این ساعت' }).waitFor({ state: 'detached' })
   assert.equal(await page.evaluate(async () => (await (await import('/src/db.ts')).db.settings.get('dayClosed'))?.value), (await page.evaluate(async () => (await import('/src/lib/format.ts')).startOfDay(Date.now()))))
 
   // 3) Monthly target: set 2,000 → 700 / 2,000 = 35٪ on the Home card.

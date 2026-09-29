@@ -11,7 +11,7 @@ const active = async name => assert.equal(await nav(name).getAttribute('aria-cur
 const heading = name => page.getByRole('heading', { name, exact: true }).waitFor()
 try {
   await heading('خانه')
-  assert.deepEqual(await page.locator('.app-nav button').allTextContents(), ['خانه', 'فروش', 'حساب‌ها', 'بیشتر'])
+  assert.deepEqual(await page.locator('.app-nav button').allTextContents(), ['خانه', 'حساب‌ها', 'فروش', 'گدام', 'بیشتر'])
   await active('خانه')
   await page.evaluate(async () => {
     const { db } = await import('/src/db.ts')
@@ -35,10 +35,11 @@ try {
   assert.deepEqual((await page.locator('.management-row').allTextContents()).slice(0, 3).map(t => t.split('\n').join('')), [
     'گدام و خریدموجودی و سفارش مجدد', 'خریدهااسناد و تاریخچهٔ خرید', 'مصارف و صندوقمصارف روزانه، کتگوری‌ها و صندوق'
   ])
-  for (const [label, title] of [['گدام و خرید', 'گدام و خرید'], ['خریدها', 'خرید'], ['مصارف و صندوق', 'پول و مصارف']]) {
+  // «گدام» is a tab of its own: the stock pages (and purchases opened from them) light it, not «بیشتر»
+  for (const [label, title, selected] of [['گدام و خرید', 'گدام و خرید', 'گدام'], ['خریدها', 'خرید', 'گدام'], ['مصارف و صندوق', 'پول و مصارف', 'بیشتر']]) {
     await nav('بیشتر').click()
     await page.getByRole('button', { name: new RegExp('^' + label) }).click()
-    await heading(title); await active('بیشتر')
+    await heading(title); await active(selected)
     assert.equal(await page.locator('dialog[open]').count(), 0, `${label} must be history, not a form`)
     assert.equal(await page.locator('.sync-status').count(), 1)
   }
@@ -63,5 +64,5 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `overflow ${width}`)
     await page.screenshot({ path: `${artifacts}/home-${width}.png`, fullPage: true })
   }
-  console.log('PASS actual App: four tabs, active routes, account paths, no accidental forms, persistent sync, unchanged records, responsive screenshots')
+  console.log('PASS actual App: five tabs, active routes, account paths, no accidental forms, persistent sync, unchanged records, responsive screenshots')
 } finally { await app.close() }
