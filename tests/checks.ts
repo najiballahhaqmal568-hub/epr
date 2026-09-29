@@ -16,6 +16,8 @@ import ReturnModal from '../src/pages/sales/ReturnModal'
 import CustomerDetail from '../src/pages/customers/CustomerDetail'
 import LandingCostModal from '../src/pages/purchases/LandingCostModal'
 import CashView from '../src/pages/expenses/CashView'
+import { RollingNumber } from '../src/components/RollingNumber'
+import appCss from '../src/index.css?raw'
 import { PurchaseReturnModal } from '../src/pages/purchases/ReturnModals'
 import { overReturnedSales } from '../src/lib/returns'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
@@ -268,6 +270,40 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازبینی کامل — عدد غلتان در صفحهٔ راست‌به‌چپ برعکس دیده نمی‌شود',
+    run: async () => {
+      // صفحهٔ خانه ۱۳٬۷۶۰ را «۰۶۷,۳۱» نشان می‌داد: هر رقم جعبهٔ جدا بود و راست‌به‌چپ چیده می‌شد
+      // همان قاعده‌های CSS اپ برای عدد غلتان — بدون آن‌ها آزمایش همان چیزی را که گوشی می‌بیند نمی‌بیند
+      const style = document.createElement('style')
+      style.textContent = appCss.split('\n').filter((line) => line.includes('.rolling-')).join('\n')
+      document.head.append(style)
+      const host = document.createElement('div')
+      host.dir = 'rtl'
+      host.style.fontSize = '24px'
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement('p', null, createElement(RollingNumber, { value: 13760 })))
+        await waitUntil(() => Boolean(host.querySelector('.rolling-number')))
+        // خواندن ارقام به ترتیبی که روی صفحه از چپ به راست دیده می‌شوند
+        const digits: { x: number; ch: string }[] = []
+        const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          const text = n.textContent ?? ''
+          for (let i = 0; i < text.length; i++) {
+            if (!/[۰-۹0-9]/.test(text[i])) continue
+            const range = document.createRange()
+            range.setStart(n, i); range.setEnd(n, i + 1)
+            digits.push({ x: range.getBoundingClientRect().left, ch: text[i] })
+          }
+        }
+        const seen = digits.sort((a, b) => a.x - b.x).map((d) => d.ch).join('')
+        is('قاعدهٔ CSS عدد غلتان خوانده شد', style.textContent.includes('.rolling-number'), true)
+        is('روی صفحه ۱۳۷۶۰ خوانده می‌شود، نه ۰۶۷۳۱', seen, '۱۳۷۶۰')
+      } finally { root.unmount(); host.remove(); style.remove() }
+    }
+  },
   {
     name: 'بازبینی کامل — «ثبت تصفیه» با خانهٔ خالی تمام صندوق را کسر حساب نمی‌کند',
     run: async () => {

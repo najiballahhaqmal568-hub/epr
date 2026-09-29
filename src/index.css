@@ -484,7 +484,8 @@ input[type='number'] {
 
 /* Numbers: changed digits roll in from the direction of change. */
 .rolling-number { display: inline-block; white-space: nowrap; }
-.rolling-number > span { display: inline-block; white-space: pre; }
+.rolling-digits { display: inline-block; direction: ltr; unicode-bidi: isolate; }
+.rolling-digits > span { display: inline-block; white-space: pre; }
 .roll-up { animation: roll-up var(--motion-slow) var(--ease-out); }
 .roll-down { animation: roll-down var(--motion-slow) var(--ease-out); }
 @keyframes roll-up { from { opacity: 0; transform: translateY(55%); } to { opacity: 1; transform: none; } }
