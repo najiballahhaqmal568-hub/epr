@@ -93,6 +93,10 @@ The owner opens the app standing at the counter, so the page answers three quest
 - **`TimePrompt`** — a separate light card with a gold border, only in the morning («صندوق را بشمارید» with the
   till figure the app expects; «بعداً» is remembered for the day in the `homeMorningSkip` setting) and in the
   evening («روز را ببندید»). It states one fact and offers one button.
+- **`BackupNudgeCard`** — «بکاپ بگیرید», only when something is unprotected AND the last backup is 7+ days old
+  (or never): the rule is `lib/backupReminder.ts` (`backupNudge`). The button downloads a real backup and
+  records `lastBackupAt`; «بعداً» sleeps it until tomorrow. Both settings are per-device and are excluded from
+  backup files, so an old backup can never move «last backup» backwards. Owner only.
 - **Quick actions** — دریافت پول (picks a customer, then opens the account with the payment form open),
   مصرف, خرید, شمارش نقد (opens the count window itself). Hidden for the read-only role.
 - **«پول شما کجاست»** (`MoneyMap`) — cash, receivables, stock and debts as rows; every bar shares ONE scale (the
@@ -115,4 +119,5 @@ The owner opens the app standing at the counter, so the page answers three quest
 | `tests/sale-design-e2e.mjs` | size grid, keypad, quick cash, change not kept, speed card |
 | `tests/documents-e2e.mjs` | who saved it, sale/expense history, branded receipt |
 | `tests/first-day-e2e.mjs` | guide ticks from data, empty screens act |
+| `tests/backup-reminder-e2e.mjs` | reminder rule on the real screen, real download is a valid backup, snooze, last backup in Settings, staff excluded, AA contrast |
 | `tests/home-e2e.mjs` | month card and bars, morning/evening card, money map on one scale, recent sale opens, 5-tab nav, receive money, staff view |
