@@ -98,6 +98,7 @@ import { parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, s
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
+import { ordinaryCustomerCollections } from '../src/lib/directTradeReports'
 import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
@@ -279,6 +280,20 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('هیچ خریدی ثبت نشد', await db.purchases.count(), 0)
       await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1000 })
       eq('پرداخت پوره هنوز کار می‌کند', await cashBalance(), 4000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — «وصول قرض مشتریان» فقط پول دریافت‌شده است',
+    run: async () => {
+      const p = (amount: number, extra: object = {}) => ({ date: 1, partyType: 'customer', partyId: 1, partyName: 'احمد', amount, ...extra }) as unknown as Payment
+      const payments = [
+        p(1000, { via: 'cash', cashDelta: 1000 }),
+        p(-50000, { via: 'opening', cashDelta: 0, note: 'قرض قبلی' }),
+        p(-300, { via: 'cash', cashDelta: -500, shipping: { saleUuid: 's', total: 500, customerShare: 300, received: 0 } }),
+        p(-200, { note: 'کسر صندوق' })
+      ]
+      // قرض قبلی، قرض کرایه و کسر صندوق پولی نیست که گرفته باشیم
+      eq('فقط ۱٬۰۰۰ دریافت شده', ordinaryCustomerCollections(payments), 1000)
     }
   },
   {

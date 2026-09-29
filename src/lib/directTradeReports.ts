@@ -27,9 +27,13 @@ export interface DirectPeriodSummary {
   customerCash: number; customerDirect: number; supplierCash: number; incomplete: number
 }
 
-/** Ordinary debt receipts only; direct routes are reported separately and D never enters cash. */
+/**
+ * Ordinary debt receipts only; direct routes are reported separately and D never enters cash.
+ * Negative customer documents (previous debt, freight debt, till shortage charged to a person) raise the
+ * debt — they are not money collected, so they are left out.
+ */
 export function ordinaryCustomerCollections(payments: Payment[]): number {
-  return payments.filter(payment => payment.partyType === 'customer' && !payment.directPayment && !payment.goodsReceipt).reduce((sum, payment) => sum + payment.amount, 0)
+  return payments.filter(payment => payment.partyType === 'customer' && !payment.deleted && payment.amount > 0 && !payment.directPayment && !payment.goodsReceipt).reduce((sum, payment) => sum + payment.amount, 0)
 }
 
 export function customerGoodsReceiptSettlements(payments: Payment[], readyReceiptUuids: ReadonlySet<string>): number {
