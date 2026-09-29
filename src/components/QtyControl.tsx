@@ -12,7 +12,7 @@ export default function QtyControl({ qty, onChange }: { qty: number; onChange: (
         aria-label="تعداد"
         inputMode="numeric"
         value={qty}
-        onChange={(e) => onChange(Math.max(1, parseNum(e.target.value) || 1))}
+        onChange={(e) => onChange(Math.max(1, Math.floor(parseNum(e.target.value) || 1)))}
       />
       <button type="button" aria-label="افزایش تعداد" className="quantity-step" onClick={() => onChange(qty + 1)}>
         ＋

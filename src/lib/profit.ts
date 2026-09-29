@@ -10,6 +10,7 @@
  */
 import type { Expense, ReturnDoc, Sale, Variant } from '../db'
 import { commercialSaleLines } from './commercialLines'
+import { returnProfit } from './returns'
 import { addCalendarDays, fmtNum, startOfDay, startOfMonth } from './format'
 
 export interface ProfitInput {
@@ -57,7 +58,7 @@ export function profitSummary(input: ProfitInput): ProfitSummary {
   }
   const salesProfit = goodsValue - goodsCost - discounts
   const returnedProfit = input.returns.filter(r => !r.deleted && r.kind === 'customer')
-    .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0)
+    .reduce((s, r) => s + returnProfit(r), 0)
   const grossProfit = salesProfit - returnedProfit
   const business = input.expenses.filter(e => !e.deleted && !e.shopClosed && e.type === 'business')
   const businessExpenses = business.reduce((s, e) => s + e.amount, 0)

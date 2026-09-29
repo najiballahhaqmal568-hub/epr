@@ -11,6 +11,13 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
+import AdjustModal from '../src/pages/inventory/AdjustModal'
+import ReturnModal from '../src/pages/sales/ReturnModal'
+import CustomerDetail from '../src/pages/customers/CustomerDetail'
+import LandingCostModal from '../src/pages/purchases/LandingCostModal'
+import CashView from '../src/pages/expenses/CashView'
+import { PurchaseReturnModal } from '../src/pages/purchases/ReturnModals'
+import { overReturnedSales } from '../src/lib/returns'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
 import PartnersCard from '../src/pages/reports/PartnersCard'
 import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
@@ -85,7 +92,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { calculateShipping } from '../src/lib/shipping'
 import * as shippingOps from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
-import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
+import { runIntegrityCheck, fixMismatch, computeCustomerBalances } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects, applyRemoteRow, encodeRefs, decodeRefs, shouldResetForGeneration } from '../src/lib/sync'
 import { dailyFlow } from '../src/lib/cashflow'
@@ -94,10 +101,11 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
-import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
+import { parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
+import { ordinaryCustomerCollections } from '../src/lib/directTradeReports'
 import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
@@ -233,7 +241,7 @@ async function profitAndLoss(): Promise<number> {
   )
   const retProfit = returns
     .filter((r) => r.kind === 'customer')
-    .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0)
+    .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0) - (r.discount ?? 0), 0)
   const bizExp = expenses.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0)
   return salesProfit - retProfit - bizExp
 }
@@ -260,6 +268,466 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازبینی کامل — «ثبت تصفیه» با خانهٔ خالی تمام صندوق را کسر حساب نمی‌کند',
+    run: async () => {
+      await seedCash(5000)
+      const button = (text: string) => Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim().startsWith(text))
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(CashView))
+        await waitUntil(() => Boolean(button('تصفیه «دکان»')))
+        button('تصفیه «دکان»')!.click()
+        await waitUntil(() => Boolean(button('ثبت تصفیه')))
+        // هیچ عددی ننوشته — دکمه نباید کار کند
+        button('ثبت تصفیه')!.click()
+        await new Promise((r) => setTimeout(r, 300))
+      } finally { root.unmount(); host.remove() }
+      eq('صندوق ۵٬۰۰۰ ماند، نه صفر', await cashBalance(), 5000)
+      eq('هیچ مصرف «کسر صندوق» ساخته نشد', (await db.expenses.toArray()).filter((e) => !e.deleted).length, 0)
+      eq('هیچ تصفیه‌ای ثبت نشد', await db.reconciliations.count(), 0)
+      await throws('شمارش منفی رد می‌شود', () => reconcile(-500))
+      eq('صندوق هنوز ۵٬۰۰۰', await cashBalance(), 5000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — دو لمس «ثبت دریافت» و «ثبت مصارف رسیدن» فقط یک سند می‌سازد',
+    run: async () => {
+      const button = (text: string) => Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === text)
+      const inside = async (el: ReturnType<typeof createElement>, steps: () => Promise<void>) => {
+        const host = document.createElement('div')
+        document.body.append(host)
+        const root = createRoot(host)
+        try { root.render(el); await steps() } finally { root.unmount(); host.remove() }
+      }
+
+      // مشتری ۲٬۰۰۰ قرضدار؛ ۵۰۰ می‌دهد — دو لمس سریع روی «ثبت دریافت»
+      const cId = await newCustomer('احمد')
+      await addOpeningDebt('customer', cId, 'احمد', 2000, 'قرض قبلی')
+      const customer = (await db.customers.get(cId))!
+      await inside(createElement(CustomerDetail, { customer, onClose: () => undefined }), async () => {
+        await waitUntil(() => Boolean(button('دریافت پول')))
+        button('دریافت پول')!.click()
+        await waitUntil(() => Boolean(button('ثبت دریافت')))
+        const amount = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.includes('مبلغ دریافتی'))!.querySelector('input')!
+        fillInput(amount, '500')
+        await new Promise((r) => setTimeout(r, 50))
+        const save = button('ثبت دریافت')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      })
+      eq('یک دریافت ثبت شد، نه دو', (await db.payments.toArray()).filter((p) => !p.deleted && p.amount === 500).length, 1)
+      eq('قرض ۱٬۵۰۰، نه ۱٬۰۰۰', (await db.customers.get(cId))!.balance, 1500)
+      eq('صندوق ۵۰۰، نه ۱٬۰۰۰', await cashBalance(), 500)
+
+      // مصارف رسیدن روی هم جمع می‌شود — دو لمس یعنی دو برابر کرایه و دو برابر قیمت تمام‌شده
+      const vId = await makeVariant()
+      const sId = await newSupplier()
+      await addPurchase(buy(sId, vId, 10, 500, { paid: 0 }))
+      await inside(createElement(LandingCostModal, { onClose: () => undefined }), async () => {
+        await waitUntil(() => Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('10 جوړه') || b.textContent?.includes('۱۰ جوړه')))
+        Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('۱۰ جوړه') || b.textContent?.includes('10 جوړه'))!.click()
+        const amount = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.includes('مجموع مصارف رسیدن'))!.querySelector('input')!
+        fillInput(amount, '300')
+        await new Promise((r) => setTimeout(r, 50))
+        const save = button('ثبت مصارف رسیدن')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      })
+      eq('مصارف رسیدن ۳۰۰، نه ۶۰۰', (await db.purchases.toArray())[0].landingCost ?? 0, 300)
+      eq('صندوق فقط یک بار ۳۰۰ کم شد', await cashBalance(), 200)
+      eq('قیمت تمام‌شده ۵۳۰، نه ۵۶۰', await costOf(vId), 530)
+    }
+  },
+  {
+    name: 'بازبینی کامل — فروش: پول منفی، تخفیف منفی یا مجموعِ نادرست ثبت نمی‌شود',
+    run: async () => {
+      await seedCash(1000)
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 5)
+      const cId = await newCustomer('احمد')
+      // «−۵۰۰» در خانهٔ نقد: صندوق ۵۰۰ کم می‌شد و مشتری ۲٬۳۰۰ قرضدار — برای فروش ۱٬۸۰۰
+      await throws('پول دریافتی منفی رد می‌شود', () => addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'احمد', paid: -500 })))
+      // تخفیف منفی مجموع را از قیمت جنس بیشتر می‌کرد و آن پول در هیچ مفادی نمی‌نشست
+      await throws('تخفیف منفی رد می‌شود', () => addSale(sell(vId, 2, 900, { total: 1900, paid: 1900, discount: -100 })))
+      await throws('تخفیف بیشتر از قیمت جنس رد می‌شود', () => addSale(sell(vId, 2, 900, { total: 0, paid: 0, discount: 2000, customerId: cId, customerName: 'احمد' })))
+      await throws('مجموعی که با جنس و تخفیف نمی‌خواند رد می‌شود', () => addSale(sell(vId, 2, 900, { total: 1500, paid: 1500 })))
+      await throws('قیمت منفی رد می‌شود', () => addSale(sell(vId, 1, -900, { total: -900, paid: 0, customerId: cId, customerName: 'احمد' })))
+      eq('صندوق دست نخورد', await cashBalance(), 1000)
+      eq('گدام دست نخورد', await stockOf(vId), 5)
+      eq('قرض مشتری دست نخورد', (await db.customers.get(cId))!.balance, 0)
+      await addSale(sell(vId, 2, 900, { total: 1700, paid: 1000, discount: 100, customerId: cId, customerName: 'احمد' }))
+      eq('فروش درست هنوز کار می‌کند: قرض ۷۰۰', (await db.customers.get(cId))!.balance, 700)
+    }
+  },
+  {
+    name: 'بازبینی کامل — مرجوعی به تأمین‌کننده: یک خرید دو بار برنمی‌گردد و جوړه نصف نمی‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 10)
+      const sId = await newSupplier()
+      const pId = await addPurchase(buy(sId, vId, 4, 500, { paid: 0 }))
+      const owed = async () => (await db.suppliers.get(sId))!.balance
+      eq('قرض ما به تأمین‌کننده ۲٬۰۰۰', await owed(), 2000)
+      const purchase = (await db.purchases.get(pId))!
+      const back = (qty: number, amount: number) => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', refId: pId, lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount })
+
+      // صفحهٔ مرجوعی: دو لمس پشت‌سرهم فقط یک سند
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(PurchaseReturnModal, { purchase, onClose: () => undefined }))
+        // تا برگشت‌های قبلی خوانده نشده، دکمهٔ زیاد بسته است
+        await waitUntil(() => Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.trim() === '＋' && !b.disabled))
+        const plus = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === '＋')!
+        for (let i = 0; i < 4; i++) { plus.click(); await new Promise((r) => setTimeout(r, 30)) }
+        const save = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ثبت مرجوعی')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      } finally { root.unmount(); host.remove() }
+      eq('یک مرجوعی ثبت شد، نه دو', (await db.returns.toArray()).filter((r) => !r.deleted).length, 1)
+      eq('قرض ما صفر، نه منفی', await owed(), 0)
+
+      await throws('همان چهار جوړه دوباره برنمی‌گردد', () => back(4, 2000))
+      await throws('حتی یک جوړه بیشتر از خرید برنمی‌گردد', () => back(1, 500))
+      eq('قرض ما هنوز صفر', await owed(), 0)
+      eq('گدام: ۱۰ + ۴ − ۴', await stockOf(vId), 10)
+
+      const p2 = await addPurchase(buy(sId, vId, 4, 500, { paid: 0 }))
+      await throws('برگشت به قیمت بالاتر از خرید رد می‌شود', () => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', refId: p2, lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 1, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount: 900 }))
+      await throws('نیم جوړه برنمی‌گردد', () => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 0.5, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount: 250 }))
+      await throws('نیم جوړه خریده نمی‌شود', () => addPurchase(buy(sId, vId, 1.5, 500, { paid: 0 })))
+      eq('گدام: ۱۴، بدون نیم جوړه', await stockOf(vId), 14)
+      eq('قرض ما فقط خرید دوم', await owed(), 2000)
+
+      // خرید در راه هنوز در گدام نیست — از آن چیزی به تأمین‌کننده برنمی‌گردد
+      const p3 = await addPurchase(buy(sId, vId, 2, 500, { paid: 0, received: false }))
+      await throws('از خرید در راه مرجوعی ثبت نمی‌شود', () => addSupplierReturn({ date: Date.now(), kind: 'supplier', partyId: sId, partyName: 'تأمین‌کننده', refId: p3, lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 500, restock: false }], reason: 'خرابی جنس', settlement: 'reduceDebt', amount: 1000 }))
+      eq('گدام دست نخورد', await stockOf(vId), 14)
+    }
+  },
+  {
+    name: 'بازبینی کامل — مرجوعی: بیشتر از فروخته یا بیشتر از پولِ گرفته‌شده پس داده نمی‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 10)
+      const cId = await newCustomer('احمد')
+      // دو جوړه ۹۰۰ = ۱٬۸۰۰، تخفیف ۱۰۰ ← مشتری ۱٬۷۰۰ قرضدار شد
+      const saleId = await addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'احمد', saleType: 'retail', total: 1700, paid: 0, discount: 100 }))
+      const sale = (await db.sales.get(saleId))!
+      const ret = (qty: number, amount: number) => addCustomerReturn({ date: Date.now(), kind: 'customer', partyId: cId, partyName: 'احمد', refId: saleId, saleType: 'retail', lines: [{ ...sale.lines[0], qty, restock: true }], reason: 'سایز غلط', settlement: 'reduceDebt', amount })
+      const balance = async () => (await db.customers.get(cId))!.balance
+
+      // صفحهٔ مرجوعی: دو جوړه برگشت = همان ۱٬۷۰۰ که مشتری داده بود، نه ۱٬۸۰۰
+      const shown = async (taps: number) => {
+        const fresh = (await db.sales.get(saleId))!
+        const host = document.createElement('div')
+        document.body.append(host)
+        const root = createRoot(host)
+        try {
+          root.render(createElement(ReturnModal, { sale: fresh, onClose: () => undefined }))
+          // تا مرجوعی‌های قبلی خوانده نشده، دکمهٔ زیاد بسته است — مثل کاربر واقعی صبر می‌کنیم
+          await waitUntil(() => Boolean(document.querySelector<HTMLButtonElement>('[aria-label^="زیاد کردن برگشتی"]:not([disabled])')) || Boolean(document.querySelector('[role="status"]')?.textContent?.includes('قبلاً برگشت خورده')))
+          const plus = document.querySelector<HTMLButtonElement>('[aria-label^="زیاد کردن برگشتی"]')!
+          for (let i = 0; i < taps; i++) { plus.click(); await new Promise((r) => setTimeout(r, 30)) }
+          const dd = Array.from(document.querySelectorAll('dt')).find((d) => d.textContent === 'مبلغ مرجوعی')!.nextElementSibling!
+          return { amount: dd.textContent ?? '', plusDisabled: plus.disabled }
+        } finally { root.unmount(); host.remove() }
+      }
+      is('صفحه برای دو جوړه ۱٬۷۰۰ نشان می‌دهد', (await shown(2)).amount, '۱٬۷۰۰ ؋')
+
+      await throws('پس دادن ۱٬۸۰۰ برای فروشی که ۱٬۷۰۰ بود رد می‌شود', () => ret(2, 1800))
+      eq('قرض دست نخورد', await balance(), 1700)
+      await ret(1, 850)
+      eq('یک جوړه برگشت: قرض ۸۵۰', await balance(), 850)
+      const after = await shown(5)
+      is('فقط یک جوړهٔ دیگر قابل برگشت است', after.amount, '۸۵۰ ؋')
+      is('دکمهٔ زیاد بعد از یک جوړه بسته است', after.plusDisabled, true)
+      await ret(1, 850)
+      eq('همه برگشت: قرض صفر، نه پیشکیِ ساختگی', await balance(), 0)
+      await throws('جوړهٔ سوم از فروش دو جوړه‌ای رد می‌شود', () => ret(1, 850))
+      eq('گدام: ۱۰ − ۲ + ۲', await stockOf(vId), 10)
+      eq('قرض هنوز صفر', await balance(), 0)
+      const sales = await db.sales.toArray()
+      const returns = await db.returns.toArray()
+      const p = profitSummary({ sales, returns, expenses: [], variants: [], readyTradeUuids: new Set(), readyReceiptUuids: new Set() })
+      eq('فروشی که کامل برگشت، مفاد صفر دارد', p.grossProfit, 0)
+      eq('راه دوم مفاد هم صفر', await profitAndLoss(), 0)
+
+      // تخفیف ۱۰۰ بر سه جوړه: سهم‌ها ۳۳ + ۳۴ + ۳۳ — جمعشان دقیقاً ۱۰۰
+      const c2 = await newCustomer('کریم')
+      const s2 = await addSale(sell(vId, 3, 900, { customerId: c2, customerName: 'کریم', saleType: 'retail', total: 2600, paid: 0, discount: 100 }))
+      const line2 = (await db.sales.get(s2))!.lines[0]
+      for (const amount of [867, 866, 867]) {
+        await addCustomerReturn({ date: Date.now(), kind: 'customer', partyId: c2, partyName: 'کریم', refId: s2, saleType: 'retail', lines: [{ ...line2, qty: 1, restock: true }], reason: 'سایز غلط', settlement: 'reduceDebt', amount })
+      }
+      eq('سه برگشت جدا: قرض دقیقاً صفر', (await db.customers.get(c2))!.balance, 0)
+      is('برگشت‌های درست در «کنترل حساب‌ها» نمی‌آیند', overReturnedSales(await db.sales.toArray(), await db.returns.toArray()).length, 0)
+
+      // سند قدیمی (پیش از این قاعده، مستقیم در دیتابیس): فروش دو جوړه با تخفیف ۱۰۰ که سه جوړه به قیمت کامل برگشت
+      const c3 = await newCustomer('ولی')
+      const s3 = await addSale(sell(vId, 2, 900, { customerId: c3, customerName: 'ولی', saleType: 'retail', total: 1700, paid: 1700, discount: 100 }))
+      const line3 = (await db.sales.get(s3))!.lines[0]
+      await db.returns.bulkAdd([
+        { date: Date.now(), kind: 'customer', partyId: c3, partyName: 'ولی', refId: s3, lines: [{ ...line3, qty: 2, restock: true }], reason: 'قدیمی', settlement: 'cashRefund', amount: 1800 },
+        { date: Date.now(), kind: 'customer', partyId: c3, partyName: 'ولی', refId: s3, lines: [{ ...line3, qty: 1, restock: true }], reason: 'قدیمی', settlement: 'cashRefund', amount: 900 }
+      ])
+      const found = overReturnedSales(await db.sales.toArray(), await db.returns.toArray())
+      eq('یک فروش پیدا شد', found.length, 1)
+      eq('یک جوړه اضافه', found[0].extraPairs, 1)
+      // داده بود ۱٬۷۰۰؛ پس گرفت ۲٬۷۰۰ ← ۱٬۰۰۰ بیشتر
+      eq('۱٬۰۰۰ بیشتر پس داده شد', found[0].extraMoney, 1000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — خرید با پرداخت بیشتر از مجموع یا منفی رد می‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 100 })
+      const sId = await newSupplier()
+      await seedCash(5000)
+      const line = { variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 10, unitCost: 100 }
+      // خرید ۱٬۰۰۰ با ۱٬۲۰۰ پرداخت: صندوق ۱٬۲۰۰ کم می‌شد و ۲۰۰ اضافه در هیچ حسابی نمی‌نشست
+      await throws('پرداخت بیشتر از مجموع رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1200 }))
+      await throws('پرداخت منفی رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: -5 }))
+      await throws('پرداخت و حواله با هم بیشتر از مجموع رد می‌شود', async () => {
+        const sarraf = await db.suppliers.add({ name: 'صراف', kind: 'sarraf', balance: 0 }) as number
+        await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 600, sarrafId: sarraf, sarrafName: 'صراف', sarrafAmount: 500 })
+      })
+      eq('صندوق دست نخورد', await cashBalance(), 5000)
+      eq('گدام دست نخورد', await stockOf(vId), 0)
+      eq('هیچ خریدی ثبت نشد', await db.purchases.count(), 0)
+      // مجموعی که با جنس نمی‌خواند: قرض تأمین‌کننده از مجموع می‌آید ولی قیمت گدام از جنس — دو عدد از هم جدا می‌شدند
+      await throws('مجموع خرید که با جنس نمی‌خواند رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1500, paid: 0 }))
+      await throws('قیمت خرید منفی رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [{ ...line, unitCost: -100 }], total: -1000, paid: 0 }))
+      eq('قرض تأمین‌کننده دست نخورد', (await db.suppliers.get(sId))!.balance, 0)
+      await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1000 })
+      eq('پرداخت پوره هنوز کار می‌کند', await cashBalance(), 4000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — دو لمس پشت‌سرهم «ذخیره» فقط یک سند می‌سازد',
+    run: async () => {
+      await seedCash(5000)
+      const catId = await db.expenseCategories.add({ name: 'نان' }) as number
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(NewExpenseModal, { onClose: () => undefined }))
+        await waitUntil(() => Boolean(host.querySelector('select')) && Boolean(Array.from(host.querySelectorAll('option')).find((o) => o.value === String(catId))))
+        chooseSelect(host.querySelector('select')!, String(catId))
+        const amount = Array.from(host.querySelectorAll('label')).find((l) => l.textContent?.includes('مبلغ *'))!.querySelector('input')!
+        fillInput(amount, '300')
+        await new Promise((r) => setTimeout(r, 50))
+        const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ذخیره')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      } finally { root.unmount(); host.remove() }
+      eq('یک مصرف ثبت شد، نه دو', (await db.expenses.toArray()).filter((e) => !e.deleted).length, 1)
+      eq('صندوق فقط یک بار کم شد', await cashBalance(), 4700)
+
+      const vId = await makeVariant({ purchasePrice: 100 })
+      await setOpeningStock(vId, 5)
+      const variant = (await db.variants.get(vId))!
+      const product = (await db.products.get(variant.productId))!
+      const adjHost = document.createElement('div')
+      document.body.append(adjHost)
+      const adjRoot = createRoot(adjHost)
+      try {
+        adjRoot.render(createElement(AdjustModal, { variant, product, onClose: () => undefined }))
+        await waitUntil(() => Boolean(Array.from(adjHost.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ثبت تعدیل')))
+        const save = Array.from(adjHost.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ثبت تعدیل')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      } finally { adjRoot.unmount(); adjHost.remove() }
+      eq('داغمه یک بار: موجودی ۴', await stockOf(vId), 4)
+      // تعداد جوړه عدد صحیح است — ۱٫۵ جوړه وجود ندارد
+      await throws('تعدیل با کسر رد می‌شود', () => addAdjustment({ date: Date.now(), variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qtyChange: 1.5, reason: 'correction' }))
+      eq('موجودی دست نخورد', await stockOf(vId), 4)
+      // صفحهٔ تبادله «۱٫۵» را به عنوان تعداد جنس نو می‌پذیرفت و فروش نیم جوړه ثبت می‌شد
+      await throws('فروش با کسر جوړه رد می‌شود', () => addSale(sell(vId, 1.5, 900)))
+      await throws('فروش با تعداد صفر یا منفی رد می‌شود', () => addSale(sell(vId, -1, 900)))
+      eq('موجودی باز هم دست نخورد', await stockOf(vId), 4)
+    }
+  },
+  {
+    name: 'بازبینی کامل — «وصول قرض مشتریان» فقط پول دریافت‌شده است',
+    run: async () => {
+      const p = (amount: number, extra: object = {}) => ({ date: 1, partyType: 'customer', partyId: 1, partyName: 'احمد', amount, ...extra }) as unknown as Payment
+      const payments = [
+        p(1000, { via: 'cash', cashDelta: 1000 }),
+        p(-50000, { via: 'opening', cashDelta: 0, note: 'قرض قبلی' }),
+        p(-300, { via: 'cash', cashDelta: -500, shipping: { saleUuid: 's', total: 500, customerShare: 300, received: 0 } }),
+        p(-200, { note: 'کسر صندوق' })
+      ]
+      // قرض قبلی، قرض کرایه و کسر صندوق پولی نیست که گرفته باشیم
+      eq('فقط ۱٬۰۰۰ دریافت شده', ordinaryCustomerCollections(payments), 1000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — ماه‌به‌ماه و هر مشتری مرجوعی را هم کم می‌کند',
+    run: async () => {
+      const l = (qty: number, unitPrice: number, unitCost: number) => ({ variantId: 1, productName: 'ب', size: '40', color: 'س', qty, unitPrice, unitCost })
+      const sales = [{ id: 1, date: 10, customerName: 'احمد', saleType: 'retail', lines: [l(3, 900, 500)], total: 2700, paid: 2700 }] as unknown as Sale[]
+      const returns = [{ id: 1, date: 20, kind: 'customer', refId: 1, partyName: 'احمد', lines: [{ ...l(1, 900, 500), restock: true }], reason: 'r', settlement: 'cashRefund', amount: 900, saleType: 'retail' }] as unknown as ReturnDoc[]
+      const month = () => ({ key: 'm', label: 'میزان ۱۴۰۵' })
+      const summary = profitSummary({ sales, returns, expenses: [], variants: [], readyTradeUuids: new Set(), readyReceiptUuids: new Set() })
+      const m = byMonth(sales, month, returns)[0]
+      eq('مفاد ماه = مفاد همان ماه در راپور (۱٬۲۰۰ − ۴۰۰)', m.profit, summary.grossProfit)
+      eq('فروش ماه پس از مرجوعی', m.sales, 1800)
+      const c = byCustomer(sales, returns)[0]
+      eq('مفاد مشتری پس از مرجوعی', c.profit, 800)
+      eq('خرید مشتری پس از مرجوعی', c.sales, 1800)
+    }
+  },
+  {
+    name: 'بازبینی کامل — «اجناس فروخته‌شده» همان مفاد آمار را می‌گوید (با تخفیف و مرجوعی)',
+    run: async () => {
+      const l = (variantId: number, qty: number, unitPrice: number, unitCost: number) => ({ variantId, productName: 'ب', size: '40', color: 'س', qty, unitPrice, unitCost })
+      const sales = [
+        { id: 1, date: 1, saleType: 'retail', lines: [l(1, 2, 900, 500), l(2, 1, 1500, 1000)], total: 3200, paid: 3200, discount: 100 },
+        { id: 2, date: 2, saleType: 'retail', lines: [l(1, 1, 900, 500)], total: 850, paid: 850, discount: 50 }
+      ] as unknown as Sale[]
+      const returns = [{ id: 1, date: 3, kind: 'customer', refId: 1, partyName: 'x', lines: [{ ...l(1, 1, 900, 500), restock: true }], reason: 'r', settlement: 'cashRefund', amount: 900 }] as unknown as ReturnDoc[]
+      const rows = soldInPeriod(sales, returns)
+      const cardProfit = rows.reduce((s, r) => s + (r.revenue - r.cost), 0)
+      const cardRevenue = rows.reduce((s, r) => s + r.revenue, 0)
+      const summary = profitSummary({ sales, returns, expenses: [], variants: [], readyTradeUuids: new Set(), readyReceiptUuids: new Set() })
+      // (۲×۴۰۰ + ۵۰۰ − ۱۰۰) + (۴۰۰ − ۵۰) − مرجوعی ۴۰۰ = ۱٬۱۵۰
+      eq('مفاد سال/دوره', summary.grossProfit, 1150)
+      eq('کارت فروخته‌شده همان مفاد', cardProfit, summary.grossProfit)
+      // فروش پس از تخفیف و مرجوعی: ۳٬۲۰۰ + ۸۵۰ − ۹۰۰
+      eq('کارت فروخته‌شده همان فروش خالص', cardRevenue, 3150)
+    }
+  },
+  {
+    name: 'بازبینی کامل — خواندن مبلغ با جداکنندهٔ هزار دری',
+    run: async () => {
+      // اپ خودش مبلغ را «۱٬۵۰۰» نشان می‌دهد؛ اگر همین کاپی و paste شود، ۱ خوانده می‌شد
+      eq('۱٬۵۰۰', parseNum('۱٬۵۰۰'), 1500)
+      eq('۱۲٬۳۴۵٬۶۷۸', parseNum('۱۲٬۳۴۵٬۶۷۸'), 12345678)
+      eq('با واحد پول', parseNum('۱٬۵۰۰ ؋'), 1500)
+      eq('کامهٔ لاتین', parseNum('1,500'), 1500)
+      eq('ممیز دری', parseNum('۲٫۵'), 2.5)
+      eq('خالی صفر', parseNum(''), 0)
+    }
+  },
+  {
+    name: 'بازبینی کامل — دفتر مشتری با قرض ثبت‌شده یکی است، حتی با فروش قدیمیِ پول اضافه',
+    run: async () => {
+      const cId = await newCustomer()
+      const sales = [
+        // فروش قدیمی پیش از قاعدهٔ «پول اضافه در صندوق نمی‌ماند»: ۱٬۰۰۰ برای ۹۰۰
+        { id: 1, date: 1, customerId: cId, saleType: 'retail', lines: [], total: 900, paid: 1000 },
+        { id: 2, date: 2, customerId: cId, saleType: 'retail', lines: [], total: 500, paid: 200 }
+      ] as unknown as Sale[]
+      const ledger = buildCustomerLedger(sales, [], [])
+      const expected = computeCustomerBalances(sales, [], []).get(cId) ?? 0
+      eq('قرض مورد انتظار', expected, 300)
+      eq('آخر دفتر = قرض ثبت‌شده', ledger.length ? ledger[ledger.length - 1].balance : 0, expected)
+    }
+  },
+  {
+    name: 'بازبینی کامل — جنس در راه جزء دارایی است؛ خرید در راه نقصِ ساختگی نمی‌سازد',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 100 })
+      const sId = await newSupplier()
+      await seedCash(5000)
+      const before = (await netWorth()).assets
+      // ۱۰ جوړه × ۱۰۰ نقد خریده شد، هنوز نرسیده: پول رفت، جنس از دکان ماست
+      const pid = await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 10, unitCost: 100 }], total: 1000, paid: 1000, received: false })
+      const inTransit = await netWorth()
+      eq('دارایی خالص با خرید در راه عوض نمی‌شود', inTransit.assets, before)
+      eq('ارزش جنس در راه جدا نشان داده می‌شود', inTransit.inTransit, 1000)
+      await receivePurchase(pid)
+      const arrived = await netWorth()
+      eq('بعد از رسیدن هم همان دارایی', arrived.assets, before)
+      eq('بعد از رسیدن در راه صفر', arrived.inTransit, 0)
+      eq('بعد از رسیدن در گدام', arrived.stock, 1000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — بستن سال: یا همه پرداخت می‌شود یا هیچ‌کدام',
+    run: async () => {
+      const a = await db.suppliers.add({ name: 'شریک الف', balance: 0, kind: 'partner', capital: 1000, share: 50 }) as number
+      const b = await db.suppliers.add({ name: 'شریک ب', balance: 0, kind: 'partner', capital: 1000, share: 50 }) as number
+      await seedCash(700)
+      // هر کدام ۵۰۰ می‌گیرد؛ صندوق فقط ۷۰۰ دارد — دومی رد می‌شود و اولی هم نباید بیرون برود
+      await throws('پول کافی نیست — رد', () => settleYear({ choices: { [a]: 'take', [b]: 'take' }, payCash: true, yearProfit: 1000, withdrawnBy: () => 0 }))
+      eq('صندوق دست نخورد', await cashBalance(), 700)
+      eq('هیچ برداشت نیمه‌کاره نماند', (await db.cashMovements.toArray()).filter(m => m.type === 'withdrawal').length, 0)
+      is('سال باز ماند', (await db.settings.get('partnershipStart'))?.value, undefined)
+    }
+  },
+  {
+    name: 'بازبینی کامل — بستن سال: سهم‌ها دقیقاً برابر مفاد سال',
+    run: async () => {
+      const ids = [
+        await db.suppliers.add({ name: 'الف', balance: 0, kind: 'partner', capital: 0, share: 50 }) as number,
+        await db.suppliers.add({ name: 'ب', balance: 0, kind: 'partner', capital: 0, share: 30 }) as number,
+        await db.suppliers.add({ name: 'ج', balance: 0, kind: 'partner', capital: 0, share: 20 }) as number
+      ]
+      // ۱٬۰۰۳ × ۵۰٪/۳۰٪/۲۰٪ = ۵۰۱٫۵ / ۳۰۰٫۹ / ۲۰۰٫۶ — گرد کردن جدا ۱٬۰۰۴ می‌ساخت
+      const choices = Object.fromEntries(ids.map(id => [id, 'reinvest' as const]))
+      await settleYear({ choices, payCash: false, yearProfit: 1003, withdrawnBy: () => 0 })
+      const caps = await Promise.all(ids.map(async id => (await db.suppliers.get(id))!.capital ?? 0))
+      eq('جمع سهم‌ها = مفاد سال', caps.reduce((x, y) => x + y, 0), 1003)
+      // نقص هم دقیق تقسیم می‌شود
+      for (const id of ids) await db.suppliers.update(id, { capital: 1000 })
+      await settleYear({ choices, payCash: false, yearProfit: -1003, withdrawnBy: () => 0 })
+      const after = await Promise.all(ids.map(async id => (await db.suppliers.get(id))!.capital ?? 0))
+      eq('جمع نقص‌ها = نقص سال', after.reduce((x, y) => x + y, 0), 3000 - 1003)
+    }
+  },
+  {
+    name: 'بازبینی کامل — کسر صندوق «خانه» که مصرف شد، با حذف به همان «خانه» برمی‌گردد',
+    run: async () => {
+      await db.cashMovements.add({ date: Date.now(), type: 'capitalIn', amount: 1000, box: 'خانه', note: 'آزمایش' })
+      await reconcile(800, '', { mode: 'expense' }, 'خانه')
+      eq('کسر از «خانه» رفت', await cashBalance('خانه'), 800)
+      const shortage = (await db.expenses.toArray())[0]
+      await deleteExpense(shortage.id!)
+      eq('حذف: پول به «خانه» برگشت', await cashBalance('خانه'), 1000)
+      eq('حذف: «دکان» دست نخورد', await cashBalance(SHOP_BOX), 0)
+    }
+  },
+  {
+    name: 'بازبینی کامل — موبایل دوم: حذف پرداخت، پول را به جای همان پرداخت برمی‌گرداند',
+    run: async () => {
+      // در موبایل دوم: یک مصرف محلی که حرکت صندوقش refId=1 دارد
+      await seedCash(1000)
+      const catId = await db.expenseCategories.add({ name: 'نان' }) as number
+      await addExpense({ date: Date.now(), categoryId: catId, categoryName: 'نان', amount: 100, type: 'business' })
+      const cUuid = '00000000-0000-4000-8000-00000000c001'
+      await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, uuid: cUuid, createdAt: Date.now() })
+      // رسیدِ «خانه» از موبایل اول: این‌جا شناسهٔ محلی ۱ می‌گیرد؛ حرکت صندوقش refId موبایل اول (۷) را دارد
+      await applyRemoteRow('payments', { uuid: '00000000-0000-4000-8000-00000000p001', deleted: false, data: { date: Date.now(), partyType: 'customer', partyUuid: cUuid, partyName: 'احمد', amount: 300, via: 'cash', cashDelta: 300, box: 'خانه' } })
+      await applyRemoteRow('cashMovements', { uuid: '00000000-0000-4000-8000-00000000m001', deleted: false, data: { date: Date.now(), type: 'customerPayment', refId: 7, amount: 300, box: 'خانه', note: 'احمد' } })
+      eq('«خانه» پول رسید را دارد', await cashBalance('خانه'), 300)
+      const paymentId = (await db.payments.toArray())[0].id!
+      await deletePayment(paymentId)
+      eq('حذف: پول از «خانه» رفت', await cashBalance('خانه'), 0)
+      eq('حذف: «دکان» دست نخورد', await cashBalance(SHOP_BOX), 900)
+    }
+  },
+  {
+    name: 'بازبینی کامل — موبایل دوم: مصرفِ اصلاح‌شده رد اصلاح را نگه می‌دارد',
+    run: async () => {
+      const catId = await db.expenseCategories.add({ name: 'نان', uuid: '00000000-0000-4000-8000-00000000e0c1' }) as number
+      const data = { date: 1000, categoryUuid: '00000000-0000-4000-8000-00000000e0c1', categoryName: 'نان', amount: 100, cashPaid: 0, creditAmount: 0, type: 'business' }
+      await applyRemoteRow('expenses', { uuid: '00000000-0000-4000-8000-00000000e001', deleted: false, data })
+      await applyRemoteRow('expenses', { uuid: '00000000-0000-4000-8000-00000000e001', deleted: true, data: { ...data, correctedByUuid: 'next', correctedAt: 2000, deletedBy: 'مالک', deletedAt: 2000 } })
+      const local = (await db.expenses.toArray())[0]
+      is('حذف رسید', local.deleted, true)
+      is('کدام سند جایش را گرفت', local.correctedByUuid, 'next')
+      is('چه کسی', local.deletedBy, 'مالک')
+      eq('کی', local.correctedAt ?? 0, 2000)
+      eq('دستهٔ مصرف همان است', local.categoryId ?? 0, catId)
+    }
+  },
   {
     name: 'مهر «چه کسی ثبت کرد» — فقط اسناد عادی، نه همگام‌سازی',
     run: async () => {
@@ -1534,17 +2002,18 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // جنسِ برگشتی دوباره فروخته شود؛ ابطال رد گردد و همه‌چیز سالم بماند
       const ret3 = await addCustomerReturn({
         date: Date.now(), kind: 'customer', partyId: custId, partyName: 'کریم', refId: saleId,
-        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 5, unitPrice: 900, restock: true }],
+        // هر چهار جوړهٔ فروش برمی‌گردد (پیش از این، این آزمایش پنج جوړه از فروش چهارتایی پس می‌گرفت)
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 4, unitPrice: 900, restock: true }],
         amount: 1000, settlement: 'reduceDebt', reason: 'برگشت بزرگ'
       })
-      eq('گدام با برگشت پنج‌تایی', await stockOf(vId), 11)
+      eq('گدام با برگشت چهارتایی', await stockOf(vId), 10)
       await addSale(sell(vId, 10, 900))
-      eq('گدام پس از فروش دوباره', await stockOf(vId), 1)
+      eq('گدام پس از فروش دوباره', await stockOf(vId), 0)
       await throws(
         'ابطال وقتی موجودی نمی‌رسد رد شود',
         () => cancelCustomerReturn(ret3, 'دیر شد')
       )
-      eq('شکست: گدام تغییری نکرد', await stockOf(vId), 1)
+      eq('شکست: گدام تغییری نکرد', await stockOf(vId), 0)
       eq('شکست: قرض تغییری نکرد', (await db.customers.get(custId))!.balance, 1600)
       eq('شکست: سند زنده ماند', Boolean((await db.returns.get(ret3))!.deleted), false)
     }
@@ -2023,8 +2492,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       const legacyRoot = createRoot(legacyHost)
       try {
         legacyRoot.render(createElement(PartnersCard, { netProfit: 0 }))
-        await waitUntil(() => legacyHost.textContent?.includes('برداشت/مصرف امسال') === true)
-        const legacyDrawLine = Array.from(legacyHost.querySelectorAll('p')).find((p) => p.textContent?.includes('برداشت/مصرف امسال'))
+        // سطر پیش از خواندن اسناد با «۰ ؋» نشان داده می‌شود — صبر تا عدد واقعی برسد (بدون این، گاهی سرخ می‌شد)
+        const drawLine = () => Array.from(legacyHost.querySelectorAll('p')).find((p) => p.textContent?.includes('برداشت/مصرف امسال'))
+        await waitUntil(() => Boolean(drawLine()) && !drawLine()!.textContent!.includes(': ۰ ؋'))
+        const legacyDrawLine = drawLine()
         is('سند قدیمی بدون نشانگر همراه سند نو یک‌بار حساب می‌شود', legacyDrawLine?.textContent?.includes('۵٬۷۰۰'), true)
       } finally {
         legacyRoot.unmount()

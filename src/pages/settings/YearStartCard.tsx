@@ -105,6 +105,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
           </p>
           <div className="rounded-xl bg-slate-50 p-3">
             <Line label="ارزش جنس گدام" value={nums.stock} hint={`${fmtNum(nums.pairs)} جوړه — در تب «گدام»`} />
+            {nums.inTransit > 0 && <Line label="جنس در راه" value={nums.inTransit} hint="خریده شده، هنوز به گدام نرسیده — مال دکان است" />}
             <Line label="پول نقد در صندوق" value={nums.cash} hint="در «مصارف ← صندوق ← تصفیه صندوق»" />
             <Line label="طلب از مشتریان" value={nums.receivables} hint="در «مشتریان ← قرض قبلی»" />
             <Line label="قرض ما به تأمین‌کنندگان" value={nums.payables} red hint="در «خرید ← تأمین‌کنندگان»" />
@@ -292,6 +293,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
           <p className="mb-3 font-bold text-slate-800">۳) تأیید نهایی</p>
           <div className="rounded-xl bg-slate-50 p-3">
             <Line label="ارزش جنس گدام" value={nums.stock} />
+            {nums.inTransit > 0 && <Line label="جنس در راه" value={nums.inTransit} />}
             <Line label="پول صندوق" value={nums.cash} />
             <Line label="طلب از مشتریان" value={nums.receivables} />
             {nums.supplierCredits > 0 && <Line label="پیشکی نزد تأمین‌کننده" value={nums.supplierCredits} />}
@@ -335,7 +337,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
               →
             </button>
             <div className="flex-1">
-              <PrimaryBtn onClick={() => void finish()}>تأیید — سال مالی شروع شود</PrimaryBtn>
+              <PrimaryBtn onClick={finish}>تأیید — سال مالی شروع شود</PrimaryBtn>
             </div>
           </div>
         </>

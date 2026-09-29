@@ -36,26 +36,40 @@ export function soldInPeriod(sales: Sale[], returns: ReturnDoc[] = []): SoldRow[
 
   for (const s of sales) {
     if (s.deleted || s.directTrade?.status === 'cancelled') continue
-    for (const l of commercialSaleLines(s)) {
+    const lines = commercialSaleLines(s)
+    const gross = lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0)
+    // تخفیف فاکتور به نسبت قیمت میان خطوط تقسیم می‌شود (خط آخر باقی را می‌گیرد) — همان قاعدهٔ
+    // lib/profit، تا فروش و مفادِ این لیست با آمار همان صفحه یکی باشد
+    let discountLeft = s.discount ?? 0
+    lines.forEach((l, index) => {
+      const value = l.qty * l.unitPrice
+      const discount = index === lines.length - 1 ? discountLeft : gross > 0 ? Math.round(((s.discount ?? 0) * value) / gross) : 0
+      discountLeft -= discount
       const key = l.variantId === undefined ? `direct:${l.productName}|${l.size}|${l.color}` : `variant:${l.variantId}`
       const r = row(key, l.variantId, l.productName, l.size, l.color)
       r.qty += l.qty
-      r.revenue += l.qty * l.unitPrice
+      r.revenue += value - discount
       r.cost += l.qty * (l.unitCost ?? 0)
       r.lastDate = Math.max(r.lastDate, s.date)
-    }
+    })
   }
 
   for (const d of returns) {
     if (d.deleted || d.kind !== 'customer') continue
-    for (const l of d.lines) {
+    // سهم تخفیفی که با مرجوعی پس داده نشد، به همان قاعدهٔ فروش میان خطوط تقسیم می‌شود
+    const gross = d.lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0)
+    let discountLeft = d.discount ?? 0
+    d.lines.forEach((l, index) => {
+      const value = l.qty * l.unitPrice
+      const discount = index === d.lines.length - 1 ? discountLeft : gross > 0 ? Math.round(((d.discount ?? 0) * value) / gross) : 0
+      discountLeft -= discount
       const r = map.get(`variant:${l.variantId}`)
-      if (!r) continue
+      if (!r) return
       r.qty -= l.qty
-      r.revenue -= l.qty * l.unitPrice
+      r.revenue -= value - discount
       // قیمت خرید هم باید پس برود، ورنه «مفاد» کمتر از واقعیت نشان می‌دهد
       r.cost -= l.qty * (l.unitCost ?? 0)
-    }
+    })
   }
 
   return [...map.values()].filter((r) => r.qty !== 0).sort((a, b) => b.qty - a.qty)

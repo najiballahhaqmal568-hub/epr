@@ -4,6 +4,7 @@
  */
 import type { ReturnDoc, Sale } from '../db'
 import { commercialSaleLines, type CommercialSaleLine } from './commercialLines'
+import { returnProfit } from './returns'
 
 export interface Totals {
   sales: number
@@ -27,10 +28,6 @@ export function saleProfit(s: Sale): number {
   return commercialSaleLines(s).reduce((a, l) => a + lineProfit(l), 0) - (s.discount ?? 0)
 }
 
-/** مفادی که با مرجوعی مشتری پس گرفته می‌شود */
-export function returnProfit(r: ReturnDoc): number {
-  return r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0)
-}
 
 /**
  * مقایسهٔ عمده و پرچون — سؤال «فایدهٔ عمده چقدر بود و پرچون چقدر».
@@ -88,8 +85,8 @@ export interface CustomerRow extends Totals {
   kind: 'retail' | 'wholesale'
 }
 
-/** آمار هر مشتری: چقدر خرید کرد و چقدر مفاد داد */
-export function byCustomer(sales: Sale[]): CustomerRow[] {
+/** آمار هر مشتری: چقدر خرید کرد و چقدر مفاد داد — مرجوعیِ همان مشتری کم می‌شود */
+export function byCustomer(sales: Sale[], returns: ReturnDoc[] = []): CustomerRow[] {
   const map = new Map<string, CustomerRow>()
   for (const s of sales) {
     if (s.directTrade?.status === 'cancelled') continue
@@ -103,6 +100,13 @@ export function byCustomer(sales: Sale[]): CustomerRow[] {
     if (s.saleType === 'wholesale') cur.kind = 'wholesale'
     map.set(s.customerName, cur)
   }
+  for (const r of returns) {
+    const cur = r.kind === 'customer' && !r.deleted ? map.get(r.partyName) : undefined
+    if (!cur) continue
+    cur.sales -= r.amount
+    cur.profit -= returnProfit(r)
+    cur.pairs -= r.lines.reduce((a, l) => a + l.qty, 0)
+  }
   return [...map.values()].map((c) => ({ ...c, ...withMargin(c) }))
 }
 
@@ -111,8 +115,8 @@ export interface MonthRow extends Totals {
   label: string
 }
 
-/** فروش و مفاد ماه‌به‌ماه */
-export function byMonth(sales: Sale[], monthOf: (ts: number) => { key: string; label: string }): MonthRow[] {
+/** فروش و مفاد ماه‌به‌ماه — مرجوعی در ماهِ خودش کم می‌شود، همان قاعدهٔ راپور */
+export function byMonth(sales: Sale[], monthOf: (ts: number) => { key: string; label: string }, returns: ReturnDoc[] = []): MonthRow[] {
   const map = new Map<string, MonthRow>()
   for (const s of sales) {
     if (s.directTrade?.status === 'cancelled') continue
@@ -122,6 +126,15 @@ export function byMonth(sales: Sale[], monthOf: (ts: number) => { key: string; l
     cur.profit += saleProfit(s)
     cur.pairs += commercialSaleLines(s).reduce((a, l) => a + l.qty, 0)
     cur.count += 1
+    map.set(key, cur)
+  }
+  for (const r of returns) {
+    if (r.kind !== 'customer' || r.deleted) continue
+    const { key, label } = monthOf(r.date)
+    const cur = map.get(key) ?? { key, label, ...emptyTotals() }
+    cur.sales -= r.amount
+    cur.profit -= returnProfit(r)
+    cur.pairs -= r.lines.reduce((a, l) => a + l.qty, 0)
     map.set(key, cur)
   }
   return [...map.values()].sort((a, b) => a.key.localeCompare(b.key)).map((m) => ({ ...m, ...withMargin(m) }))

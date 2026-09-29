@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
 import { addExchange } from '../../lib/ops'
+import { priorReturnsOf, returnRefund, returnableQtys } from '../../lib/returns'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
@@ -34,7 +35,12 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
           .slice(0, 12)
       : []
 
-  const returnAmount = sale.lines.reduce((s, l, i) => s + (qtys[i] ?? 0) * l.unitPrice, 0)
+  // همان قاعدهٔ صفحهٔ مرجوعی: جوړهٔ برگشت‌خورده دوباره برنمی‌گردد و سهم تخفیف پس داده نمی‌شود
+  const prior = useLiveQuery(async () => priorReturnsOf(sale, await db.returns.filter((r) => r.refId === sale.id).toArray()), [sale.id])
+  const left = prior ? returnableQtys(sale, prior) : sale.lines.map(() => 0)
+  const chosen = sale.lines.map((_, i) => Math.min(qtys[i] ?? 0, left[i]))
+  const refund = returnRefund(sale, prior ?? [], chosen)
+  const returnAmount = refund.amount
   const newTotal = newLines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
   const diff = newTotal - returnAmount
   const cashIn = cashTouched ? parseNum(cashStr) : Math.max(0, diff)
@@ -57,7 +63,7 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
   async function save() {
     if (savingRef.current) return
     const retLines = sale.lines
-      .map((l, i) => ({ ...l, qty: qtys[i] ?? 0, restock }))
+      .map((l, i) => ({ ...l, qty: chosen[i], restock }))
       .filter((l) => l.qty > 0)
     if (!retLines.length) return setError('جنس برگشتی را انتخاب کنید')
     if (!newLines.length) return setError('جنس جدید را انتخاب کنید')
@@ -117,19 +123,20 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
                 <p className="text-slate-500">
                   فروخته: {fmtNum(l.qty)} × {fmtMoney(l.unitPrice)}
                 </p>
+                {prior && left[i] < l.qty && <p className="text-slate-500">قبلاً برگشت: {fmtNum(l.qty - left[i])} جوړه</p>}
               </div>
               <div className="sale-quantity-actions">
-                <button className="quantity-step" aria-label={`کم کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={(qtys[i] ?? 0) <= 0} onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
+                <button className="quantity-step" aria-label={`کم کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={chosen[i] <= 0} onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, chosen[i] - 1) }))}>
                   −
                 </button>
                 <input
                   className="quantity-value"
                   aria-label={`تعداد برگشتی ${l.productName} ${l.size} ${l.color}`}
                   inputMode="numeric"
-                  value={qtys[i] ?? 0}
-                  onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
+                  value={chosen[i]}
+                  onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(left[i], Math.max(0, Math.floor(parseNum(e.target.value) || 0))) }))}
                 />
-                <button className="quantity-step" aria-label={`زیاد کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={(qtys[i] ?? 0) >= l.qty} onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
+                <button className="quantity-step" aria-label={`زیاد کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={chosen[i] >= left[i]} onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(left[i], chosen[i] + 1) }))}>
                   ＋
                 </button>
               </div>
@@ -194,7 +201,7 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
                   aria-label={`تعداد جنس جدید ${l.productName} ${l.size} ${l.color}`}
                   inputMode="numeric"
                   value={l.qty}
-                  onChange={(e) => setNewLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, parseNum(e.target.value) || 1) } : x)))}
+                  onChange={(e) => setNewLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, Math.floor(parseNum(e.target.value) || 1)) } : x)))}
                 />
               </label>
               <button className="sale-remove-line" aria-label={`حذف جنس جدید ${l.productName} ${l.size} ${l.color}`} onClick={() => setNewLines((ls) => ls.filter((_, j) => j !== i))}>
@@ -207,6 +214,7 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
           <h3>۳) تفاوت و تصفیه</h3>
           <div className="sale-correction-summary">
             <dl>
+              {refund.discount > 0 && <div><dt>سهم تخفیف فاکتور اصلی</dt><dd>−{fmtMoney(refund.discount)}</dd></div>}
               <div><dt>ارزش جنس برگشتی</dt><dd>{fmtMoney(returnAmount)}</dd></div>
               <div><dt>ارزش جنس جدید</dt><dd>{fmtMoney(newTotal)}</dd></div>
             </dl>
@@ -241,7 +249,7 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
       {error && <p role="alert" className="sale-correction-error">{error}</p>}
       {saving && <p role="status" className="sale-correction-help">در حال ثبت… تا پایان ثبت، این صفحه باز می‌ماند.</p>}
       <div className="mt-3">
-        <PrimaryBtn onClick={save} disabled={saving || returnAmount <= 0 || !newLines.length}>
+        <PrimaryBtn onClick={save} disabled={saving || !prior || chosen.every((n) => n === 0) || !newLines.length}>
           {saving ? 'در حال ثبت…' : 'ثبت تبادله'}
         </PrimaryBtn>
       </div>

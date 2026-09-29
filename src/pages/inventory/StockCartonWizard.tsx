@@ -1,4 +1,5 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import ProductPhotoPicker from './ProductPhotoPicker'
 import { useState } from 'react'
 import { db } from '../../db'
@@ -20,6 +21,7 @@ export function StockCartonWizard({
   onClose: () => void
 }) {
   const [step, setStep] = useState(1)
+  const submit = useSubmitOnce()
   const [name, setName] = useState('')
   const [brand, setBrand] = useState('')
   const [color, setColor] = useState('')
@@ -250,7 +252,7 @@ export function StockCartonWizard({
             بعدی
           </button>
         ) : (
-          <button onClick={() => void confirm()} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
+          <button onClick={() => void submit.run(confirm)} disabled={submit.busy} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
             ✓ ثبت در گدام
           </button>
         )}

@@ -56,6 +56,7 @@ import { applyDocEffects } from '../src/lib/sync'
 import { mergeProducts } from '../src/lib/merge'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { computeCosts } from '../src/lib/costing'
+import { priorReturnsOf, returnRefund, returnableQtys } from '../src/lib/returns'
 
 // ── تصادفِ قابل تکرار ────────────────────────────────────────────
 function rng(seed: number) {
@@ -233,19 +234,26 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         const sales = await db.sales.filter((s) => !s.deleted && typeof s.customerId === 'number').toArray()
         if (sales.length === 0) return
         const s = pick(sales)
-        const l = s.lines[0]
-        const qty = int(1, l.qty)
-        const amount = qty * l.unitPrice
-        const settlement = rand() < 0.5 ? 'reduceDebt' : 'cash'
-        if (settlement === 'cash' && (await boxBalances()).total < amount) return
+        // مرجوعی به فروش خودش وصل است: فقط آنچه هنوز برنگشته، به پولی که مشتری داده بود (با سهم تخفیف)
+        const prior = priorReturnsOf(s, await db.returns.toArray())
+        const left = returnableQtys(s, prior)
+        const i = left.findIndex((n) => n > 0)
+        if (i < 0) return
+        const l = s.lines[i]
+        const qty = int(1, left[i])
+        const { amount } = returnRefund(s, prior, s.lines.map((_, j) => (j === i ? qty : 0)))
+        const settlement = rand() < 0.5 ? 'reduceDebt' : 'cashRefund'
+        if (settlement === 'cashRefund' && (await boxBalances()).total < amount) return
         await addCustomerReturn({
           date: Date.now(),
           kind: 'customer',
           partyId: s.customerId!,
           partyName: 'مشتری',
+          refId: s.id,
           lines: [{ ...l, qty, restock: rand() < 0.7 }],
           amount,
           settlement,
+          reason: 'آزمایش',
           saleType: s.saleType
         })
       }
@@ -558,18 +566,24 @@ export async function runFuzz(seed: number, steps: number): Promise<FuzzFailure 
         const avail = await inStock()
         if (sales.length === 0 || avail.length === 0) return
         const old = pick(sales)
-        const l = old.lines[0]
-        const back = int(1, l.qty)
+        const prior = priorReturnsOf(old, await db.returns.toArray())
+        const left = returnableQtys(old, prior)
+        const i = left.findIndex((n) => n > 0)
+        if (i < 0) return
+        const l = old.lines[i]
+        const back = int(1, left[i])
         const v = pick(avail)
         const qty = int(1, Math.min(3, v.stockQty))
         const newTotal = qty * v.retailPrice
-        const backAmount = back * l.unitPrice
+        const backAmount = returnRefund(old, prior, old.lines.map((_, j) => (j === i ? back : 0))).amount
         await addExchange(
           {
             date: Date.now(),
             kind: 'customer',
             partyId: old.customerId!,
             partyName: 'مشتری',
+            refId: old.id,
+            reason: 'تبادله',
             lines: [{ ...l, qty: back, restock: true }],
             amount: backAmount,
             settlement: 'reduceDebt',

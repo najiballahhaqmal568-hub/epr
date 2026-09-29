@@ -4,6 +4,8 @@ import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
 import { validateCustomerGoodsReceiptBackup, validateCustomerGoodsReceiptConflictEvidence } from './customerGoodsReceiptBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
+import { checkPurchaseReturn, checkReturn, priorReturnsOf, priorSupplierReturnsOf } from './returns'
+import { fmtMoney } from './format'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
@@ -163,6 +165,19 @@ export async function boxBalances(): Promise<{ boxes: { name: string; balance: n
   return { boxes, total: boxes.reduce((s, b) => s + b.balance, 0) }
 }
 
+/**
+ * جایی که پولِ یک سند رفته بود — برای برگرداندن در همان جا.
+ * جای ثبت‌شده روی خودِ سند مقدم است. refId حرکت صندوق شمارهٔ محلیِ موبایلی است که سند را ساخت؛
+ * در موبایل دوم همان شمارهٔ سند دیگری است. پس حرکت فقط برای سندهای قدیمیِ بی‌جا و فقط با اثر
+ * کاملش (شماره + تاریخ + مبلغ) پیدا می‌شود، وگرنه «دکان».
+ */
+async function documentBox(docBox: string | undefined, refId: number | undefined, fingerprint: (m: CashMovement) => boolean): Promise<string> {
+  if (docBox?.trim()) return docBox.trim()
+  if (refId === undefined) return SHOP_BOX
+  const orig = await db.cashMovements.filter((m) => !m.deleted && m.refId === refId && fingerprint(m)).first()
+  return orig ? boxOf(orig) : SHOP_BOX
+}
+
 /** ثبت فروش: کاهش گدام + قرض مشتری + ورود نقد به صندوق در یک تراکنش */
 export async function addSale(sale: Sale): Promise<number> {
   assertOrdinarySale(sale)
@@ -171,7 +186,17 @@ export async function addSale(sale: Sale): Promise<number> {
   // پول اضافه (بازگشت به مشتری) در صندوق نمی‌ماند؛ اگر ثبت شود، صندوق بیشتر از پول واقعی نشان می‌دهد.
   if (saleCashPaid(sale) > sale.total) throw new Error('پول دریافتی از مجموع فروش بیشتر است؛ باقی را به مشتری پس بدهید — فقط مجموع در صندوق ثبت می‌شود.')
   if (sale.discount !== undefined) sale.discount = afn(sale.discount)
+  // جوړه عدد صحیح است؛ نیم جوړه یا تعداد منفی گدام را به عدد ناممکن می‌برد
+  if (sale.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
   sale.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
+  // مجموع همیشه «قیمت جنس − تخفیف» است؛ ورنه پولی وارد صندوق یا قرض می‌شود که مفاد آن را نمی‌شناسد.
+  // «−» اشتباهی در خانهٔ نقد، پول را از صندوق بیرون می‌برد و قرض مشتری را بیشتر از فروش می‌کرد.
+  if (sale.lines.some((l) => l.unitPrice < 0)) throw new Error('قیمت جنس منفی نمی‌شود')
+  const gross = sale.lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
+  const discount = sale.discount ?? 0
+  if (discount < 0 || discount > gross) throw new Error('تخفیف باید بین صفر و قیمت جنس باشد')
+  if (sale.total !== gross - discount) throw new Error('مجموع فروش با قیمت جنس و تخفیف نمی‌خواند')
+  if (sale.paid < 0 || (sale.cashPaid ?? 0) < 0) throw new Error('پول دریافتی منفی نمی‌شود')
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
     for (const line of sale.lines) {
       const v = await db.variants.get(line.variantId)
@@ -228,14 +253,14 @@ export async function deleteSale(saleId: number): Promise<void> {
       }
       const linkedCash = paymentCashDelta(linkedPayment)
       if (linkedCash !== 0) {
-        const linkedOrig = await db.cashMovements.filter((m) => !m.deleted && m.refId === linkedPayment.id).first()
+        const linkedBox = await documentBox(linkedPayment.box, linkedPayment.id, (m) => m.date === linkedPayment.date && m.amount === linkedCash)
         await movement(
           {
             date: Date.now(),
             type: 'supplierPayment',
             refId: linkedPayment.id,
             amount: -linkedCash,
-            box: linkedOrig ? boxOf(linkedOrig) : linkedPayment.box,
+            box: linkedBox,
             note: `حذف — ${linkedPayment.partyName}`
           },
           { allowNegative: true }
@@ -263,13 +288,13 @@ export async function deleteSale(saleId: number): Promise<void> {
       await db.returns.update(r.id!, { deleted: true })
     }
     // پول در همان جایی برمی‌گردد که آمده بود
-    const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
     const cash = saleCashPaid(sale)
+    const saleBox = await documentBox(undefined, saleId, (m) => m.type === 'sale' && m.date === sale.date && m.amount === cash)
     // در تسویهٔ جفت‌شده، پول مازاد به سند Payment وصل است و همان بالا برگشت.
     if (cash !== 0 && !linkedPayment) {
       // حذفِ اصلاحی است — حتی اگر پول کم شود باید ثبت گردد
       await movement(
-        { date: Date.now(), type: 'sale', refId: saleId, amount: -cash, box: orig ? boxOf(orig) : SHOP_BOX, note: 'حذف فروش' },
+        { date: Date.now(), type: 'sale', refId: saleId, amount: -cash, box: saleBox, note: 'حذف فروش' },
         { allowNegative: true }
       )
     }
@@ -291,10 +316,9 @@ export async function deleteSaleImpact(
   const sale = await db.sales.get(saleId)
   if (!sale || sale.deleted) return null
   assertOrdinarySale(sale)
-  const orig = await db.cashMovements.filter((m) => !m.deleted && m.type === 'sale' && m.refId === saleId).first()
-  const box = orig ? boxOf(orig) : SHOP_BOX
-  const before = await cashBalance(box)
   const paid = saleCashPaid(sale)
+  const box = await documentBox(undefined, saleId, (m) => m.type === 'sale' && m.date === sale.date && m.amount === paid)
+  const before = await cashBalance(box)
   const linkedReturns = await db.returns.filter((r) => !r.deleted && r.kind === 'customer' && r.refId === saleId).count()
   return { paid, box, before, after: before - paid, linkedReturns }
 }
@@ -308,6 +332,16 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
   purchase.total = afn(purchase.total)
   purchase.paid = afn(purchase.paid)
   if (purchase.sarrafAmount !== undefined) purchase.sarrafAmount = afn(purchase.sarrafAmount)
+  // همان قاعدهٔ اصلاح خرید: پرداخت و حواله با هم از مجموع بیشتر نمی‌شود. اضافه در هیچ حسابی
+  // نمی‌نشست — صندوق کم می‌شد و طلب ما از تأمین‌کننده ثبت نمی‌شد.
+  if (purchase.paid < 0 || (purchase.sarrafAmount ?? 0) < 0) throw new Error('پرداخت و حواله منفی نمی‌شود')
+  if (purchase.paid + (purchase.sarrafAmount ?? 0) > purchase.total) {
+    throw new Error('پرداخت و حواله از مجموع خرید بیشتر است؛ پول اضافه را جداگانه «پرداخت به تأمین‌کننده» ثبت کنید تا طلب شما بماند.')
+  }
+  if (purchase.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
+  if (purchase.lines.some((l) => l.unitCost < 0)) throw new Error('قیمت خرید منفی نمی‌شود')
+  // قرض تأمین‌کننده از «مجموع» می‌آید و قیمت گدام از خطوط — اگر یکی نباشند، دو عدد از هم جدا می‌شوند
+  if (purchase.total !== afn(purchase.lines.reduce((s, l) => s + l.qty * l.unitCost, 0))) throw new Error('مجموع خرید با تعداد و قیمت جنس نمی‌خواند')
   return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     // «رسیده» فقط با receivePurchase ساخته می‌شود، نه در لحظهٔ ثبت خرید.
     // اگر اینجا اجازه داده شود، موجودی‌اش نه از سند خرید می‌آید و نه از سند رسید.
@@ -711,7 +745,7 @@ export async function cancelPurchaseImpact(purchaseId: number): Promise<Purchase
   const purchase = await db.purchases.get(purchaseId)
   if (!purchase || purchase.deleted) return null
   assertOrdinaryPurchase(purchase)
-  const original = await db.cashMovements.filter((movement) => !movement.deleted && movement.type === 'purchase' && movement.refId === purchaseId).first()
+  const purchaseBox = await documentBox(undefined, purchaseId, (m) => m.type === 'purchase' && m.date === purchase.date && m.amount === -purchase.paid)
   let blockedReason: string | undefined
   try {
     await assertPurchaseCanChange(purchase, [])
@@ -734,7 +768,7 @@ export async function cancelPurchaseImpact(purchaseId: number): Promise<Purchase
     cashReturn: purchaseCashReturn + landingCashReturn,
     purchaseCashReturn,
     landingCashReturn,
-    cashBox: original ? boxOf(original) : SHOP_BOX,
+    cashBox: purchaseBox,
     supplierDebtDecrease: Math.max(0, purchase.total - purchase.paid - (purchase.sarrafAmount ?? 0)),
     sarrafDebtDecrease: (purchase.sarrafAmount ?? 0) + landingSarrafOwed(purchase),
     blockedReason
@@ -761,15 +795,13 @@ export async function cancelPurchase(purchaseId: number): Promise<void> {
       await db.purchases.update(purchaseId, { deleted: true })
 
       if (purchase.paid > 0) {
-        const original = await db.cashMovements
-          .filter((cash) => !cash.deleted && cash.type === 'purchase' && cash.refId === purchaseId)
-          .first()
+        const purchaseBox = await documentBox(undefined, purchaseId, (m) => m.type === 'purchase' && m.date === purchase.date && m.amount === -purchase.paid)
         await movement({
           date: Date.now(),
           type: 'purchase',
           refId: purchaseId,
           amount: purchase.paid,
-          box: original ? boxOf(original) : SHOP_BOX,
+          box: purchaseBox,
           note: `ابطال خرید — ${purchase.supplierName}`
         })
       }
@@ -1561,7 +1593,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
     const primaryKind = p.partyType === 'supplier' ? (primary as Supplier | undefined)?.kind : undefined
     const cashDelta = paymentCashDelta(p, primaryKind)
     if (cashDelta !== 0) {
-      const orig = await db.cashMovements.filter((m) => !m.deleted && m.refId === paymentId).first()
+      const box = await documentBox(p.box, paymentId, (m) => m.date === p.date && m.amount === cashDelta)
       await movement(
         {
           date: Date.now(),
@@ -1576,7 +1608,7 @@ export async function deletePayment(paymentId: number): Promise<void> {
               : 'supplierPayment',
           refId: paymentId,
           amount: -cashDelta,
-          box: orig ? boxOf(orig) : p.box,
+          box,
           note: `حذف — ${p.partyName}`
         },
         // اصلاح اشتباه است؛ حتی اگر پول کم شود باید ثبت گردد
@@ -2371,13 +2403,13 @@ export async function deleteExpense(expenseId: number): Promise<void> {
       if (creditor) await db.suppliers.update(e.creditorId, { balance: creditor.balance - creditAmount })
     }
     if (cashPaid > 0) {
-      const orig = await db.cashMovements.filter((m) => !m.deleted && m.refId === expenseId && m.type === EXPENSE_MOVE[e.type]).first()
+      const box = await documentBox(e.box, expenseId, (m) => m.type === EXPENSE_MOVE[e.type] && m.date === e.date && m.amount === -cashPaid)
       await movement({
         date: Date.now(),
         type: EXPENSE_MOVE[e.type],
         refId: expenseId,
         amount: cashPaid,
-        box: orig ? boxOf(orig) : e.box,
+        box,
         drawAccountedByExpense: e.drawAmount !== undefined,
         note: `حذف: ${e.categoryName}`
       })
@@ -2590,6 +2622,8 @@ export async function renameCategory(categoryId: number, newName: string): Promi
 /** تعدیل گدام با دلیل (داغمه/مفقود/تصحیح) */
 export async function addAdjustment(adj: Adjustment): Promise<number> {
   if (adj.goodsReceiptChild) throw new Error(GOODS_RECEIPT_ERROR)
+  // جوړه نیمه ندارد: «۱٫۵» موجودی را کسری می‌ساخت
+  if (!Number.isInteger(adj.qtyChange)) throw new Error('تعداد جوړه باید عدد صحیح باشد')
   return db.transaction('rw', db.adjustments, db.variants, async () => {
     const v = await db.variants.get(adj.variantId)
     if (!v) throw new Error('جنس یافت نشد')
@@ -2607,7 +2641,23 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
     if (ret.refId !== undefined) {
       const sale = await db.sales.get(ret.refId)
-      if (sale) assertOrdinarySale(sale)
+      if (sale) {
+        assertOrdinarySale(sale)
+        if (sale.deleted) throw new Error('این فروش حذف شده است؛ مرجوعی از آن ثبت نمی‌شود')
+        // همان قاعدهٔ صفحه‌ها: بیشتر از فروخته برنمی‌گردد و بیشتر از پولِ داده‌شده پس داده نمی‌شود
+        const prior = priorReturnsOf(sale, await db.returns.filter((r) => r.refId === sale.id).toArray())
+        const checked = checkReturn(sale, prior, ret.lines)
+        if (typeof checked === 'string') throw new Error(checked)
+        if (ret.amount < 0) throw new Error('پول مرجوعی منفی نمی‌شود')
+        if (ret.amount > checked.refund.amount) {
+          throw new Error(`پول مرجوعی از پولی که مشتری برای این جوړه‌ها داده بیشتر است — حداکثر ${fmtMoney(checked.refund.amount)} (قیمت منهای سهم تخفیف فاکتور).`)
+        }
+        // هرچه از قیمت جوړه‌ها پس داده نشد (سهم تخفیف و هرچه دکان نگه داشت) روی سند می‌ماند،
+        // تا مفاد مرجوعی همان پولی باشد که واقعاً برگشت
+        const kept = checked.refund.gross - ret.amount
+        if (kept > 0) ret.discount = kept
+        else delete ret.discount
+      }
     }
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
@@ -2775,10 +2825,20 @@ export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
 export async function addSupplierReturn(ret: ReturnDoc): Promise<number> {
   ret.amount = afn(ret.amount)
   ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
+  if (ret.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد برگشتی باید عدد صحیح و بیشتر از صفر باشد')
+  if (ret.amount < 0) throw new Error('پول مرجوعی منفی نمی‌شود')
   return db.transaction('rw', [db.returns, db.purchases, db.variants, db.suppliers, db.cashMovements], async () => {
     if (ret.refId !== undefined) {
       const purchase = await db.purchases.get(ret.refId)
-      if (purchase) assertOrdinaryPurchase(purchase)
+      if (purchase) {
+        assertOrdinaryPurchase(purchase)
+        if (purchase.deleted) throw new Error('این خرید باطل شده است؛ مرجوعی از آن ثبت نمی‌شود')
+        // یک خرید دو بار برنمی‌گردد — ورنه قرض ما به تأمین‌کننده دو بار کم می‌شود
+        const prior = priorSupplierReturnsOf(purchase, await db.returns.filter((r) => r.refId === purchase.id).toArray())
+        const checked = checkPurchaseReturn(purchase, prior, ret.lines)
+        if (typeof checked === 'string') throw new Error(checked)
+        if (ret.amount > checked.value) throw new Error(`پول مرجوعی از قیمت همین جنس در فاکتور خرید بیشتر است — حداکثر ${fmtMoney(checked.value)}`)
+      }
     }
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
@@ -2892,6 +2952,7 @@ export async function applyStocktake(entries: { variantId: number; counted: numb
     let fixed = 0
     let valueDiff = 0
     for (const e of entries) {
+      if (!Number.isInteger(e.counted) || e.counted < 0) throw new Error('شمارش هر سایز باید عدد صحیح و مثبت باشد')
       const v = await db.variants.get(e.variantId)
       if (!v || v.deleted) continue
       const diff = e.counted - v.stockQty
@@ -2933,6 +2994,7 @@ export type ShortageAction =
  * برای کمبود سه راه: مصرف «کسر صندوق» (از مفاد کم می‌شود)، قرض شخص مسئول، یا فقط تنظیم.
  */
 export async function reconcile(counted: number, note?: string, shortage?: ShortageAction, box = SHOP_BOX): Promise<number> {
+  if (!Number.isFinite(counted) || counted < 0) throw new Error('نقد شمارش‌شده باید صفر یا بیشتر باشد')
   counted = afn(counted)
   return db.transaction(
     'rw',
@@ -2944,8 +3006,10 @@ export async function reconcile(counted: number, note?: string, shortage?: Short
       if (difference < 0 && shortage?.mode === 'expense') {
         const cat = await db.expenseCategories.filter((c) => !c.deleted && c.name === 'کسر صندوق').first()
         const catId = cat?.id ?? ((await db.expenseCategories.add({ name: 'کسر صندوق' })) as number)
-        await db.expenses.add({ date: Date.now(), categoryId: catId, categoryName: 'کسر صندوق', amount: -difference, note, type: 'business' })
-        await movement({ date: Date.now(), type: 'expense', amount: difference, box, note: `کسر صندوق — ${box}` })
+        // مصرف جای خودش را نگه می‌دارد و به حرکت صندوقش وصل است، تا حذف یا اصلاحش پول را به همان جا برگرداند
+        const now = Date.now()
+        const expenseId = (await db.expenses.add({ date: now, categoryId: catId, categoryName: 'کسر صندوق', amount: -difference, cashPaid: -difference, creditAmount: 0, box, note, type: 'business' })) as number
+        await movement({ date: now, type: 'expense', refId: expenseId, amount: difference, box, note: `کسر صندوق — ${box}` })
       } else if (difference < 0 && shortage?.mode === 'debt') {
         await movement({ date: Date.now(), type: 'openingSet', amount: difference, box, note: `کسر صندوق — به حساب ${shortage.customerName}` })
         const c = await db.customers.get(shortage.customerId)

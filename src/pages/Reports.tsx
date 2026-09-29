@@ -7,6 +7,7 @@ import { inputCls, Card } from '../components/ui'
 import { ColumnChart } from '../components/charts'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialPurchaseLines, commercialSaleLines } from '../lib/commercialLines'
+import { returnProfit } from '../lib/returns'
 import { customerGoodsReceiptSettlements, ordinaryCustomerCollections } from '../lib/directTradeReports'
 import CustomerGoodsReceiptWarning, { useCustomerGoodsReceiptReview } from '../components/CustomerGoodsReceiptWarning'
 import Row from './reports/Row'
@@ -184,7 +185,7 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   returns?.filter((row) => row.kind === 'customer').forEach((returned) => {
     const row = trendRows[trendIndex(returned.date)]
     row.value -= returned.amount
-    row.second -= returned.lines.reduce((sum, line) => sum + (line.unitPrice - (line.unitCost ?? 0)) * line.qty, 0)
+    row.second -= returnProfit(returned)
   })
   const shortMoney = (amount: number) => (Math.abs(amount) >= 1000 ? `${fmtNum(Math.round(amount / 1000))}هـ` : fmtNum(Math.round(amount)))
 
@@ -300,8 +301,8 @@ export default function Reports({ onBack }: { onBack: () => void }) {
           <PeriodCompareCard label="دورهٔ قبلی" now={confirmedSales ?? []} before={(prevSales ?? []).filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))} returnsNow={returns ?? []} />
           <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
           <ModelsCard sales={confirmedSales ?? []} />
-          <CustomersCard sales={confirmedSales ?? []} />
-          <MonthsCard sales={confirmedSales ?? []} />
+          <CustomersCard sales={confirmedSales ?? []} returns={returns ?? []} />
+          <MonthsCard sales={confirmedSales ?? []} returns={returns ?? []} />
 
           <Card>
             <p className="mb-2 font-bold text-slate-700">خرید از تأمین‌کنندگان در دوره</p>

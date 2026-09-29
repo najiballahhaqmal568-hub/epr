@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type PurchaseLine, type Product } from '../../db'
 import { addPurchase } from '../../lib/ops'
@@ -12,6 +13,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<PurchaseLine[]>([])
   const [paidStr, setPaidStr] = useState('')
   const [paidTouched, setPaidTouched] = useState(false)
+  const submit = useSubmitOnce()
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [received, setReceived] = useState(true)
@@ -246,6 +248,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           />
         </Field>
         {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض ما به تأمین‌کننده): {fmtMoney(remainder)}</p>}
+        {(remainder < 0 || paid < 0) && <p role="alert" className="text-sm font-bold text-red-700">{paid < 0 ? 'پرداخت منفی نمی‌شود.' : `پرداخت ${fmtMoney(-remainder)} از مجموع خرید بیشتر است — پول اضافه را جداگانه «پرداخت به تأمین‌کننده» ثبت کنید.`}</p>}
         {hawala > 0 && <p className="text-sm font-bold text-amber-700">قرض ما به صراف: {fmtMoney(hawala)}</p>}
       </div>
 
@@ -257,8 +260,8 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           {remainder > 0 && <p className="text-xs font-bold text-red-600">باقی: {fmtMoney(remainder)}</p>}
         </div>
         <button
-          onClick={save}
-          disabled={!lines.length || !supplierId}
+          onClick={() => void submit.run(save)}
+          disabled={!lines.length || !supplierId || remainder < 0 || paid < 0 || submit.busy}
           className="primary-button primary-button-inline py-3 text-lg"
         >
           ثبت خرید

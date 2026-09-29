@@ -94,6 +94,8 @@ try {
 
   await page.getByRole('region', { name: 'مدیریت گدام' }).getByRole('button', { name: /^خرید مجدد/ }).click()
   await page.getByRole('heading', { name: 'لیست خرید مجدد' }).waitFor()
+  // سرخط پیش از خواندن گدام می‌آید؛ زیر بار، متن پیش از داده خوانده می‌شد (۱ از ۳ بار سرخ)
+  await page.getByRole('dialog').getByText(/همهٔ رنگ‌ها و سایزها/).first().waitFor()
   assert.match(await page.getByRole('dialog').innerText(), /همهٔ رنگ‌ها و سایزها/)
   assert.match(await page.getByRole('dialog').innerText(), /معادل/)
   await closeDialog(page)

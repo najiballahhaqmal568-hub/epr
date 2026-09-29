@@ -458,6 +458,12 @@ export interface ReturnDoc extends Synced {
   reason: string
   settlement: 'cashRefund' | 'reduceDebt' | 'none'
   amount: number
+  /**
+   * بخشی از قیمت جوړه‌ها که پس داده نشد: amount = قیمت جوړه‌ها − discount.
+   * بیشترش سهم همین جوړه‌ها از تخفیف فروش اصلی است (مشتری آن را نداده بود).
+   * از مفاد مرجوعی کم می‌شود تا مفاد با پولِ واقعاً برگشته یکی بماند.
+   */
+  discount?: number
   /** نوع فروشِ اصلی — تا مرجوعی از مفاد عمده یا پرچون کم شود */
   saleType?: 'retail' | 'wholesale'
   /** وقتی برگشت ابطال شده باشد: دلیل و وقتش — سند برای رد حساب می‌ماند */

@@ -40,6 +40,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
   const yearStart = useLiveQuery(async () => Number((await db.settings.get('partnershipStart'))?.value ?? 0), [])
 
   const stockValue = nw?.stock ?? 0
+  const inTransit = nw?.inTransit ?? 0
   const cash = nw?.cash ?? 0
   const receivables = nw?.receivables ?? 0
   const customerCredits = nw?.customerCredits ?? 0
@@ -342,6 +343,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
         <SettleModal
           partners={partners}
           stockValue={stockValue}
+          inTransit={inTransit}
           cash={cash}
           receivables={receivables}
           supplierCredits={supplierCredits}
@@ -362,6 +364,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
 function SettleModal({
   partners,
   stockValue,
+  inTransit,
   cash,
   receivables,
   supplierCredits,
@@ -374,6 +377,7 @@ function SettleModal({
 }: {
   partners: import('../../db').Supplier[]
   stockValue: number
+  inTransit: number
   cash: number
   receivables: number
   supplierCredits: number
@@ -421,6 +425,7 @@ function SettleModal({
       <p className="mb-2 text-xs text-slate-500">اول «شمارش گدام» و «تصفیه صندوق» را انجام دهید تا اعداد با واقعیت برابر باشند.</p>
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
         <Row label="ارزش جنس گدام" value={fmtMoney(stockValue)} />
+        {inTransit > 0 && <Row label="جنس در راه (خریده، هنوز نرسیده)" value={fmtMoney(inTransit)} />}
         <Row label="پول صندوق" value={fmtMoney(cash)} />
         <Row label="طلب از مشتریان" value={fmtMoney(receivables)} />
         {supplierCredits > 0 && <Row label="طلب ما از تأمین‌کنندگان (پیشکی)" value={fmtMoney(supplierCredits)} />}
@@ -466,7 +471,7 @@ function SettleModal({
       <Field label="برای تأیید، عبارت «بستن سال» را دقیق بنویسید *">
         <input className={inputCls} value={confirmStr} onChange={(e) => setConfirmStr(e.target.value)} placeholder="بستن سال" />
       </Field>
-      <PrimaryBtn disabled={confirmStr.trim() !== 'بستن سال'} onClick={() => void closeYear()}>
+      <PrimaryBtn disabled={confirmStr.trim() !== 'بستن سال'} onClick={closeYear}>
         ✓ بستن سال و شروع سال جدید
       </PrimaryBtn>
     </Modal>

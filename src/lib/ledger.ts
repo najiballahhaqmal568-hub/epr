@@ -4,7 +4,7 @@
  * این فایل هیچ کاری با دیتابیس ندارد: سند می‌گیرد و سطر پس می‌دهد،
  * تا بشود دقیقاً همان را آزمایش کرد که کاربر در صفحه می‌بیند.
  */
-import type { CashMovement, Payment, ReturnDoc, Sale } from '../db'
+import { saleCreditAmount, type CashMovement, type Payment, type ReturnDoc, type Sale } from '../db'
 import { fmtNum, pageOrder } from './format'
 import { commercialSaleLines } from './commercialLines'
 
@@ -83,12 +83,14 @@ export function buildCustomerLedger(sales: Sale[], payments: Payment[], returns:
         source: { table: 'sales', id: s.id! }, delta: s.total - s.paid })
       continue
     }
-    const credit = s.total - s.paid
+    // همان قاعدهٔ حساب (lib/effects): فقط باقیِ مثبت قرض می‌شود. پولِ بیشتر از مجموع (فروش‌های قدیمی)
+    // قرض مشتری را منفی نکرده بود، پس دفتر هم نباید آن را کم کند — وگرنه آخر دفتر با حساب نمی‌خواند.
+    const credit = saleCreditAmount(s)
     if (credit === 0) continue // فروش نقدی بر قرض اثر ندارد
     events.push({
       key: `s${s.id}`,
       date: s.date,
-      label: credit > 0 ? 'فروش قرضی' : 'پرداخت اضافی در فروش',
+      label: 'فروش قرضی',
       note: `فاکتور ${fmtNum(s.total)} — نقد ${fmtNum(s.paid)}`,
       items: itemsLabel(s.lines),
       page: s.bookPage?.trim() || undefined,

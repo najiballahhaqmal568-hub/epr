@@ -102,9 +102,9 @@ export function ModelsCard({ sales }: { sales: Sale[] }) {
 }
 
 /** مشتریان: خرید و مفاد هر کدام */
-export function CustomersCard({ sales }: { sales: Sale[] }) {
+export function CustomersCard({ sales, returns = [] }: { sales: Sale[]; returns?: ReturnDoc[] }) {
   const [sort, setSort] = useState<'sales' | 'profit'>('sales')
-  const rows = byCustomer(sales)
+  const rows = byCustomer(sales, returns)
   if (rows.length === 0) return null
   const sorted = [...rows].sort((a, b) => b[sort] - a[sort]).slice(0, 10)
   const max = Math.max(...sorted.map((r) => Math.abs(r[sort])), 1)
@@ -142,8 +142,8 @@ export function CustomersCard({ sales }: { sales: Sale[] }) {
 }
 
 /** فروش و مفاد ماه‌به‌ماه */
-export function MonthsCard({ sales }: { sales: Sale[] }) {
-  const rows = byMonth(sales, jalaliMonth)
+export function MonthsCard({ sales, returns = [] }: { sales: Sale[]; returns?: ReturnDoc[] }) {
+  const rows = byMonth(sales, jalaliMonth, returns)
   if (rows.length < 2) return null
   return (
     <Card>

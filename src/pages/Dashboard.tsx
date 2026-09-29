@@ -11,6 +11,7 @@ import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
+import { returnProfit } from '../lib/returns'
 import { Icon } from '../components/Icon'
 import { RollingNumber } from '../components/RollingNumber'
 import { celebrate } from '../lib/motion'
@@ -99,10 +100,7 @@ export default function Dashboard({
         sum + commercialSaleLines(sale).reduce((lineSum, line) => lineSum + (line.unitPrice - costOf(line)) * line.qty, 0) - (sale.discount ?? 0),
       0
     )
-  const returnedProfit = (returns ?? []).reduce(
-    (sum, row) => sum + row.lines.reduce((lineSum, line) => lineSum + (line.unitPrice - (line.unitCost ?? 0)) * line.qty, 0),
-    0
-  )
+  const returnedProfit = (returns ?? []).reduce((sum, row) => sum + returnProfit(row), 0)
 
   const todaySales = (sales ?? []).filter(sale => (!sale.directTrade || directReview.readyTradeUuids.has(sale.directTrade.uuid)) && (!sale.goodsReceiptChild || receiptReview.readyReceiptUuids.has(sale.goodsReceiptChild.receiptUuid)))
   const todayTotal = todaySales.reduce((sum, row) => sum + row.total, 0)

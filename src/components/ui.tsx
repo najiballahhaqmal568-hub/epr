@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { accessFlags } from '../db'
 import { addModal, pushModal, removeModal } from '../lib/appHistory'
@@ -88,12 +88,32 @@ export function Field({ label, children }: { label: string; children: ReactNode 
 
 export const inputCls = 'ui-input'
 
-export function PrimaryBtn({ children, onClick, disabled, type }: { children: ReactNode; onClick?: () => void; disabled?: boolean; type?: 'submit' | 'button' }) {
+/**
+ * دکمهٔ اصلی. اگر کارش async باشد (Promise برگرداند)، تا پایان همان کار بسته می‌ماند —
+ * دو لمس سریع روی «ثبت دریافت» یا «ثبت مصارف رسیدن» دو سند می‌ساخت و پول را دو بار حساب می‌کرد.
+ * قفل با ref است، نه فقط state، تا لمس دوم در همان لحظه هم رد شود.
+ */
+export function PrimaryBtn({ children, onClick, disabled, type }: { children: ReactNode; onClick?: () => unknown; disabled?: boolean; type?: 'submit' | 'button' }) {
+  const running = useRef(false)
+  const [busy, setBusy] = useState(false)
+  function click() {
+    if (running.current || !onClick) return
+    const result = onClick()
+    if (result && typeof (result as Promise<unknown>).finally === 'function') {
+      running.current = true
+      setBusy(true)
+      void (result as Promise<unknown>).finally(() => {
+        running.current = false
+        setBusy(false)
+      })
+    }
+  }
   return (
     <button
       type={type ?? 'button'}
-      onClick={onClick}
-      disabled={disabled}
+      onClick={click}
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
       className="primary-button"
     >
       {children}

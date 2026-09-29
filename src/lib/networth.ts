@@ -13,15 +13,21 @@
  *  • شریک قرض نیست — سرمایهٔ او از دارایی کم نمی‌شود.
  *  • قرضِ اشخاص (lender) جدا نشان داده می‌شود ولی مثل هر قرض دیگر کم می‌شود.
  *  • بیلانس منفی یعنی طرف مقابل به ما مقروض است — آن، دارایی است.
+ *  • جنسِ «در راه» مال ماست: پولش رفته یا قرضش ثبت شده، پس تا رسیدن جدا شمرده می‌شود.
+ *    وگرنه هر خرید در راه به اندازهٔ ارزشش نقصِ ساختگی در مفاد شرکا می‌ساخت.
+ *    خرید مستقیم هرگز به گدام نمی‌آید و اینجا شمرده نمی‌شود.
  */
 import { db, landingUnpaidOf, type Customer, type Purchase, type Supplier, type Variant, type CashMovement } from '../db'
 import { afn } from './ops'
+import { landedUnitCost } from './costing'
 
 export interface NetWorth {
   /** ارزش جنس گدام به قیمت تمام‌شده */
   stock: number
   /** تعداد جوړه در گدام */
   pairs: number
+  /** ارزش جنس خریده‌شده‌ای که هنوز نرسیده (در راه) — دارایی ماست */
+  inTransit: number
   /** پول نقد در همهٔ جاها (دکان، خانه، صراف…) */
   cash: number
   /** طلب ما از مشتریان */
@@ -63,6 +69,9 @@ export function computeNetWorth(input: NetWorthInput): NetWorth {
 
   const stock = variants.reduce((s, v) => s + v.stockQty * v.purchasePrice, 0)
   const pairs = variants.reduce((s, v) => s + v.stockQty, 0)
+  const inTransit = purchases
+    .filter((p) => !p.directTrade && p.received === false)
+    .reduce((s, p) => s + p.lines.reduce((t, l) => t + l.qty * landedUnitCost(p, l.unitCost), 0), 0)
   const cash = movements.reduce((s, m) => s + m.amount, 0)
   const receivables = customers.reduce((s, c) => s + Math.max(0, c.balance), 0)
   const customerCredits = customers.reduce((s, c) => s + Math.max(0, -c.balance), 0)
@@ -72,12 +81,13 @@ export function computeNetWorth(input: NetWorthInput): NetWorth {
   const unpaidLanding = purchases.reduce((s, p) => s + landingUnpaidOf(p), 0)
 
   const assets = afn(
-    stock + cash + receivables + supplierCredits - payables - loans - unpaidLanding - customerCredits
+    stock + inTransit + cash + receivables + supplierCredits - payables - loans - unpaidLanding - customerCredits
   )
 
   return {
     stock: afn(stock),
     pairs,
+    inTransit: afn(inTransit),
     cash: afn(cash),
     receivables: afn(receivables),
     supplierCredits: afn(supplierCredits),
