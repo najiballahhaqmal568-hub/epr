@@ -19,6 +19,7 @@ const paths = {
   backup: 'M7 18H6a4 4 0 0 1-1-8 7 7 0 0 1 14-1 5 5 0 0 1 0 10h-2m-5 2V10m-4 4 4-4 4 4',
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m16-13a4 4 0 0 1 0 8m4 5v-2a4 4 0 0 0-3-3M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
   sync: 'M21 4v6h-6M3 20v-6h6M5 7a8 8 0 0 1 13-2l3 5M3 14l3 5a8 8 0 0 0 13-2',
+  coins: 'M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3Zm0 0v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6',
 } as const
 
 export type IconName = keyof typeof paths

@@ -17,8 +17,8 @@ import CustomerGoodsReceiptEnable from './CustomerGoodsReceiptEnable'
 import CustomerGoodsReceiptModal from './CustomerGoodsReceiptModal'
 import CustomerGoodsReceiptDetail from './CustomerGoodsReceiptDetail'
 
-export function CustomerDetail({ customer, onClose }: { customer: Customer; onClose: () => void }) {
-  const [showPay, setShowPay] = useState(false)
+export function CustomerDetail({ customer, onClose, startPay = false }: { customer: Customer; onClose: () => void; startPay?: boolean }) {
+  const [showPay, setShowPay] = useState(startPay)
   const [payError, setPayError] = useState('')
   const [directUuid, setDirectUuid] = useState<string | null>(null)
   const [receiptUuid, setReceiptUuid] = useState<string | null>(null)

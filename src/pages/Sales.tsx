@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { commercialSaleLines } from '../lib/commercialLines'
 import { directFeatureEnabled } from '../lib/directTradeState'
 import DirectTradeForm from './sales/direct/DirectTradeForm'
 import DirectTradeDetail from './sales/direct/DirectTradeDetail'
 import DirectTradeEnable from './sales/direct/DirectTradeEnable'
-import { accessFlags, type Sale } from '../db'
+import { accessFlags, db, type Sale } from '../db'
 import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { clearWorkingSale, readWorkingSale, deleteSaleDraft, readSaleDrafts, saleDraftTotal, type SaleDraft } from '../lib/saleDrafts'
@@ -22,7 +22,7 @@ import SaleShipping from './sales/SaleShipping'
 import SaleTimeline from './sales/SaleTimeline'
 import CustomerGoodsReceiptDetail from './customers/CustomerGoodsReceiptDetail'
 
-export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void }) {
+export default function Sales({ isStaff, openNew = false, pending = false, onPendingChange, openSaleId = null, onSaleOpened }: { isStaff?: boolean; openNew?: boolean; pending?: boolean; onPendingChange?: (pending: boolean) => void; openSaleId?: number | null; onSaleOpened?: () => void }) {
   const [view, setView] = useState<'new' | 'list' | 'stats' | 'held'>(accessFlags.readOnly ? 'list' : 'new')
   const [workspaceKey, setWorkspaceKey] = useState(openNew ? 1 : 0)
   const [checkoutStage, setCheckoutStage] = useState<'selection' | 'payment'>('selection')
@@ -44,6 +44,23 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
   const [activeDraft, setActiveDraft] = useState<SaleDraft | null>(null)
   // کفشِ قرض‌دهنده از دفتر همان شخص حذف/اصلاح می‌شود؛ در آمار مفاد می‌ماند
   // اما در این لیست عملیاتی نمی‌آید تا مرجوعی/تبادله حساب پیوندشده را نیمه‌کاره نکند.
+
+  // از صفحهٔ خانه یک فروش انتخاب شده: همان سندی باز می‌شود که در تاریخچه با زدن روی همان فروش باز می‌شد
+  useEffect(() => {
+    if (openSaleId === null) return
+    let cancelled = false
+    void db.sales.get(openSaleId).then((found) => {
+      if (cancelled) return
+      if (found && !found.deleted) {
+        setView('list')
+        if (found.directTrade) setDirectDetail(found.directTrade.uuid)
+        else if (found.goodsReceiptChild) setGoodsReceiptDetail(found.goodsReceiptChild.receiptUuid)
+        else setDetail(found)
+      }
+      onSaleOpened?.()
+    })
+    return () => { cancelled = true }
+  }, [openSaleId])
 
   const tabCls = (v: string) =>
     `flex-1 rounded-xl py-2 text-sm font-bold ${view === v ? 'bg-[var(--action)] text-white' : 'bg-slate-100 text-slate-600'}`

@@ -7,7 +7,10 @@ import { reducedMotion } from '../lib/feedback'
  * flash. It never counts through in-between values: the true number is on screen from the first frame,
  * because in a money app even half a second of a wrong number is wrong.
  */
-export function RollingNumber({ value, format = fmtMoney }: { value: number; format?: (n: number) => string }) {
+/** رنگ چشمکِ هنگام تغییر. پیش‌فرض برای زمینهٔ روشن است؛ روی زمینهٔ تیره باید رنگ‌های روشن داده شود، وگرنه عدد وسط چشمک تیره و ناخوانا می‌شود. */
+export interface RollFlash { up: string; down: string }
+
+export function RollingNumber({ value, format = fmtMoney, flash }: { value: number; format?: (n: number) => string; flash?: RollFlash }) {
   const text = format(value)
   const last = useRef<{ value: number; text: string } | null>(null)
   const wrap = useRef<HTMLSpanElement>(null)
@@ -28,8 +31,8 @@ export function RollingNumber({ value, format = fmtMoney }: { value: number; for
     last.current = { value, text }
     if (!prev || prev.value === value || reducedMotion() || !wrap.current) return
     const el = wrap.current
-    const flash = value > prev.value ? 'var(--success)' : 'var(--danger)'
-    el.animate([{ color: flash }, { color: getComputedStyle(el).color }], { duration: 900, easing: 'ease-out' })
+    const from = value > prev.value ? (flash?.up ?? 'var(--success)') : (flash?.down ?? 'var(--danger)')
+    el.animate([{ color: from }, { color: getComputedStyle(el).color }], { duration: 900, easing: 'ease-out' })
   }, [value, text])
 
   return (

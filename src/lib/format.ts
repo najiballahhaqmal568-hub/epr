@@ -73,6 +73,19 @@ function fmtTime12(ts: number): string {
   return `${faDigits(h)}:${faDigits(String(d.getMinutes()).padStart(2, '0'))} ${period}`
 }
 
+/** ساعت و دقیقه به شکل ۲۴ ساعته، مثل «۱۴:۰۵» */
+export function fmtClock(ts: number): string {
+  const d = new Date(ts)
+  return faDigits(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)
+}
+
+const weekdayName = new Intl.DateTimeFormat('fa-AF-u-ca-persian', { weekday: 'long' })
+
+/** «سه‌شنبه ۷ میزان ۱۴۰۵» — روزِ هفته و تاریخ هجری شمسی */
+export function fmtDayLabel(ts: number): string {
+  return `${weekdayName.format(ts)} ${fmtDateShort(ts)}`
+}
+
 export function fmtDate(ts: number): string {
   return `${fmtDateShort(ts)}، ${fmtTime12(ts)}`
 }

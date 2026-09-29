@@ -188,8 +188,8 @@ function CashLedgerModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-export function CashView() {
-  const [showReconcile, setShowReconcile] = useState(false)
+export function CashView({ startReconcile = false }: { startReconcile?: boolean } = {}) {
+  const [showReconcile, setShowReconcile] = useState(startReconcile && !accessFlags.readOnly)
   const [showLedger, setShowLedger] = useState(false)
   const [counted, setCounted] = useState('')
   const [note, setNote] = useState('')

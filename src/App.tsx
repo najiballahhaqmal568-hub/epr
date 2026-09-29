@@ -25,17 +25,19 @@ import { Icon } from './components/Icon'
 import { SyncIndicator } from './components/SyncIndicator'
 import { UndoToast } from './components/UndoToast'
 
+// «فروش» وسط نوار پایین است، زیر شست؛ چپ و راستش دو دکمه — همان چیدمانِ طرح خانهٔ نو
 const tabs = [
   { id: 'dashboard', label: 'خانه', icon: 'chart' },
-  { id: 'sales', label: 'فروش', icon: 'sale' },
   { id: 'accounts', label: 'حساب‌ها', icon: 'accounts' },
+  { id: 'sales', label: 'فروش', icon: 'sale' },
+  { id: 'inventory', label: 'گدام', icon: 'stock' },
   { id: 'more', label: 'بیشتر', icon: 'settings' }
 ] as const
 
 type NavTabId = (typeof tabs)[number]['id']
 type TabId = NavTabId | 'inventory' | 'expenses' | 'purchases' | 'customers' | 'settings' | 'reports'
 // Travel order for the tab-change animation: deeper pages count as «forward».
-const TAB_ORDER: Record<TabId, number> = { dashboard: 0, sales: 1, accounts: 2, customers: 3, more: 4, inventory: 5, expenses: 5, purchases: 5, settings: 5, reports: 5 }
+const TAB_ORDER: Record<TabId, number> = { dashboard: 0, accounts: 1, customers: 2, sales: 3, inventory: 4, more: 5, expenses: 6, purchases: 6, settings: 6, reports: 6 }
 
 export default function App() {
   // VITE_UI_PREVIEW فقط برای build آزمایشی روی همین کمپیوتر است؛ حتی اگر اشتباهی
@@ -54,6 +56,10 @@ export default function App() {
   const [purchaseBack, setPurchaseBack] = useState<'inventory' | 'accounts'>('inventory')
   const [openInventoryReorder, setOpenInventoryReorder] = useState(false)
   const [expensesBack, setExpensesBack] = useState<'dashboard' | 'accounts' | 'more'>('more')
+  // صفحهٔ پول و مصارف از کجا شروع شود: مصارف، صندوق، یا مستقیم پنجرهٔ «شمارش نقد»
+  const [expensesStart, setExpensesStart] = useState<'expenses' | 'cash' | 'reconcile'>('expenses')
+  // فروشی که از صفحهٔ خانه انتخاب شده تا سندش باز شود
+  const [openSaleId, setOpenSaleId] = useState<number | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('all')
   const [unlocked, setUnlocked] = useState(false)
   const [pinError, setPinError] = useState('')
@@ -89,6 +95,20 @@ export default function App() {
   }
 
   const goTo = (target: string) => {
+    if (target.startsWith('sale:')) {
+      const id = Number(target.slice('sale:'.length))
+      if (Number.isInteger(id) && id > 0) setOpenSaleId(id)
+      setOpenNewSale(false)
+      setTab('sales')
+      return
+    }
+    if (target === 'cash-count') {
+      setExpensesBack('dashboard')
+      setOpenNewExpense(false)
+      setExpensesStart('reconcile')
+      setTab('expenses')
+      return
+    }
     if (target === 'sales-new') {
       setOpenNewSale(true)
       setTab('sales')
@@ -101,6 +121,7 @@ export default function App() {
     if (target === 'expenses-new') {
       setExpensesBack('dashboard')
       setOpenNewExpense(true)
+      setExpensesStart('expenses')
       setTab('expenses')
       return
     }
@@ -111,6 +132,7 @@ export default function App() {
     if (target === 'expenses') {
       setExpensesBack('dashboard')
       setOpenNewExpense(false)
+      setExpensesStart('expenses')
     }
     setTab(target as TabId)
   }
@@ -119,9 +141,11 @@ export default function App() {
     tab === 'customers' ||
     (tab === 'purchases' && purchaseBack === 'accounts')
       ? 'accounts'
-      : tab === 'inventory' || tab === 'expenses' || tab === 'settings' || tab === 'reports' || tab === 'purchases'
-        ? 'more'
-        : tab
+      : tab === 'purchases'
+        ? 'inventory'
+        : tab === 'expenses' || tab === 'settings' || tab === 'reports'
+          ? 'more'
+          : tab
 
   const serverCfg = useLiveQuery(async () => Boolean(await getServerConfig()), [])
 
@@ -311,12 +335,12 @@ export default function App() {
       </header>
       <main className="app-content" id="main-content">
       {relogin && (
-        <div className="flex items-center gap-2 bg-amber-500 p-2.5 text-white">
+        <div className="flex items-center gap-2 bg-[#FFB340] p-2.5 text-[#1D1D1F]">
           <span className="flex-1 text-sm font-bold">
             همگام‌سازی متوقف است — کار شما ثبت می‌شود، ولی به موبایل دیگر نمی‌رود.
           </span>
           <button
-            className="rounded-lg bg-white/25 px-3 py-1 text-sm font-bold"
+            className="min-h-[44px] rounded-lg bg-black/15 px-3 py-1 text-sm font-bold text-[#1D1D1F]"
             onClick={() => {
               setRelogin(false)
               setAuth('anon')
@@ -395,11 +419,9 @@ export default function App() {
           goTo={goTo}
           isStaff={isStaff}
           pendingExpenseCount={reminder.show ? reminder.count : 0}
-          debtCount={debtReminder.show ? debtReminder.count : 0}
-          debtTotal={debtReminder.show ? debtReminder.total : 0}
         />
       )}
-      {tab === 'sales' && <Sales isStaff={isStaff} openNew={openNewSale} pending={salePending} onPendingChange={setSalePending} />}
+      {tab === 'sales' && <Sales isStaff={isStaff} openNew={openNewSale} pending={salePending} onPendingChange={setSalePending} openSaleId={openSaleId} onSaleOpened={() => setOpenSaleId(null)} />}
       {tab === 'inventory' && (
         <Inventory
           onOpenPurchases={() => openPurchases('history', 'inventory')}
@@ -414,6 +436,7 @@ export default function App() {
           openExpenses={() => {
             setExpensesBack('accounts')
             setOpenNewExpense(false)
+            setExpensesStart('expenses')
             setTab('expenses')
           }}
         />
@@ -429,6 +452,7 @@ export default function App() {
             if (target === 'expenses') {
               setExpensesBack('more')
               setOpenNewExpense(false)
+              setExpensesStart('expenses')
               setTab('expenses')
               return
             }
@@ -453,7 +477,7 @@ export default function App() {
           onOpenAccounts={() => setTab('accounts')}
         />
       )}
-      {tab === 'expenses' && <Expenses openNew={openNewExpense} onBack={() => setTab(expensesBack)} />}
+      {tab === 'expenses' && <Expenses openNew={openNewExpense} start={expensesStart} onBack={() => setTab(expensesBack)} />}
       {tab === 'customers' && <Customers onBack={() => setTab('accounts')} />}
       {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => { try { sessionStorage.removeItem('epr_sale_working_v1') } catch { /* storage unavailable */ } setAuth('anon') }} />}
       {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('more')} />}
@@ -466,6 +490,7 @@ export default function App() {
           <button
             key={t.id}
             disabled={salePending}
+            className={t.id === 'sales' ? 'app-nav-sell' : undefined}
             aria-current={activeNav === t.id ? 'page' : undefined}
             onClick={() => {
               if (t.id === 'sales') setOpenNewSale(false)

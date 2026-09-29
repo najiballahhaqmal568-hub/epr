@@ -4,19 +4,21 @@ import { Modal, Skeleton } from '../../components/ui'
 import { fmtMoney, fmtNum } from '../../lib/format'
 import { explainCash, explainPayables, explainReceivables, explainStock, type SourceRow } from '../../lib/numberSources'
 
-export type ExplainKind = 'receivables' | 'cash' | 'stock' | 'payables'
+export type ExplainKind = 'receivables' | 'cash' | 'stock' | 'payables' | 'loans'
 
 const TITLES: Record<ExplainKind, string> = {
   receivables: 'طلب از مشتریان از کجا آمد',
   cash: 'صندوق از کجا آمد',
   stock: 'موجودی گدام از کجا آمد',
-  payables: 'قرض ما از کجا آمد'
+  payables: 'قرض ما از کجا آمد',
+  loans: 'قرض از اشخاص از کجا آمد'
 }
 const GO: Record<ExplainKind, { target: string; label: string }> = {
   receivables: { target: 'accounts', label: 'دیدن حساب‌ها' },
   cash: { target: 'expenses', label: 'دیدن صندوق و حرکت‌ها' },
   stock: { target: 'inventory', label: 'دیدن گدام' },
-  payables: { target: 'accounts', label: 'دیدن حساب‌ها' }
+  payables: { target: 'accounts', label: 'دیدن حساب‌ها' },
+  loans: { target: 'accounts', label: 'دیدن حساب‌ها' }
 }
 
 function Rows({ rows, pairs, showValue }: { rows: SourceRow[]; pairs?: boolean; showValue?: boolean }) {
@@ -76,6 +78,14 @@ export default function ExplainModal({ kind, isStaff, onClose, goTo }: { kind: E
           <Rows rows={e.loans.rows} />
         </>}
         <p className="explain-note">شرکا قرض نیستند و اینجا نمی‌آیند.</p>
+      </>
+    })()}
+    {data && kind === 'loans' && (() => {
+      const e = explainPayables(data.suppliers).loans
+      return <>
+        <p className="explain-total">مجموع: <strong>{fmtMoney(e.total)}</strong> — از اشخاص</p>
+        {e.rows.length === 0 ? <p className="text-sm text-slate-500">از هیچ شخصی قرض نگرفته‌اید.</p> : <Rows rows={e.rows} />}
+        <p className="explain-note">قرض تأمین‌کنندگان و صراف‌ها جدا حساب می‌شود؛ شرکا قرض نیستند.</p>
       </>
     })()}
     <button className="primary-button mt-4" onClick={go}>{GO[kind].label}</button>
