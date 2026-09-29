@@ -18,12 +18,15 @@ try {
     await db.variants.add({ productId, size: '42', color: 'سیاه', stockQty: 10, purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, lowStock: 2 })
   })
   await nav('فروش').click(); await heading('میز فروش')
-  await page.getByRole('button', { name: /آزمایشی/ }).click()
+  // the size window is gone (sizes sit on the card); a sale's receipt is the window we close with back
+  await page.getByRole('button', { name: /آزمایشی 42 سیاه/ }).click()
+  await page.getByRole('button', { name: 'نقد', exact: true }).click()
+  await page.getByRole('button', { name: 'رسید', exact: true }).click()
   await page.locator('dialog[open]').waitFor()
   await page.goBack()
   await page.locator('dialog[open]').waitFor({ state: 'hidden' })
   await heading('میز فروش')
   assert.equal(await nav('فروش').getAttribute('aria-current'), 'page')
   await page.goBack(); await heading('خانه')
-  console.log('PASS hardware back: More → expenses → More → Home; product modal closes without leaving Sales; next back returns Home')
+  console.log('PASS hardware back: More → expenses → More → Home; receipt window closes without leaving Sales; next back returns Home')
 } finally { await app.close() }
