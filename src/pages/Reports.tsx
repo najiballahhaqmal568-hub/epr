@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { productProfits, profitSummary } from '../lib/profit'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, saleCashPaid, type Variant } from '../db'
+import { db, type Variant } from '../db'
+import { summarizeSales } from '../lib/salesFigures'
 import { fmtNum, fmtMoney, ageLabel, startOfDay, startOfMonth, startOfYear, toDateInput, fromDateInput } from '../lib/format'
 import { inputCls, Card } from '../components/ui'
 import { ColumnChart } from '../components/charts'
@@ -81,10 +82,10 @@ export default function Reports({ onBack }: { onBack: () => void }) {
   const confirmedSales = sales?.filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))
   const confirmedPurchases = purchases?.filter(p => !p.directTrade || directReview.readyTradeUuids.has(p.directTrade.uuid))
   const salesTotal = confirmedSales?.reduce((s, x) => s + x.total, 0) ?? 0
-  const salesCash = confirmedSales?.filter(s => !s.directTrade).reduce((s, x) => s + saleCashPaid(x), 0) ?? 0
+  const salesCash = summarizeSales(confirmedSales ?? []).cash
   const directReceipts = payments?.filter(p => p.directPayment?.route === 'customerCash').reduce((s, p) => s + p.amount, 0) ?? 0
   const directToSupplier = payments?.filter(p => p.directPayment?.route === 'customerToSupplier').reduce((s, p) => s + p.amount, 0) ?? 0
-  const pairsSold = confirmedSales?.reduce((s, x) => s + commercialSaleLines(x).reduce((a, l) => a + l.qty, 0), 0) ?? 0
+  const pairsSold = summarizeSales(confirmedSales ?? []).pairs
   // قیمت خرید ثبت‌شده در خود فاکتور — مفاد گذشته با تغییر قیمت عوض نمی‌شود
   const costOf = (l: { variantId?: number; unitCost?: number }) => l.unitCost ?? (l.variantId === undefined ? 0 : variantMap.get(l.variantId)?.purchasePrice) ?? 0
   // مفاد و مصرف از همان تابعی که کارت خانه می‌خواند (lib/profit.ts)

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { applyRebuiltCosts } from './costing'
-import { effectsOf, type DocTable } from './effects'
-import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Purchase } from '../db'
+import { applyDocument, type DocTable } from './effects'
+import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable } from '../db'
 import { getSupa, getProfile } from './supa'
 import { receiptReplayDecision } from './customerGoodsReceiptSync'
 import { RECEIPT_UUID } from './customerGoodsReceiptTypes'
@@ -326,16 +326,24 @@ export class RecoverableSyncReferenceError extends Error {
 const MASTERS: SyncTable[] = ['products', 'variants', 'customers', 'suppliers', 'expenseCategories']
 
 /**
+ * یک سندِ موجود با نسخهٔ رسیده جایگزین می‌شود: اثر نسخهٔ قبلی برمی‌گردد، ردیف به‌روز می‌شود، اثر نسخهٔ تازه
+ * اعمال می‌شود (اگر نسخهٔ تازه حذف‌شده نیست). قاعدهٔ اثر همچنان فقط در effects.ts است.
+ */
+async function replaceDocument(table: SyncTable, existing: Record<string, unknown> & { id: number; uuid?: string; deleted?: boolean }, incoming: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const merged = { ...existing, ...incoming, id: existing.id, uuid: existing.uuid }
+  if (!existing.deleted) await applyDocEffects(table, existing, true)
+  await db.table(table).update(existing.id, merged)
+  if (!incoming.deleted) await applyDocEffects(table, merged, false)
+  return merged
+}
+
+/**
  * اعمال اثرات جانبی یک سند دریافتی (گدام/قرض) — پول نقد سند جداگانه دارد.
  * قاعده‌ها اینجا نوشته نمی‌شوند؛ همه از lib/effects.ts می‌آیند تا با
  * «کنترل حساب‌ها» و با ops.ts هرگز فرق نکنند.
  */
 export async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, reverse: boolean) {
-  const sign = reverse ? -1 : 1
-  for (const e of effectsOf(table as DocTable, rec)) {
-    const row = await db.table(e.table).get(e.id!)
-    if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) + e.delta * sign })
-  }
+  await applyDocument(table as DocTable, rec, reverse ? -1 : 1) // a row missing here is skipped: replay from another phone
 }
 
 async function rebuildReceiptAdjustmentCosts(receiptUuid: string): Promise<void> {
@@ -483,47 +491,31 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
             await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
           }
         } else if (table === 'purchases') {
-          const inc = rec as unknown as Purchase
-          const merged = { ...(existing as Purchase), ...inc, id: existing.id, uuid: existing.uuid }
           // خرید اکنون می‌تواند قیمت اصلاح‌شده داشته باشد. اثر سند قبلی را برمی‌گردانیم
           // و اثر نسخهٔ تازه را اعمال می‌کنیم تا قرض تأمین‌کننده در موبایل دوم هم درست بماند.
-          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-          await db.table(table).update(existing.id, merged)
-          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          await replaceDocument(table, existing, rec)
           // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
           await applyRebuiltCosts()
         } else if (table === 'sales' || table === 'returns') {
-          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
           // اصلاح قیمت خرید می‌تواند فقط unitCost فروش و مرجوعی وابسته را عوض کند.
           // اثر گدام/قرض را برمی‌گردانیم و نسخهٔ تازه را اعمال می‌کنیم؛ چون در
           // اصلاح قیمت این اثرها برابر اند، تعداد و حساب‌ها خالصاً صفر تغییر می‌کنند.
-          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-          await db.table(table).update(existing.id, merged)
-          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          await replaceDocument(table, existing, rec)
           await applyRebuiltCosts()
         } else if (table === 'payments') {
-          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
           // دو دستگاه ممکن است همان پرداخت را همزمان اصلاح کنند. سند جایگزین
           // uuid ثابت دارد؛ نسخهٔ برنده باید اثر نسخهٔ محلی را برگرداند و اثر
           // تازه را اعمال کند، نه اینکه هر دو پرداخت در حساب بمانند.
-          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-          await db.table(table).update(existing.id, merged)
-          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          await replaceDocument(table, existing, rec)
           if (rec.goodsReceipt) await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
         } else if (table === 'adjustments' && (existing.goodsReceiptChild || rec.goodsReceiptChild)) {
-          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
-          if (!existing.deleted) await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-          await db.table(table).update(existing.id, merged)
-          if (!row.deleted) await applyDocEffects(table, merged as unknown as Record<string, unknown>, false)
+          await replaceDocument(table, existing, rec)
           const child = (rec.goodsReceiptChild ?? existing.goodsReceiptChild) as { receiptUuid: string }
           await rebuildReceiptAdjustmentCosts(child.receiptUuid)
         } else if (table === 'expenses' && (existing.shippingPaymentUuid || rec.shippingPaymentUuid)) {
           // Concurrent freight corrections share deterministic child UUIDs. The
           // winning shop share must replace the old value, including a zero share.
-          const merged = { ...existing, ...rec, id: existing.id, uuid: existing.uuid }
-          if (!existing.deleted) await applyDocEffects(table, existing as Record<string, unknown>, true)
-          await db.table(table).update(existing.id, merged)
-          if (!row.deleted) await applyDocEffects(table, merged as Record<string, unknown>, false)
+          await replaceDocument(table, existing, rec)
         } else if (table === 'cashMovements') {
           // حرکت‌های صندوقِ اصلاح نیز uuid ثابت دارند؛ آخرین نسخه جای قبلی می‌نشیند.
           await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid })

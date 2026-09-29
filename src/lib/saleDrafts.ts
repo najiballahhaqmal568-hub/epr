@@ -1,6 +1,6 @@
 import { type SaleLine } from '../db'
-import { parseNum } from './format'
 import type { SaleShippingInput } from './ops'
+import { readPayment, saleSubtotal } from './checkout'
 
 const STORAGE_KEY = 'epr_sale_drafts_v1'
 const MAX_DRAFTS = 20
@@ -146,7 +146,5 @@ export function deleteSaleDraft(id: string): void {
 }
 
 export function saleDraftTotal(draft: Pick<SaleDraft, 'lines' | 'discountStr'>): number {
-  const subtotal = draft.lines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)
-  const rawDiscount = parseNum(draft.discountStr)
-  return subtotal - Math.min(Math.max(rawDiscount, 0), subtotal)
+  return readPayment({ subtotal: saleSubtotal(draft.lines), discountStr: draft.discountStr, paidStr: '', paidTouched: false }).total
 }

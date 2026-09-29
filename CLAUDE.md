@@ -77,6 +77,10 @@ inside `sync.ts` or `integrity.ts` — that duplication is what caused both mone
 bugs this project has had (in-transit purchases counted twice, and landing cost
 attributed wholly to the last `via`).
 
+Writing an effect onto a stored number is also one function: `applyDocument()` / `applyEffectList()` in
+`effects.ts` (`sync.ts`, `ops.ts`, direct trade and goods receipt all call it; the guard — missing row, deleted row,
+negative stock, whole numbers — is a parameter, not a copy). Do not write a new `row[field] + delta` loop.
+
 `ops.ts` still writes locally (it also does guards, cash movements and
 transactions), so it is the one place that can drift. The fuzzer is what holds
 it honest — it compares stored numbers against `effectsOf` after every step.
@@ -98,6 +102,21 @@ Any operation that shifts quantity between variants (e.g. merging duplicate
 products) must write **two adjustment documents** — negative at the source,
 positive at the destination. Otherwise `runIntegrityCheck()` will flag the
 result and a second device will rebuild different numbers.
+
+### Sales figures are read from one place
+
+Cash, customer credit and pairs of a sale are read through `src/lib/salesFigures.ts` (`saleCashReceived`,
+`saleCustomerCredit`, `salePairs`, `summarizeSales`) — home, «بستن روز», today's list, the sales stats and the
+reports all import it. Never write `total - saleCashPaid(sale)` on a screen: for a shoe settlement to a lender
+or expense creditor the till gets nothing (`saleCashPaid` = 0) but nobody owes the shop either, so that formula
+showed the whole total as customer debt. `saleCreditAmount` (db.ts) stays the one rule underneath.
+
+### The sale desk's rules are in `src/lib/checkout.ts`
+
+What the customer owes after a discount, how the money handed over reads (cash / credit / part), when a sale is
+refused and what the Sale document says are `readPayment`, `checkoutRefusal` and `buildSale` — the screen only
+collects the form. `ops.addSale` stays the authority that writes. A new way to sell (a button, a barcode) calls
+these; it must not re-derive `paid` / `remainder` in a component. A discount is never negative.
 
 ### Change is never kept in the till
 
@@ -130,7 +149,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1374 checks in 142 scenarios
+npm test          # tests/checks.ts — currently 1429 checks in 145 scenarios
 ```
 
 ```bash

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { accessFlags, db, saleCashPaid, type Customer, type Sale, type Variant } from '../db'
+import { accessFlags, db, type Customer, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
 import { addCalendarDays, fmtDayLabel, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
 import { daysLeftInMonth, expenseAlert, profitSummary } from '../lib/profit'
@@ -11,6 +11,7 @@ import { syncNow, useSyncStatus } from '../lib/sync'
 import { syncStatusLabel } from '../lib/syncStatusLabel'
 import DirectTradeWarning, { useDirectTradeReview } from '../components/DirectTradeWarning'
 import { commercialSaleLines } from '../lib/commercialLines'
+import { summarizeSales } from '../lib/salesFigures'
 import { returnProfit } from '../lib/returns'
 import { Icon, type IconName } from '../components/Icon'
 import { RollingNumber } from '../components/RollingNumber'
@@ -115,8 +116,7 @@ export default function Dashboard({
 
   const todaySales = (sales ?? []).filter(sale => (!sale.directTrade || directReview.readyTradeUuids.has(sale.directTrade.uuid)) && (!sale.goodsReceiptChild || receiptReview.readyReceiptUuids.has(sale.goodsReceiptChild.receiptUuid)))
   const todayTotal = todaySales.reduce((sum, row) => sum + row.total, 0)
-  const todayCash = todaySales.filter(row => !row.directTrade).reduce((sum, row) => sum + saleCashPaid(row), 0)
-  const todayPairs = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + line.qty, 0), 0)
+  const { cash: todayCash, pairs: todayPairs } = summarizeSales(todaySales)
   const todayProfit = grossProfit(todaySales) - returnedProfit
   // Same numbers as todayProfit, split into steps for «از کجا آمد».
   const goodsValue = todaySales.reduce((sum, sale) => sum + commercialSaleLines(sale).reduce((s, line) => s + line.unitPrice * line.qty, 0), 0)

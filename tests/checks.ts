@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, accessFlags, syncFlags, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, syncFlags, saleCashPaid, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -112,6 +112,9 @@ import { ordinaryCustomerCollections } from '../src/lib/directTradeReports'
 import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
+import { saleCustomerCredit, summarizeSales } from '../src/lib/salesFigures'
+import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment } from '../src/lib/checkout'
+import { saleDraftTotal } from '../src/lib/saleDrafts'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
 import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
@@ -5374,6 +5377,126 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('قرض نهایی دفتر', rows[rows.length - 1].balance, 2600)
       eq('با عدد ذخیره‌شده هم برابر است', (await db.customers.get(cId))!.balance, 2600)
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'ارقام فروش — قرض، نقد و جوړه در همهٔ صفحه‌ها یک جواب دارد',
+    run: async () => {
+      const variantId = await makeVariant({ purchasePrice: 500, retailPrice: 900 })
+      await setOpeningStock(variantId, 10, 'اسپرتکس')
+      const customerId = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, createdAt: Date.now() })) as number
+      const lenderId = (await db.suppliers.add({ name: 'حاجی عبدالکریم', balance: 0, kind: 'lender' })) as number
+      await addLoan(lenderId, 'حاجی عبدالکریم', 5000, Date.now(), 'قرض پیشین', 'opening')
+      const line = (qty: number) => ({ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 900 })
+
+      // ۱) نقد کامل، ۲) نیمه‌نقد به مشتری، ۳) کفش بابت تسویهٔ قرض‌دهنده (پول نمی‌آید و کسی قرض نیست)
+      await addSale({ date: Date.now(), saleType: 'retail', lines: [line(1)], total: 900, paid: 900 })
+      await addSale({ date: Date.now(), customerId, customerName: 'احمد', saleType: 'retail', lines: [line(2)], total: 1800, paid: 500 })
+      await giveGoodsToLender(lenderId, 'حاجی عبدالکریم', [line(2)], Date.now(), 'بابت قسط', 'goodsSettlement')
+      const sales = await db.sales.filter((x) => !x.deleted).toArray()
+      const settlement = sales.find((x) => x.lenderAction)!
+
+      // نشان می‌دهد که فرمول قدیمی صفحه‌ها (کل − نقد) برای فروش تسویه عدد غلط می‌داد
+      eq('فرمول قدیمی برای فروش تسویه «قرض ۱٬۸۰۰» نشان می‌داد', settlement.total - saleCashPaid(settlement), 1800)
+      eq('قرض واقعی مشتری برای فروش تسویه صفر است', saleCustomerCredit(settlement), 0)
+
+      const f = summarizeSales(sales)
+      eq('تعداد فروش', f.count, 3)
+      eq('مجموع فروش', f.total, 4500)
+      eq('نقد گرفته‌شده: ۹۰۰ + ۵۰۰، نه کفش تسویه', f.cash, 1400)
+      eq('قرض مشتری فقط ۱٬۳۰۰ احمد است', f.credit, 1300)
+      eq('جوړه: ۱ + ۲ + ۲', f.pairs, 5)
+      eq('قرض ثبت‌شدهٔ احمد با همین عدد برابر است', (await db.customers.get(customerId))!.balance, f.credit)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'میز فروش — قواعد پرداخت و ثبت بدون صفحه',
+    run: async () => {
+      const variantId = await makeVariant({ purchasePrice: 500, retailPrice: 900 })
+      await setOpeningStock(variantId, 5, 'اسپرتکس')
+      const variants = await db.variants.toArray()
+      const line = (qty: number) => ({ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 900 })
+      const base = { lines: [line(2)], variants, saleType: 'retail' as const, customerId: '' as number | '', subtotal: 1800, discountStr: '', paidStr: '', paidTouched: false }
+
+      // خواندن پول: دست‌نخورده = پوره؛ صفر = قرض؛ بین این دو = نیمه‌نقد؛ خالیِ لمس‌شده = نیمه‌کاره
+      const mode = (over: Partial<typeof base>) => readPayment({ ...base, ...over }).mode
+      is('دست‌نخورده نقد است', mode({}), 'cash')
+      is('صفر قرض است', mode({ paidTouched: true, paidStr: '0' }), 'credit')
+      is('۵۰۰ از ۱٬۸۰۰ نیمه‌نقد است', mode({ paidTouched: true, paidStr: '500' }), 'mixed')
+      is('بیشتر از مجموع هم نقد است (باقی پس داده می‌شود)', mode({ paidTouched: true, paidStr: '2000' }), 'cash')
+      is('خالیِ لمس‌شده نیمه‌کاره است', mode({ paidTouched: true, paidStr: ' ' }), 'mixed')
+      for (const m of ['cash', 'credit'] as const) is(`دکمهٔ «${m}» همان حالت را می‌خواند`, mode({ ...paymentFieldsFor(m) }), m)
+
+      // تخفیف: نه منفی (قیمت را بالا می‌برد) و نه بیشتر از اجناس
+      eq('تخفیف ۳۰۰', readPayment({ ...base, discountStr: '300' }).total, 1500)
+      eq('تخفیف منفی قیمت را بالا نمی‌برد', readPayment({ ...base, discountStr: '-300' }).total, 1800)
+      eq('تخفیف بیشتر از اجناس مجموع را صفر می‌کند', readPayment({ ...base, discountStr: '99999' }).total, 0)
+      eq('مجموع پیش‌نویس همان عدد را می‌دهد', saleDraftTotal({ lines: [line(2)], discountStr: '300' }), 1500)
+
+      // رد کردن: به ترتیبی که فروشنده باید درست کند
+      is('سبد خالی', checkoutRefusal({ ...base, lines: [], subtotal: 0 })?.message, 'حداقل یک جنس انتخاب کنید')
+      is('بیشتر از گدام', checkoutRefusal({ ...base, lines: [line(6)] })?.message?.slice(0, 11), 'موجودی بعضی')
+      is('نیم‌جوړه', checkoutRefusal({ ...base, lines: [line(1.5)] })?.message?.slice(0, 11), 'موجودی بعضی')
+      is('دو خط یک سایز روی هم از گدام بیشتر می‌شود', checkoutRefusal({ ...base, lines: [line(3), line(3)] })?.message?.slice(0, 11), 'موجودی بعضی')
+      is('خالیِ لمس‌شده رد می‌شود', checkoutRefusal({ ...base, paidTouched: true, paidStr: '' })?.message?.slice(0, 12), 'مبلغ نقد دری')
+      is('«نقد» به خانهٔ خالی کاری ندارد', checkoutRefusal({ ...base, paidTouched: true, paidStr: '', cashOnly: true }), null)
+      const credit = checkoutRefusal({ ...base, paidTouched: true, paidStr: '0' })
+      is('قرض بدون مشتری رد می‌شود و خانهٔ مشتری را می‌خواهد', credit?.needsCustomer, true)
+      is('قرض با مشتری قبول است', checkoutRefusal({ ...base, paidTouched: true, paidStr: '0', customerId: 7 }), null)
+      is('کرایه برای پرچون رد می‌شود', checkoutRefusal({ ...base, customerId: 7, shipping: { total: 100, customerShare: 100, received: 0 } as never })?.message?.slice(0, 8), 'کرایه به')
+
+      // ساختن سند: پولِ اضافه نگه داشته نمی‌شود؛ وعده و صفحه فقط برای قرض
+      const cash = buildSale({ ...base, paidTouched: true, paidStr: '2000' }, { promise: '2026-10-10', bookPage: '12' })
+      eq('پول اضافه: paid = مجموع', cash.paid, 1800)
+      is('فروش نقد وعده ندارد', cash.promiseDate, undefined)
+      is('فروش نقد صفحه ندارد', cash.bookPage, undefined)
+      const part = buildSale({ ...base, customerId: 7, paidTouched: true, paidStr: '500', discountStr: '300' }, { customer: { id: 7, name: 'احمد' }, promise: '2026-10-10', bookPage: ' 12 ' })
+      eq('نیمه‌نقد: مجموع بعد از تخفیف', part.total, 1500)
+      eq('نیمه‌نقد: paid', part.paid, 500)
+      eq('تخفیف در سند', part.discount ?? 0, 300)
+      is('صفحه بی‌فاصله', part.bookPage, '12')
+      is('وعده ثبت شد', typeof part.promiseDate, 'number')
+      const viaButton = buildSale({ ...base, paidTouched: true, paidStr: '0', cashOnly: true }, { promise: '', bookPage: '' })
+      eq('«نقد» همیشه پوره می‌گیرد', viaButton.paid, 1800)
+
+      // و سندِ ساخته‌شده واقعاً ثبت می‌شود: گدام و صندوق درست، قرض احمد ۱٬۰۰۰
+      const customerId = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, createdAt: Date.now() })) as number
+      const saleId = await addSale(buildSale({ ...base, customerId, paidTouched: true, paidStr: '500' }, { customer: { id: customerId, name: 'احمد' }, promise: '', bookPage: '' }))
+      eq('گدام ۲ کم شد', await stockOf(variantId), 3)
+      eq('قرض احمد', (await db.customers.get(customerId))!.balance, 1300)
+      is('فروش ثبت شد', typeof saleId, 'number')
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'فروش — قرض بدون مشتری و دو خط از یک سایز',
+    run: async () => {
+      const variantId = await makeVariant({ purchasePrice: 500, retailPrice: 900 })
+      await setOpeningStock(variantId, 5, 'اسپرتکس')
+      const customerId = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, createdAt: Date.now() })) as number
+      const line = (qty: number) => ({ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 900 })
+
+      // پیش از این، قرضِ بی‌نام بی‌صدا در هیچ حسابی نمی‌نشست و گم می‌شد
+      await throws('قرض بدون مشتری رد می‌شود', () => addSale({ date: Date.now(), saleType: 'retail', lines: [line(1)], total: 900, paid: 0 }))
+      eq('رد شدن گدام را تغییر نداد', await stockOf(variantId), 5)
+      eq('رد شدن فروشی نساخت', await db.sales.count(), 0)
+
+      // دو خط از یک سایز روی هم حساب می‌شود: ۳ + ۳ از ۵ جوړه
+      await throws('دو خط ۳ + ۳ از موجودی ۵ رد می‌شود', () => addSale({ date: Date.now(), saleType: 'retail', lines: [line(3), line(3)], total: 5400, paid: 5400 }))
+      eq('گدام هنوز ۵', await stockOf(variantId), 5)
+      eq('صندوق هنوز صفر', await cashBalance(), 0)
+
+      // ۲ + ۳ = ۵ درست است و گدام را صفر می‌کند؛ حذفش همه را برمی‌گرداند
+      const id = await addSale({ date: Date.now(), customerId, customerName: 'احمد', saleType: 'retail', lines: [line(2), line(3)], total: 4500, paid: 1000 })
+      eq('گدام صفر شد', await stockOf(variantId), 0)
+      eq('قرض احمد ۳٬۵۰۰', (await db.customers.get(customerId))!.balance, 3500)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      await deleteSale(id)
+      eq('حذف گدام را برگرداند', await stockOf(variantId), 5)
+      eq('حذف قرض را برگرداند', (await db.customers.get(customerId))!.balance, 0)
+      eq('حذف صندوق را برگرداند', await cashBalance(), 0)
+      is('کنترل حساب‌ها بعد از حذف سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   }
 ]

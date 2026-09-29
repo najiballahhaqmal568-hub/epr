@@ -2,7 +2,7 @@ import type { Sale } from '../../db'
 import { Modal } from '../../components/ui'
 import { commercialSaleLines } from '../../lib/commercialLines'
 import { fmtDate, fmtMoney, fmtNum } from '../../lib/format'
-import { saleCashPaid } from '../../db'
+import { saleCustomerCredit } from '../../lib/salesFigures'
 
 export interface TodayProfitParts { goods: number; cost: number; discount: number; returned: number; profit: number }
 
@@ -16,7 +16,7 @@ export default function TodaySalesModal({ sales, parts, isStaff, onClose, goTo }
     <p className="explain-total">مجموع: <strong>{fmtMoney(total)}</strong> — {fmtNum(sales.length)} فروش</p>
     {rows.length === 0 ? <p className="text-sm text-slate-500">امروز هنوز فروشی ثبت نشده.</p> : <div className="explain-rows">
       {rows.map(sale => {
-        const credit = sale.directTrade ? 0 : sale.total - saleCashPaid(sale)
+        const credit = saleCustomerCredit(sale)
         return <div key={sale.id} className="explain-row">
           <span className="min-w-0">{sale.customerName || 'مشتری نقدی'}<small>{fmtDate(sale.date)} · {commercialSaleLines(sale).map(l => `${l.productName} ×${fmtNum(l.qty)}`).join('، ')}</small></span>
           <span className="explain-amount">{fmtMoney(sale.total)}{sale.directTrade ? <small>فروش مستقیم</small> : credit > 0 ? <small className="text-red-700">قرض {fmtMoney(credit)}</small> : <small>نقد</small>}</span>

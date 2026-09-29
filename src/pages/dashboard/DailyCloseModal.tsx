@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, saleCashPaid } from '../../db'
+import { db } from '../../db'
+import { summarizeSales } from '../../lib/salesFigures'
 import { Modal, PrimaryBtn, Skeleton } from '../../components/ui'
 import { addCalendarDays, fmtDateShort, fmtMoney, fmtNum } from '../../lib/format'
 import { explainCash } from '../../lib/numberSources'
@@ -35,7 +36,7 @@ export default function DailyCloseModal({ day, readyTradeUuids, readyReceiptUuid
   if (!data) return <Modal title="بستن روز" onClose={onClose}><Skeleton rows={5} /></Modal>
   const summary = profitSummary({ ...data, readyTradeUuids, readyReceiptUuids })
   const sales = confirmedSales(data.sales, readyTradeUuids, readyReceiptUuids)
-  const credit = sales.filter(s => !s.directTrade).reduce((sum, s) => sum + Math.max(0, s.total - saleCashPaid(s)), 0)
+  const credit = summarizeSales(sales).credit
   // فقط پول دریافت‌شده؛ «قرض قبلی» مبلغ منفی است و اینجا شمرده نمی‌شود
   const collected = ordinaryCustomerCollections(data.payments.filter(p => !p.deleted && p.amount > 0))
   const cash = explainCash(data.movements)

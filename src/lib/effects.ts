@@ -13,7 +13,7 @@
  *   • integrity.ts → اثرها را جمع می‌زند تا عدد مورد انتظار را بسازد
  *   • آزمایش تصادفی → می‌سنجد که ops.ts هم به همان عدد رسیده باشد
  */
-import { landingSarrafOwed, saleCreditAmount, type Adjustment, type Expense, type Payment, type Purchase, type ReturnDoc, type Sale } from '../db'
+import { db, landingSarrafOwed, saleCreditAmount, type Adjustment, type Expense, type Payment, type Purchase, type ReturnDoc, type Sale } from '../db'
 
 export type EffectTable = 'variants' | 'customers' | 'suppliers'
 export type EffectField = 'stockQty' | 'balance'
@@ -113,4 +113,33 @@ export function foldEffects(docs: { table: DocTable; rows: unknown[] }[]): {
       }
 
   return { stockQty, customerBalance, supplierBalance }
+}
+
+/**
+ * چگونه یک اثر روی ردیفِ ذخیره‌شده اعمال شود. قاعدهٔ «چه چیزی تغییر می‌کند» همین‌جا (effectsOf) است؛ این
+ * «چگونه نوشتن» هم فقط یک جا نوشته می‌شود تا پنج نسخهٔ جدا با پنج رفتار متفاوت نشود.
+ *  • missing: پیام خطا وقتی ردیف نیست؛ بدون آن، ردیفِ گم‌شده بی‌صدا رد می‌شود (بازپخش از موبایل دیگر)
+ *  • rejectDeleted: ردیفِ حذف‌شده هم «نیست» حساب شود
+ *  • wholeNumbers: پیام خطا اگر نتیجه عدد صحیحِ امن نباشد
+ *  • noNegativeStock: پیام خطا اگر موجودی گدام منفی شود
+ */
+export interface ApplyGuard { missing?: string; rejectDeleted?: boolean; wholeNumbers?: string; noNegativeStock?: string }
+
+export async function applyEffectList(effects: readonly Effect[], sign: 1 | -1, guard: ApplyGuard = {}): Promise<void> {
+  for (const effect of effects) {
+    const row = (await db.table(effect.table).get(effect.id!)) as Record<string, number> | undefined
+    if (!row || (guard.rejectDeleted && (row as { deleted?: boolean }).deleted)) {
+      if (guard.missing !== undefined) throw new Error(guard.missing)
+      continue
+    }
+    const next = Number(row[effect.field] ?? 0) + effect.delta * sign
+    if (guard.wholeNumbers !== undefined && !Number.isSafeInteger(next)) throw new Error(guard.wholeNumbers)
+    if (guard.noNegativeStock !== undefined && effect.field === 'stockQty' && next < 0) throw new Error(guard.noNegativeStock)
+    await db.table(effect.table).update(effect.id!, { [effect.field]: next })
+  }
+}
+
+/** اثرهای یک سند را اعمال (sign = 1) یا برگردان (sign = −1) کن */
+export function applyDocument(table: DocTable, doc: unknown, sign: 1 | -1, guard: ApplyGuard = {}): Promise<void> {
+  return applyEffectList(effectsOf(table, doc), sign, guard)
 }
