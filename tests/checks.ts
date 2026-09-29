@@ -423,6 +423,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('صندوق دست نخورد', await cashBalance(), 5000)
       eq('گدام دست نخورد', await stockOf(vId), 0)
       eq('هیچ خریدی ثبت نشد', await db.purchases.count(), 0)
+      // مجموعی که با جنس نمی‌خواند: قرض تأمین‌کننده از مجموع می‌آید ولی قیمت گدام از جنس — دو عدد از هم جدا می‌شدند
+      await throws('مجموع خرید که با جنس نمی‌خواند رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1500, paid: 0 }))
+      await throws('قیمت خرید منفی رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [{ ...line, unitCost: -100 }], total: -1000, paid: 0 }))
+      eq('قرض تأمین‌کننده دست نخورد', (await db.suppliers.get(sId))!.balance, 0)
       await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1000 })
       eq('پرداخت پوره هنوز کار می‌کند', await cashBalance(), 4000)
     }

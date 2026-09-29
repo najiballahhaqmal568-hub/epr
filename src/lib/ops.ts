@@ -339,6 +339,9 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
     throw new Error('پرداخت و حواله از مجموع خرید بیشتر است؛ پول اضافه را جداگانه «پرداخت به تأمین‌کننده» ثبت کنید تا طلب شما بماند.')
   }
   if (purchase.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
+  if (purchase.lines.some((l) => l.unitCost < 0)) throw new Error('قیمت خرید منفی نمی‌شود')
+  // قرض تأمین‌کننده از «مجموع» می‌آید و قیمت گدام از خطوط — اگر یکی نباشند، دو عدد از هم جدا می‌شوند
+  if (purchase.total !== afn(purchase.lines.reduce((s, l) => s + l.qty * l.unitCost, 0))) throw new Error('مجموع خرید با تعداد و قیمت جنس نمی‌خواند')
   return db.transaction('rw', [db.purchases, db.variants, db.suppliers, db.cashMovements, db.sales, db.adjustments, db.returns], async () => {
     // «رسیده» فقط با receivePurchase ساخته می‌شود، نه در لحظهٔ ثبت خرید.
     // اگر اینجا اجازه داده شود، موجودی‌اش نه از سند خرید می‌آید و نه از سند رسید.
