@@ -261,6 +261,73 @@ async function settlement() {
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
   {
+    name: 'بازبینی کامل — خرید با پرداخت بیشتر از مجموع یا منفی رد می‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 100 })
+      const sId = await newSupplier()
+      await seedCash(5000)
+      const line = { variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 10, unitCost: 100 }
+      // خرید ۱٬۰۰۰ با ۱٬۲۰۰ پرداخت: صندوق ۱٬۲۰۰ کم می‌شد و ۲۰۰ اضافه در هیچ حسابی نمی‌نشست
+      await throws('پرداخت بیشتر از مجموع رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1200 }))
+      await throws('پرداخت منفی رد می‌شود', () => addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: -5 }))
+      await throws('پرداخت و حواله با هم بیشتر از مجموع رد می‌شود', async () => {
+        const sarraf = await db.suppliers.add({ name: 'صراف', kind: 'sarraf', balance: 0 }) as number
+        await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 600, sarrafId: sarraf, sarrafName: 'صراف', sarrafAmount: 500 })
+      })
+      eq('صندوق دست نخورد', await cashBalance(), 5000)
+      eq('گدام دست نخورد', await stockOf(vId), 0)
+      eq('هیچ خریدی ثبت نشد', await db.purchases.count(), 0)
+      await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1000 })
+      eq('پرداخت پوره هنوز کار می‌کند', await cashBalance(), 4000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — کسر صندوق «خانه» که مصرف شد، با حذف به همان «خانه» برمی‌گردد',
+    run: async () => {
+      await db.cashMovements.add({ date: Date.now(), type: 'capitalIn', amount: 1000, box: 'خانه', note: 'آزمایش' })
+      await reconcile(800, '', { mode: 'expense' }, 'خانه')
+      eq('کسر از «خانه» رفت', await cashBalance('خانه'), 800)
+      const shortage = (await db.expenses.toArray())[0]
+      await deleteExpense(shortage.id!)
+      eq('حذف: پول به «خانه» برگشت', await cashBalance('خانه'), 1000)
+      eq('حذف: «دکان» دست نخورد', await cashBalance(SHOP_BOX), 0)
+    }
+  },
+  {
+    name: 'بازبینی کامل — موبایل دوم: حذف پرداخت، پول را به جای همان پرداخت برمی‌گرداند',
+    run: async () => {
+      // در موبایل دوم: یک مصرف محلی که حرکت صندوقش refId=1 دارد
+      await seedCash(1000)
+      const catId = await db.expenseCategories.add({ name: 'نان' }) as number
+      await addExpense({ date: Date.now(), categoryId: catId, categoryName: 'نان', amount: 100, type: 'business' })
+      const cUuid = '00000000-0000-4000-8000-00000000c001'
+      await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, uuid: cUuid, createdAt: Date.now() })
+      // رسیدِ «خانه» از موبایل اول: این‌جا شناسهٔ محلی ۱ می‌گیرد؛ حرکت صندوقش refId موبایل اول (۷) را دارد
+      await applyRemoteRow('payments', { uuid: '00000000-0000-4000-8000-00000000p001', deleted: false, data: { date: Date.now(), partyType: 'customer', partyUuid: cUuid, partyName: 'احمد', amount: 300, via: 'cash', cashDelta: 300, box: 'خانه' } })
+      await applyRemoteRow('cashMovements', { uuid: '00000000-0000-4000-8000-00000000m001', deleted: false, data: { date: Date.now(), type: 'customerPayment', refId: 7, amount: 300, box: 'خانه', note: 'احمد' } })
+      eq('«خانه» پول رسید را دارد', await cashBalance('خانه'), 300)
+      const paymentId = (await db.payments.toArray())[0].id!
+      await deletePayment(paymentId)
+      eq('حذف: پول از «خانه» رفت', await cashBalance('خانه'), 0)
+      eq('حذف: «دکان» دست نخورد', await cashBalance(SHOP_BOX), 900)
+    }
+  },
+  {
+    name: 'بازبینی کامل — موبایل دوم: مصرفِ اصلاح‌شده رد اصلاح را نگه می‌دارد',
+    run: async () => {
+      const catId = await db.expenseCategories.add({ name: 'نان', uuid: '00000000-0000-4000-8000-00000000e0c1' }) as number
+      const data = { date: 1000, categoryUuid: '00000000-0000-4000-8000-00000000e0c1', categoryName: 'نان', amount: 100, cashPaid: 0, creditAmount: 0, type: 'business' }
+      await applyRemoteRow('expenses', { uuid: '00000000-0000-4000-8000-00000000e001', deleted: false, data })
+      await applyRemoteRow('expenses', { uuid: '00000000-0000-4000-8000-00000000e001', deleted: true, data: { ...data, correctedByUuid: 'next', correctedAt: 2000, deletedBy: 'مالک', deletedAt: 2000 } })
+      const local = (await db.expenses.toArray())[0]
+      is('حذف رسید', local.deleted, true)
+      is('کدام سند جایش را گرفت', local.correctedByUuid, 'next')
+      is('چه کسی', local.deletedBy, 'مالک')
+      eq('کی', local.correctedAt ?? 0, 2000)
+      eq('دستهٔ مصرف همان است', local.categoryId ?? 0, catId)
+    }
+  },
+  {
     name: 'مهر «چه کسی ثبت کرد» — فقط اسناد عادی، نه همگام‌سازی',
     run: async () => {
       const vId = await makeVariant({ purchasePrice: 500 })

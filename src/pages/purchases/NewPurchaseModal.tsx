@@ -246,6 +246,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           />
         </Field>
         {remainder > 0 && <p className="text-sm font-bold text-red-600">باقی (قرض ما به تأمین‌کننده): {fmtMoney(remainder)}</p>}
+        {(remainder < 0 || paid < 0) && <p role="alert" className="text-sm font-bold text-red-700">{paid < 0 ? 'پرداخت منفی نمی‌شود.' : `پرداخت ${fmtMoney(-remainder)} از مجموع خرید بیشتر است — پول اضافه را جداگانه «پرداخت به تأمین‌کننده» ثبت کنید.`}</p>}
         {hawala > 0 && <p className="text-sm font-bold text-amber-700">قرض ما به صراف: {fmtMoney(hawala)}</p>}
       </div>
 
@@ -258,7 +259,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
         </div>
         <button
           onClick={save}
-          disabled={!lines.length || !supplierId}
+          disabled={!lines.length || !supplierId || remainder < 0 || paid < 0}
           className="primary-button primary-button-inline py-3 text-lg"
         >
           ثبت خرید

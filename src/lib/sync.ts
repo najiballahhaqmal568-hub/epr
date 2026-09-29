@@ -528,7 +528,8 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
           // حرکت‌های صندوقِ اصلاح نیز uuid ثابت دارند؛ آخرین نسخه جای قبلی می‌نشیند.
           await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid })
         } else if (row.deleted && !existing.deleted) {
-          await db.table(table).update(existing.id, { deleted: true })
+          // رد حذف/اصلاح (چه کسی، کی، کدام سند جایش را گرفت) هم با حذف می‌آید؛ اثر از نسخهٔ محلی برمی‌گردد
+          await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid, deleted: true })
           await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
         }
       }
