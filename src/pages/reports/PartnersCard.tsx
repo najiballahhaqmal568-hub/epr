@@ -471,7 +471,7 @@ function SettleModal({
       <Field label="برای تأیید، عبارت «بستن سال» را دقیق بنویسید *">
         <input className={inputCls} value={confirmStr} onChange={(e) => setConfirmStr(e.target.value)} placeholder="بستن سال" />
       </Field>
-      <PrimaryBtn disabled={confirmStr.trim() !== 'بستن سال'} onClick={() => void closeYear()}>
+      <PrimaryBtn disabled={confirmStr.trim() !== 'بستن سال'} onClick={closeYear}>
         ✓ بستن سال و شروع سال جدید
       </PrimaryBtn>
     </Modal>

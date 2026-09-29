@@ -337,7 +337,7 @@ function YearStartWizard({ onClose }: { onClose: () => void }) {
               →
             </button>
             <div className="flex-1">
-              <PrimaryBtn onClick={() => void finish()}>تأیید — سال مالی شروع شود</PrimaryBtn>
+              <PrimaryBtn onClick={finish}>تأیید — سال مالی شروع شود</PrimaryBtn>
             </div>
           </div>
         </>

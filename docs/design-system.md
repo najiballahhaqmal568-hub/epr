@@ -61,6 +61,9 @@ columns line up. The money amount is the largest thing on its card. Font size is
 ## Components
 
 - `Modal` — bottom sheet on phones, centred window on desktop; Back closes it (`lib/appHistory`).
+- `PrimaryBtn` — when `onClick` returns a promise, the button locks until it settles, so one tap makes one
+  document. Pass the async function itself (`onClick={save}`), not `() => void save()`, or the lock never
+  sees the promise. Plain `<button>`s that create documents use `lib/useSubmitOnce`.
 - `Empty({ text, hint, action })` — an empty screen says what to do next and offers the action.
 - `Skeleton` — loading shapes with `role="status"`.
 - `RollingNumber` — money that changes in place.

@@ -13,6 +13,8 @@ import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
 import AdjustModal from '../src/pages/inventory/AdjustModal'
 import ReturnModal from '../src/pages/sales/ReturnModal'
+import CustomerDetail from '../src/pages/customers/CustomerDetail'
+import LandingCostModal from '../src/pages/purchases/LandingCostModal'
 import { PurchaseReturnModal } from '../src/pages/purchases/ReturnModals'
 import { overReturnedSales } from '../src/lib/returns'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
@@ -265,6 +267,55 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازبینی کامل — دو لمس «ثبت دریافت» و «ثبت مصارف رسیدن» فقط یک سند می‌سازد',
+    run: async () => {
+      const button = (text: string) => Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === text)
+      const inside = async (el: ReturnType<typeof createElement>, steps: () => Promise<void>) => {
+        const host = document.createElement('div')
+        document.body.append(host)
+        const root = createRoot(host)
+        try { root.render(el); await steps() } finally { root.unmount(); host.remove() }
+      }
+
+      // مشتری ۲٬۰۰۰ قرضدار؛ ۵۰۰ می‌دهد — دو لمس سریع روی «ثبت دریافت»
+      const cId = await newCustomer('احمد')
+      await addOpeningDebt('customer', cId, 'احمد', 2000, 'قرض قبلی')
+      const customer = (await db.customers.get(cId))!
+      await inside(createElement(CustomerDetail, { customer, onClose: () => undefined }), async () => {
+        await waitUntil(() => Boolean(button('دریافت پول')))
+        button('دریافت پول')!.click()
+        await waitUntil(() => Boolean(button('ثبت دریافت')))
+        const amount = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.includes('مبلغ دریافتی'))!.querySelector('input')!
+        fillInput(amount, '500')
+        await new Promise((r) => setTimeout(r, 50))
+        const save = button('ثبت دریافت')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      })
+      eq('یک دریافت ثبت شد، نه دو', (await db.payments.toArray()).filter((p) => !p.deleted && p.amount === 500).length, 1)
+      eq('قرض ۱٬۵۰۰، نه ۱٬۰۰۰', (await db.customers.get(cId))!.balance, 1500)
+      eq('صندوق ۵۰۰، نه ۱٬۰۰۰', await cashBalance(), 500)
+
+      // مصارف رسیدن روی هم جمع می‌شود — دو لمس یعنی دو برابر کرایه و دو برابر قیمت تمام‌شده
+      const vId = await makeVariant()
+      const sId = await newSupplier()
+      await addPurchase(buy(sId, vId, 10, 500, { paid: 0 }))
+      await inside(createElement(LandingCostModal, { onClose: () => undefined }), async () => {
+        await waitUntil(() => Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.includes('10 جوړه') || b.textContent?.includes('۱۰ جوړه')))
+        Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('۱۰ جوړه') || b.textContent?.includes('10 جوړه'))!.click()
+        const amount = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.includes('مجموع مصارف رسیدن'))!.querySelector('input')!
+        fillInput(amount, '300')
+        await new Promise((r) => setTimeout(r, 50))
+        const save = button('ثبت مصارف رسیدن')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      })
+      eq('مصارف رسیدن ۳۰۰، نه ۶۰۰', (await db.purchases.toArray())[0].landingCost ?? 0, 300)
+      eq('صندوق فقط یک بار ۳۰۰ کم شد', await cashBalance(), 200)
+      eq('قیمت تمام‌شده ۵۳۰، نه ۵۶۰', await costOf(vId), 530)
+    }
+  },
   {
     name: 'بازبینی کامل — فروش: پول منفی، تخفیف منفی یا مجموعِ نادرست ثبت نمی‌شود',
     run: async () => {
