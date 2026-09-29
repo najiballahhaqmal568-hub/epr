@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../../db'
 import { fmtNum } from '../../lib/format'
-import { Modal } from '../../components/ui'
+import { Modal, Skeleton } from '../../components/ui'
 import { reorderProducts } from '../../lib/reorder'
 
 export function ReorderModal({ onClose }: { onClose: () => void }) {
@@ -11,7 +11,9 @@ export function ReorderModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="لیست خرید مجدد" onClose={onClose}>
-      {low.length === 0 && <p className="rounded-2xl bg-blue-50 p-4 text-center text-sm text-blue-800">همه اجناس کافی است.</p>}
+      {/* تا اجناس خوانده نشده، «همه کافی است» گفتن دروغ است — شکل خاکستری نشان داده می‌شود */}
+      {(products === undefined || variants === undefined) && <Skeleton rows={3} label="در حال خواندن گدام…" />}
+      {products !== undefined && variants !== undefined && low.length === 0 && <p className="rounded-2xl bg-blue-50 p-4 text-center text-sm text-blue-800">همه اجناس کافی است.</p>}
       {low.map((info) => (
           <section key={info.product.id} className="mb-3 rounded-2xl border border-blue-100 bg-white p-4 text-sm shadow-sm" aria-label={`خرید مجدد ${info.product.name}`}>
             <div className="flex justify-between gap-2">
