@@ -12,6 +12,8 @@ import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
 import AdjustModal from '../src/pages/inventory/AdjustModal'
+import ReturnModal from '../src/pages/sales/ReturnModal'
+import { overReturnedSales } from '../src/lib/returns'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
 import PartnersCard from '../src/pages/reports/PartnersCard'
 import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
@@ -235,7 +237,7 @@ async function profitAndLoss(): Promise<number> {
   )
   const retProfit = returns
     .filter((r) => r.kind === 'customer')
-    .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0), 0)
+    .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0) - (r.discount ?? 0), 0)
   const bizExp = expenses.filter((e) => e.type === 'business').reduce((s, e) => s + e.amount, 0)
   return salesProfit - retProfit - bizExp
 }
@@ -262,6 +264,79 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'بازبینی کامل — مرجوعی: بیشتر از فروخته یا بیشتر از پولِ گرفته‌شده پس داده نمی‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 10)
+      const cId = await newCustomer('احمد')
+      // دو جوړه ۹۰۰ = ۱٬۸۰۰، تخفیف ۱۰۰ ← مشتری ۱٬۷۰۰ قرضدار شد
+      const saleId = await addSale(sell(vId, 2, 900, { customerId: cId, customerName: 'احمد', saleType: 'retail', total: 1700, paid: 0, discount: 100 }))
+      const sale = (await db.sales.get(saleId))!
+      const ret = (qty: number, amount: number) => addCustomerReturn({ date: Date.now(), kind: 'customer', partyId: cId, partyName: 'احمد', refId: saleId, saleType: 'retail', lines: [{ ...sale.lines[0], qty, restock: true }], reason: 'سایز غلط', settlement: 'reduceDebt', amount })
+      const balance = async () => (await db.customers.get(cId))!.balance
+
+      // صفحهٔ مرجوعی: دو جوړه برگشت = همان ۱٬۷۰۰ که مشتری داده بود، نه ۱٬۸۰۰
+      const shown = async (taps: number) => {
+        const fresh = (await db.sales.get(saleId))!
+        const host = document.createElement('div')
+        document.body.append(host)
+        const root = createRoot(host)
+        try {
+          root.render(createElement(ReturnModal, { sale: fresh, onClose: () => undefined }))
+          // تا مرجوعی‌های قبلی خوانده نشده، دکمهٔ زیاد بسته است — مثل کاربر واقعی صبر می‌کنیم
+          await waitUntil(() => Boolean(document.querySelector<HTMLButtonElement>('[aria-label^="زیاد کردن برگشتی"]:not([disabled])')) || Boolean(document.querySelector('[role="status"]')?.textContent?.includes('قبلاً برگشت خورده')))
+          const plus = document.querySelector<HTMLButtonElement>('[aria-label^="زیاد کردن برگشتی"]')!
+          for (let i = 0; i < taps; i++) { plus.click(); await new Promise((r) => setTimeout(r, 30)) }
+          const dd = Array.from(document.querySelectorAll('dt')).find((d) => d.textContent === 'مبلغ مرجوعی')!.nextElementSibling!
+          return { amount: dd.textContent ?? '', plusDisabled: plus.disabled }
+        } finally { root.unmount(); host.remove() }
+      }
+      is('صفحه برای دو جوړه ۱٬۷۰۰ نشان می‌دهد', (await shown(2)).amount, '۱٬۷۰۰ ؋')
+
+      await throws('پس دادن ۱٬۸۰۰ برای فروشی که ۱٬۷۰۰ بود رد می‌شود', () => ret(2, 1800))
+      eq('قرض دست نخورد', await balance(), 1700)
+      await ret(1, 850)
+      eq('یک جوړه برگشت: قرض ۸۵۰', await balance(), 850)
+      const after = await shown(5)
+      is('فقط یک جوړهٔ دیگر قابل برگشت است', after.amount, '۸۵۰ ؋')
+      is('دکمهٔ زیاد بعد از یک جوړه بسته است', after.plusDisabled, true)
+      await ret(1, 850)
+      eq('همه برگشت: قرض صفر، نه پیشکیِ ساختگی', await balance(), 0)
+      await throws('جوړهٔ سوم از فروش دو جوړه‌ای رد می‌شود', () => ret(1, 850))
+      eq('گدام: ۱۰ − ۲ + ۲', await stockOf(vId), 10)
+      eq('قرض هنوز صفر', await balance(), 0)
+      const sales = await db.sales.toArray()
+      const returns = await db.returns.toArray()
+      const p = profitSummary({ sales, returns, expenses: [], variants: [], readyTradeUuids: new Set(), readyReceiptUuids: new Set() })
+      eq('فروشی که کامل برگشت، مفاد صفر دارد', p.grossProfit, 0)
+      eq('راه دوم مفاد هم صفر', await profitAndLoss(), 0)
+
+      // تخفیف ۱۰۰ بر سه جوړه: سهم‌ها ۳۳ + ۳۴ + ۳۳ — جمعشان دقیقاً ۱۰۰
+      const c2 = await newCustomer('کریم')
+      const s2 = await addSale(sell(vId, 3, 900, { customerId: c2, customerName: 'کریم', saleType: 'retail', total: 2600, paid: 0, discount: 100 }))
+      const line2 = (await db.sales.get(s2))!.lines[0]
+      for (const amount of [867, 866, 867]) {
+        await addCustomerReturn({ date: Date.now(), kind: 'customer', partyId: c2, partyName: 'کریم', refId: s2, saleType: 'retail', lines: [{ ...line2, qty: 1, restock: true }], reason: 'سایز غلط', settlement: 'reduceDebt', amount })
+      }
+      eq('سه برگشت جدا: قرض دقیقاً صفر', (await db.customers.get(c2))!.balance, 0)
+      is('برگشت‌های درست در «کنترل حساب‌ها» نمی‌آیند', overReturnedSales(await db.sales.toArray(), await db.returns.toArray()).length, 0)
+
+      // سند قدیمی (پیش از این قاعده، مستقیم در دیتابیس): فروش دو جوړه با تخفیف ۱۰۰ که سه جوړه به قیمت کامل برگشت
+      const c3 = await newCustomer('ولی')
+      const s3 = await addSale(sell(vId, 2, 900, { customerId: c3, customerName: 'ولی', saleType: 'retail', total: 1700, paid: 1700, discount: 100 }))
+      const line3 = (await db.sales.get(s3))!.lines[0]
+      await db.returns.bulkAdd([
+        { date: Date.now(), kind: 'customer', partyId: c3, partyName: 'ولی', refId: s3, lines: [{ ...line3, qty: 2, restock: true }], reason: 'قدیمی', settlement: 'cashRefund', amount: 1800 },
+        { date: Date.now(), kind: 'customer', partyId: c3, partyName: 'ولی', refId: s3, lines: [{ ...line3, qty: 1, restock: true }], reason: 'قدیمی', settlement: 'cashRefund', amount: 900 }
+      ])
+      const found = overReturnedSales(await db.sales.toArray(), await db.returns.toArray())
+      eq('یک فروش پیدا شد', found.length, 1)
+      eq('یک جوړه اضافه', found[0].extraPairs, 1)
+      // داده بود ۱٬۷۰۰؛ پس گرفت ۲٬۷۰۰ ← ۱٬۰۰۰ بیشتر
+      eq('۱٬۰۰۰ بیشتر پس داده شد', found[0].extraMoney, 1000)
+    }
+  },
   {
     name: 'بازبینی کامل — خرید با پرداخت بیشتر از مجموع یا منفی رد می‌شود',
     run: async () => {
@@ -323,6 +398,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // تعداد جوړه عدد صحیح است — ۱٫۵ جوړه وجود ندارد
       await throws('تعدیل با کسر رد می‌شود', () => addAdjustment({ date: Date.now(), variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qtyChange: 1.5, reason: 'correction' }))
       eq('موجودی دست نخورد', await stockOf(vId), 4)
+      // صفحهٔ تبادله «۱٫۵» را به عنوان تعداد جنس نو می‌پذیرفت و فروش نیم جوړه ثبت می‌شد
+      await throws('فروش با کسر جوړه رد می‌شود', () => addSale(sell(vId, 1.5, 900)))
+      await throws('فروش با تعداد صفر یا منفی رد می‌شود', () => addSale(sell(vId, -1, 900)))
+      eq('موجودی باز هم دست نخورد', await stockOf(vId), 4)
     }
   },
   {
@@ -1774,17 +1853,18 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // جنسِ برگشتی دوباره فروخته شود؛ ابطال رد گردد و همه‌چیز سالم بماند
       const ret3 = await addCustomerReturn({
         date: Date.now(), kind: 'customer', partyId: custId, partyName: 'کریم', refId: saleId,
-        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 5, unitPrice: 900, restock: true }],
+        // هر چهار جوړهٔ فروش برمی‌گردد (پیش از این، این آزمایش پنج جوړه از فروش چهارتایی پس می‌گرفت)
+        lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 4, unitPrice: 900, restock: true }],
         amount: 1000, settlement: 'reduceDebt', reason: 'برگشت بزرگ'
       })
-      eq('گدام با برگشت پنج‌تایی', await stockOf(vId), 11)
+      eq('گدام با برگشت چهارتایی', await stockOf(vId), 10)
       await addSale(sell(vId, 10, 900))
-      eq('گدام پس از فروش دوباره', await stockOf(vId), 1)
+      eq('گدام پس از فروش دوباره', await stockOf(vId), 0)
       await throws(
         'ابطال وقتی موجودی نمی‌رسد رد شود',
         () => cancelCustomerReturn(ret3, 'دیر شد')
       )
-      eq('شکست: گدام تغییری نکرد', await stockOf(vId), 1)
+      eq('شکست: گدام تغییری نکرد', await stockOf(vId), 0)
       eq('شکست: قرض تغییری نکرد', (await db.customers.get(custId))!.balance, 1600)
       eq('شکست: سند زنده ماند', Boolean((await db.returns.get(ret3))!.deleted), false)
     }

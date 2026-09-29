@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale } from '../../db'
 import { addCustomerReturn } from '../../lib/ops'
+import { priorReturnsOf, returnRefund, returnableQtys } from '../../lib/returns'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 
@@ -19,12 +20,17 @@ export function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void
     [sale.customerId]
   )
 
-  const amount = sale.lines.reduce((s, l, i) => s + (qtys[i] ?? 0) * l.unitPrice, 0)
+  // جوړه‌هایی که قبلاً برگشت خورده دوباره برنمی‌گردند؛ پول برگشتی سهم تخفیف فاکتور را ندارد
+  const prior = useLiveQuery(async () => priorReturnsOf(sale, await db.returns.filter((r) => r.refId === sale.id).toArray()), [sale.id])
+  const left = prior ? returnableQtys(sale, prior) : sale.lines.map(() => 0)
+  const chosen = sale.lines.map((_, i) => Math.min(qtys[i] ?? 0, left[i]))
+  const refund = returnRefund(sale, prior ?? [], chosen)
+  const amount = refund.amount
 
   async function save() {
     if (savingRef.current) return
     const lines = sale.lines
-      .map((l, i) => ({ ...l, qty: qtys[i] ?? 0, restock }))
+      .map((l, i) => ({ ...l, qty: chosen[i], restock }))
       .filter((l) => l.qty > 0)
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
     if (settlement === 'reduceDebt' && !sale.customerId) return setError('این فروش مشتری ندارد — بازپرداخت نقدی را انتخاب کنید')
@@ -72,19 +78,20 @@ export function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void
                 <p className="text-slate-500">
                   فروخته: {fmtNum(l.qty)} × {fmtMoney(l.unitPrice)}
                 </p>
+                {prior && left[i] < l.qty && <p className="text-slate-500">قبلاً برگشت: {fmtNum(l.qty - left[i])} جوړه</p>}
               </div>
               <div className="sale-quantity-actions">
-                <button className="quantity-step" aria-label={`کم کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={(qtys[i] ?? 0) <= 0} onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, (q[i] ?? 0) - 1) }))}>
+                <button className="quantity-step" aria-label={`کم کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={chosen[i] <= 0} onClick={() => setQtys((q) => ({ ...q, [i]: Math.max(0, chosen[i] - 1) }))}>
                   −
                 </button>
                 <input
                   className="quantity-value"
                   aria-label={`تعداد برگشتی ${l.productName} ${l.size} ${l.color}`}
                   inputMode="numeric"
-                  value={qtys[i] ?? 0}
-                  onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, Math.max(0, parseNum(e.target.value) || 0)) }))}
+                  value={chosen[i]}
+                  onChange={(e) => setQtys((q) => ({ ...q, [i]: Math.min(left[i], Math.max(0, Math.floor(parseNum(e.target.value) || 0))) }))}
                 />
-                <button className="quantity-step" aria-label={`زیاد کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={(qtys[i] ?? 0) >= l.qty} onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(l.qty, (q[i] ?? 0) + 1) }))}>
+                <button className="quantity-step" aria-label={`زیاد کردن برگشتی ${l.productName} ${l.size} ${l.color}`} disabled={chosen[i] >= left[i]} onClick={() => setQtys((q) => ({ ...q, [i]: Math.min(left[i], chosen[i] + 1) }))}>
                   ＋
                 </button>
               </div>
@@ -119,7 +126,12 @@ export function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void
           </Field>
           {customer && <p className="sale-correction-help">قرض فعلی: {fmtMoney(customer.balance)}</p>}
           <div className="sale-correction-summary">
-            <dl><div><dt>مبلغ مرجوعی</dt><dd>{fmtMoney(amount)}</dd></div></dl>
+            <dl>
+              {refund.discount > 0 && <div><dt>قیمت جوړه‌ها</dt><dd>{fmtMoney(refund.gross)}</dd></div>}
+              {refund.discount > 0 && <div><dt>سهم تخفیف فاکتور</dt><dd>−{fmtMoney(refund.discount)}</dd></div>}
+              <div><dt>مبلغ مرجوعی</dt><dd>{fmtMoney(amount)}</dd></div>
+            </dl>
+            {refund.discount > 0 && <p>مشتری در این فروش تخفیف گرفته بود؛ همان پولی که داده بود پس داده می‌شود.</p>}
             <p>{settlement === 'cashRefund' ? 'این مبلغ نقداً از صندوق به مشتری برمی‌گردد.' : 'این مبلغ از قرض مشتری کم می‌شود؛ پولی از صندوق خارج نمی‌شود.'}</p>
           </div>
         </section>
@@ -127,7 +139,8 @@ export function ReturnModal({ sale, onClose }: { sale: Sale; onClose: () => void
       <p className="sale-correction-help">اگر مشتری جنس دیگری می‌خواهد، به جای مرجوعی از دکمهٔ «تبادله» استفاده کنید.</p>
       {error && <p role="alert" className="sale-correction-error">{error}</p>}
       {saving && <p role="status" className="sale-correction-help">در حال ثبت… تا پایان ثبت، این صفحه باز می‌ماند.</p>}
-      <PrimaryBtn onClick={save} disabled={saving || amount <= 0}>
+      {prior && left.every((n) => n === 0) && <p role="status" className="sale-correction-help">همهٔ جنس این فروش قبلاً برگشت خورده است.</p>}
+      <PrimaryBtn onClick={save} disabled={saving || !prior || chosen.every((n) => n === 0)}>
         {saving ? 'در حال ثبت…' : 'ثبت مرجوعی'}
       </PrimaryBtn>
     </Modal>

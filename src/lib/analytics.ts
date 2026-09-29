@@ -4,6 +4,7 @@
  */
 import type { ReturnDoc, Sale } from '../db'
 import { commercialSaleLines, type CommercialSaleLine } from './commercialLines'
+import { returnProfit } from './returns'
 
 export interface Totals {
   sales: number
@@ -27,10 +28,6 @@ export function saleProfit(s: Sale): number {
   return commercialSaleLines(s).reduce((a, l) => a + lineProfit(l), 0) - (s.discount ?? 0)
 }
 
-/** مفادی که با مرجوعی مشتری پس گرفته می‌شود */
-export function returnProfit(r: ReturnDoc): number {
-  return r.lines.reduce((a, l) => a + (l.unitPrice - (l.unitCost ?? 0)) * l.qty, 0)
-}
 
 /**
  * مقایسهٔ عمده و پرچون — سؤال «فایدهٔ عمده چقدر بود و پرچون چقدر».

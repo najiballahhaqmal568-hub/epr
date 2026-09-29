@@ -56,14 +56,20 @@ export function soldInPeriod(sales: Sale[], returns: ReturnDoc[] = []): SoldRow[
 
   for (const d of returns) {
     if (d.deleted || d.kind !== 'customer') continue
-    for (const l of d.lines) {
+    // سهم تخفیفی که با مرجوعی پس داده نشد، به همان قاعدهٔ فروش میان خطوط تقسیم می‌شود
+    const gross = d.lines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0)
+    let discountLeft = d.discount ?? 0
+    d.lines.forEach((l, index) => {
+      const value = l.qty * l.unitPrice
+      const discount = index === d.lines.length - 1 ? discountLeft : gross > 0 ? Math.round(((d.discount ?? 0) * value) / gross) : 0
+      discountLeft -= discount
       const r = map.get(`variant:${l.variantId}`)
-      if (!r) continue
+      if (!r) return
       r.qty -= l.qty
-      r.revenue -= l.qty * l.unitPrice
+      r.revenue -= value - discount
       // قیمت خرید هم باید پس برود، ورنه «مفاد» کمتر از واقعیت نشان می‌دهد
       r.cost -= l.qty * (l.unitCost ?? 0)
-    }
+    })
   }
 
   return [...map.values()].filter((r) => r.qty !== 0).sort((a, b) => b.qty - a.qty)

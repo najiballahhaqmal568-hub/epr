@@ -4,11 +4,13 @@ import { Card, PrimaryBtn } from '../../components/ui'
 import { runIntegrityCheck, fixMismatch, type IntegrityReport, type Mismatch } from '../../lib/integrity'
 import { accessFlags, db } from '../../db'
 import { overpaidSales, type OverpaidSale } from '../../lib/overpaid'
+import { overReturnedSales, type OverReturnedSale } from '../../lib/returns'
 
 /** کنترل حساب‌ها: مقایسهٔ عددهای ذخیره‌شده با اسناد و اصلاح اختلاف */
 function IntegrityCard() {
   const [report, setReport] = useState<IntegrityReport | null>(null)
   const [overpaid, setOverpaid] = useState<OverpaidSale[]>([])
+  const [overReturned, setOverReturned] = useState<OverReturnedSale[]>([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
@@ -17,7 +19,9 @@ function IntegrityCard() {
     setMsg('')
     try {
       setReport(await runIntegrityCheck())
-      setOverpaid(overpaidSales(await db.sales.toArray()))
+      const sales = await db.sales.toArray()
+      setOverpaid(overpaidSales(sales))
+      setOverReturned(overReturnedSales(sales, await db.returns.toArray()))
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     }
@@ -106,6 +110,24 @@ function IntegrityCard() {
                 <p key={o.id ?? o.date} className="mt-1 flex justify-between gap-2 text-xs">
                   <span>{fmtDate(o.date)} · {o.customerName ?? 'مشتری نقدی'}</span>
                   <span>مجموع {fmtMoney(o.total)} · ثبت‌شده {fmtMoney(o.paid)} · اضافه {fmtMoney(o.extra)}</span>
+                </p>
+              ))}
+            </section>
+          )}
+          {overReturned.length > 0 && (
+            <section aria-label="مرجوعی بیشتر از فروش" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-bold">{fmtNum(overReturned.length)} فروش قدیمی بیشتر از حد برگشت خورده است</p>
+              <p className="mt-1 text-xs">
+                پیش از این اصلاح، یک فروش می‌توانست دو بار برگشت بخورد، و مرجوعی از فروشِ تخفیف‌دار قیمت کامل را پس می‌داد. هیچ عددی خودکار عوض نشده؛ هر مورد را با مشتری بررسی کنید.
+              </p>
+              {overReturned.slice(0, 20).map((o) => (
+                <p key={o.id ?? o.date} className="mt-1 flex justify-between gap-2 text-xs">
+                  <span>{fmtDate(o.date)} · {o.customerName ?? 'مشتری نقدی'}</span>
+                  <span>
+                    {o.extraPairs > 0 && `${fmtNum(o.extraPairs)} جوړه اضافه`}
+                    {o.extraPairs > 0 && o.extraMoney > 0 && ' · '}
+                    {o.extraMoney > 0 && `${fmtMoney(o.extraMoney)} بیشتر پس داده شد`}
+                  </span>
                 </p>
               ))}
             </section>

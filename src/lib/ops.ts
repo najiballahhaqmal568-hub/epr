@@ -4,6 +4,8 @@ import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
 import { validateCustomerGoodsReceiptBackup, validateCustomerGoodsReceiptConflictEvidence } from './customerGoodsReceiptBackup'
 import { calculateShipping, type ShippingAmounts } from './shipping'
+import { checkReturn, priorReturnsOf } from './returns'
+import { fmtMoney } from './format'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
 import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
@@ -184,6 +186,8 @@ export async function addSale(sale: Sale): Promise<number> {
   // پول اضافه (بازگشت به مشتری) در صندوق نمی‌ماند؛ اگر ثبت شود، صندوق بیشتر از پول واقعی نشان می‌دهد.
   if (saleCashPaid(sale) > sale.total) throw new Error('پول دریافتی از مجموع فروش بیشتر است؛ باقی را به مشتری پس بدهید — فقط مجموع در صندوق ثبت می‌شود.')
   if (sale.discount !== undefined) sale.discount = afn(sale.discount)
+  // جوړه عدد صحیح است؛ نیم جوړه یا تعداد منفی گدام را به عدد ناممکن می‌برد
+  if (sale.lines.some((l) => !Number.isInteger(l.qty) || l.qty <= 0)) throw new Error('تعداد هر جنس باید عدد صحیح و بیشتر از صفر باشد')
   sale.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
     for (const line of sale.lines) {
@@ -2625,7 +2629,23 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
     if (ret.refId !== undefined) {
       const sale = await db.sales.get(ret.refId)
-      if (sale) assertOrdinarySale(sale)
+      if (sale) {
+        assertOrdinarySale(sale)
+        if (sale.deleted) throw new Error('این فروش حذف شده است؛ مرجوعی از آن ثبت نمی‌شود')
+        // همان قاعدهٔ صفحه‌ها: بیشتر از فروخته برنمی‌گردد و بیشتر از پولِ داده‌شده پس داده نمی‌شود
+        const prior = priorReturnsOf(sale, await db.returns.filter((r) => r.refId === sale.id).toArray())
+        const checked = checkReturn(sale, prior, ret.lines)
+        if (typeof checked === 'string') throw new Error(checked)
+        if (ret.amount < 0) throw new Error('پول مرجوعی منفی نمی‌شود')
+        if (ret.amount > checked.refund.amount) {
+          throw new Error(`پول مرجوعی از پولی که مشتری برای این جوړه‌ها داده بیشتر است — حداکثر ${fmtMoney(checked.refund.amount)} (قیمت منهای سهم تخفیف فاکتور).`)
+        }
+        // هرچه از قیمت جوړه‌ها پس داده نشد (سهم تخفیف و هرچه دکان نگه داشت) روی سند می‌ماند،
+        // تا مفاد مرجوعی همان پولی باشد که واقعاً برگشت
+        const kept = checked.refund.gross - ret.amount
+        if (kept > 0) ret.discount = kept
+        else delete ret.discount
+      }
     }
     for (const line of ret.lines) {
       const v = await db.variants.get(line.variantId)
