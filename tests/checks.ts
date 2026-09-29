@@ -103,6 +103,7 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
+import { backupNudge, noteBackupDone, readBackupNudge, snoozeBackupNudge } from '../src/lib/backupReminder'
 import { fmtClock, fmtDayLabel, parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
@@ -270,6 +271,53 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'یادآوری بکاپ — فقط وقتی چیزی برای محافظت هست و بکاپ کهنه است',
+    run: async () => {
+      const DAY = 86400000
+      const now = 1_800_000_000_000
+      const rule = (over: Partial<Parameters<typeof backupNudge>[0]>) => backupNudge({ lastBackupAt: 0, snoozedUntil: 0, now, changes: 3, ...over })
+      is('هرگز بکاپ نگرفته و سند دارد: یادآوری «هرگز»', rule({})?.kind, 'never')
+      is('دکان تازه بدون سند: مزاحم نمی‌شود', rule({ changes: 0 }), null)
+      is('سه روز پیش بکاپ گرفته: هنوز زود است', rule({ lastBackupAt: now - 3 * DAY }), null)
+      is('شش روز و بیست‌ودو ساعت: هنوز زود است', rule({ lastBackupAt: now - 7 * DAY + 3600000 }), null)
+      const stale = rule({ lastBackupAt: now - 9 * DAY - 5000 })
+      eq('نه روز پیش: نه روز', stale?.days ?? -1, 9)
+      is('نوع کهنه', stale?.kind, 'stale')
+      eq('تعداد سندها همان است', stale?.changes ?? -1, 3)
+      is('بکاپ کهنه ولی سند تازه‌ای نیست: چیزی برای محافظت نیست', rule({ lastBackupAt: now - 30 * DAY, changes: 0 }), null)
+      is('«بعداً» تا فردا خاموشش می‌کند', rule({ snoozedUntil: now + 1000 }), null)
+      is('پایان «بعداً»: دوباره می‌آید', rule({ snoozedUntil: now - 1000 })?.kind, 'never')
+
+      // با دیتابیس واقعی: سند ثبت شود، یادآوری بیاید؛ بکاپ ثبت شود، برود؛ ۸ روز بگذرد و سند تازه بیاید، برگردد
+      is('دیتابیس خالی: یادآوری نیست', await readBackupNudge(), null)
+      const cust = await newCustomer('احمد')
+      await addOpeningDebt('customer', cust, 'احمد', 1000, 'قرض قبلی')
+      const vId = await makeVariant({ purchasePrice: 100 })
+      await setOpeningStock(vId, 5)
+      await addSale(sell(vId, 1, 300, { customerId: cust, customerName: 'احمد', paid: 100 }))
+      const first = await readBackupNudge()
+      is('سند هست، بکاپ نیست: «هرگز»', first?.kind, 'never')
+      const wroteAt = Date.now()
+      await noteBackupDone(wroteAt)
+      is('بعد از بکاپ: یادآوری نیست', await readBackupNudge(), null)
+      // هشت روز بعد، با همان سندها که قبل از بکاپ بودند: چیزی تازه نیست
+      is('هشت روز بعد ولی سند تازه‌ای نیست', await readBackupNudge(wroteAt + 8 * DAY), null)
+      await noteBackupDone(wroteAt - 8 * DAY) // مثل این‌که بکاپ هشت روز پیش بوده و فروش بعدش ثبت شده
+      const later = await readBackupNudge(wroteAt)
+      is('سند بعد از بکاپِ هشت‌روزه: کهنه', later?.kind, 'stale')
+      eq('هشت روز', later?.days ?? -1, 8)
+      await snoozeBackupNudge(wroteAt)
+      is('بعداً: امروز نه', await readBackupNudge(wroteAt), null)
+      is('بعداً: دو روز بعد دوباره', (await readBackupNudge(wroteAt + 2 * DAY))?.kind, 'stale')
+
+      // «کی بکاپ گرفتم» مال همین موبایل است: در فایل بکاپ نمی‌رود، تا بکاپ قدیمی آن را به عقب نبرد
+      const backup = JSON.parse(await exportBackup()) as { data: { settings: { key: string }[] } }
+      const keys = backup.data.settings.map((r) => r.key)
+      is('lastBackupAt در فایل بکاپ نیست', keys.includes('lastBackupAt'), false)
+      is('backupSnoozeUntil در فایل بکاپ نیست', keys.includes('backupSnoozeUntil'), false)
+    }
+  },
   {
     name: 'خانهٔ نو — ساعت و روزِ هفته درست خوانده می‌شود',
     run: async () => {

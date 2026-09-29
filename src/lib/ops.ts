@@ -3052,7 +3052,8 @@ const TABLES = [
 // A backup may come from another owner/shop, so these rows must never replace it.
 const CLOUD_IDENTITY_SETTINGS = new Set(['supaUrl', 'supaKey', 'cachedProfile'])
 // Compatibility acknowledgement belongs to this device, never to a backup.
-const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled', 'goodsReceiptCompatibilityAcknowledged'])
+// «کی بکاپ گرفتم» و «بعداً»ی یادآوری هم مال همین دستگاه‌اند: بکاپِ قدیمی نباید آن را به عقب ببرد.
+const BACKUP_EXCLUDED_SETTINGS = new Set([...CLOUD_IDENTITY_SETTINGS, 'directTrades.enabled', 'goodsReceiptCompatibilityAcknowledged', 'lastBackupAt', 'backupSnoozeUntil'])
 
 export async function exportBackup(): Promise<string> {
   return db.transaction('r', [...TABLES.map(t => db.table(t)), db.syncState], async () => {

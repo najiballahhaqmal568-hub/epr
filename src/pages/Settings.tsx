@@ -1,4 +1,7 @@
 import { useRef, useState } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { downloadBackupNow, readLastBackupAt } from '../lib/backupReminder'
+import { fmtDateShort } from '../lib/format'
 import { exportBackup, importBackup, type BackupImportMode } from '../lib/ops'
 import { hasPendingCloudRestore, syncNow } from '../lib/sync'
 import { Card } from '../components/ui'
@@ -29,6 +32,7 @@ export default function Settings({
   const mergeFileRef = useRef<HTMLInputElement>(null)
   const replaceFileRef = useRef<HTMLInputElement>(null)
   const [msg, setMsg] = useState('')
+  const lastBackupAt = useLiveQuery(readLastBackupAt, [])
   const [restoreBusy, setRestoreBusy] = useState(false)
   const show = (...sections: SettingsSection[]) => section === 'all' || sections.includes(section)
   const titles: Record<SettingsSection, string> = {
@@ -53,8 +57,7 @@ export default function Settings({
   }
 
   async function backup() {
-    const json = await exportBackup()
-    downloadJson(json, `shoe-erp-backup-${new Date().toISOString().slice(0, 10)}.json`)
+    await downloadBackupNow()
     setMsg('✅ فایل بکاپ آماده دانلود شد. آن را در جای امن (گوگل درایو، واتساپ خودتان...) نگه دارید.')
   }
 
@@ -123,6 +126,9 @@ export default function Settings({
             <p className="mb-1 font-bold text-slate-800">بکاپ اطلاعات</p>
             <p className="mb-3 text-sm text-slate-500">
               هر چند روز یک بار بکاپ بگیرید تا اگر موبایل گم یا خراب شد، اطلاعات از بین نرود.
+            </p>
+            <p className="mb-3 text-sm font-bold text-slate-700">
+              {lastBackupAt === undefined ? '' : lastBackupAt > 0 ? `آخرین بکاپ: ${fmtDateShort(lastBackupAt)}` : 'هنوز بکاپ نگرفته‌اید.'}
             </p>
             <button onClick={backup} className="w-full rounded-xl bg-[var(--action)] py-3 font-bold text-white">
               دانلود فایل بکاپ

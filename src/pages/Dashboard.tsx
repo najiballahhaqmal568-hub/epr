@@ -23,6 +23,7 @@ import HomeHero, { TimePrompt, type HeroState } from './dashboard/HomeHero'
 import MoneyMap from './dashboard/MoneyMap'
 import RecentSales from './dashboard/RecentSales'
 import ReceivePicker from './dashboard/ReceivePicker'
+import BackupNudgeCard from './dashboard/BackupNudgeCard'
 import CustomerDetail from './customers/CustomerDetail'
 
 function SyncChip() {
@@ -237,6 +238,8 @@ export default function Dashboard({
           ))}
         </div>
       )}
+
+      {canAct && !isStaff && <BackupNudgeCard />}
 
       {!isStaff && (
         <section aria-label="امروز تا حالا" className="mb-4">
