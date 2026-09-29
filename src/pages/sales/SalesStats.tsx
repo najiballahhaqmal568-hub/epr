@@ -127,8 +127,8 @@ export function SalesStats({ isStaff }: { isStaff?: boolean }) {
           <PeriodCompareCard label="دورهٔ گذشته" now={confirmedSales ?? []} before={(prev ?? []).filter(s => (!s.directTrade || directReview.readyTradeUuids.has(s.directTrade.uuid)) && (!s.goodsReceiptChild || receiptReview.readyReceiptUuids.has(s.goodsReceiptChild.receiptUuid)))} returnsNow={returns ?? []} />
           <RetailWholesaleCard sales={confirmedSales ?? []} returns={returns ?? []} />
           <ModelsCard sales={confirmedSales ?? []} />
-          <CustomersCard sales={confirmedSales ?? []} />
-          <MonthsCard sales={confirmedSales ?? []} />
+          <CustomersCard sales={confirmedSales ?? []} returns={returns ?? []} />
+          <MonthsCard sales={confirmedSales ?? []} returns={returns ?? []} />
         </>
       )}
     </>

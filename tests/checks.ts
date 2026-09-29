@@ -282,6 +282,42 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'بازبینی کامل — ماه‌به‌ماه و هر مشتری مرجوعی را هم کم می‌کند',
+    run: async () => {
+      const l = (qty: number, unitPrice: number, unitCost: number) => ({ variantId: 1, productName: 'ب', size: '40', color: 'س', qty, unitPrice, unitCost })
+      const sales = [{ id: 1, date: 10, customerName: 'احمد', saleType: 'retail', lines: [l(3, 900, 500)], total: 2700, paid: 2700 }] as unknown as Sale[]
+      const returns = [{ id: 1, date: 20, kind: 'customer', refId: 1, partyName: 'احمد', lines: [{ ...l(1, 900, 500), restock: true }], reason: 'r', settlement: 'cashRefund', amount: 900, saleType: 'retail' }] as unknown as ReturnDoc[]
+      const month = () => ({ key: 'm', label: 'میزان ۱۴۰۵' })
+      const summary = profitSummary({ sales, returns, expenses: [], variants: [], readyTradeUuids: new Set(), readyReceiptUuids: new Set() })
+      const m = byMonth(sales, month, returns)[0]
+      eq('مفاد ماه = مفاد همان ماه در راپور (۱٬۲۰۰ − ۴۰۰)', m.profit, summary.grossProfit)
+      eq('فروش ماه پس از مرجوعی', m.sales, 1800)
+      const c = byCustomer(sales, returns)[0]
+      eq('مفاد مشتری پس از مرجوعی', c.profit, 800)
+      eq('خرید مشتری پس از مرجوعی', c.sales, 1800)
+    }
+  },
+  {
+    name: 'بازبینی کامل — «اجناس فروخته‌شده» همان مفاد آمار را می‌گوید (با تخفیف و مرجوعی)',
+    run: async () => {
+      const l = (variantId: number, qty: number, unitPrice: number, unitCost: number) => ({ variantId, productName: 'ب', size: '40', color: 'س', qty, unitPrice, unitCost })
+      const sales = [
+        { id: 1, date: 1, saleType: 'retail', lines: [l(1, 2, 900, 500), l(2, 1, 1500, 1000)], total: 3200, paid: 3200, discount: 100 },
+        { id: 2, date: 2, saleType: 'retail', lines: [l(1, 1, 900, 500)], total: 850, paid: 850, discount: 50 }
+      ] as unknown as Sale[]
+      const returns = [{ id: 1, date: 3, kind: 'customer', refId: 1, partyName: 'x', lines: [{ ...l(1, 1, 900, 500), restock: true }], reason: 'r', settlement: 'cashRefund', amount: 900 }] as unknown as ReturnDoc[]
+      const rows = soldInPeriod(sales, returns)
+      const cardProfit = rows.reduce((s, r) => s + (r.revenue - r.cost), 0)
+      const cardRevenue = rows.reduce((s, r) => s + r.revenue, 0)
+      const summary = profitSummary({ sales, returns, expenses: [], variants: [], readyTradeUuids: new Set(), readyReceiptUuids: new Set() })
+      // (۲×۴۰۰ + ۵۰۰ − ۱۰۰) + (۴۰۰ − ۵۰) − مرجوعی ۴۰۰ = ۱٬۱۵۰
+      eq('مفاد سال/دوره', summary.grossProfit, 1150)
+      eq('کارت فروخته‌شده همان مفاد', cardProfit, summary.grossProfit)
+      // فروش پس از تخفیف و مرجوعی: ۳٬۲۰۰ + ۸۵۰ − ۹۰۰
+      eq('کارت فروخته‌شده همان فروش خالص', cardRevenue, 3150)
+    }
+  },
+  {
     name: 'بازبینی کامل — خواندن مبلغ با جداکنندهٔ هزار دری',
     run: async () => {
       // اپ خودش مبلغ را «۱٬۵۰۰» نشان می‌دهد؛ اگر همین کاپی و paste شود، ۱ خوانده می‌شد
