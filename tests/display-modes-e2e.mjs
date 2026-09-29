@@ -35,7 +35,7 @@ try {
     ['reports', async () => { await more('راپورها'); await page.getByRole('heading', { name: 'راپورها' }).waitFor() }],
     ['settings', async () => { await more('تنظیمات اپ'); await page.getByText('نمای اپ', { exact: true }).waitFor() }],
     ['size-window', async () => {
-      await nav('فروش'); await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click(); await page.getByRole('dialog').waitFor()
+      await nav('فروش'); await page.getByRole('button', { name: /کوهستان 42 سیاه/ }).waitFor()
     }]
   ]
   const report = []

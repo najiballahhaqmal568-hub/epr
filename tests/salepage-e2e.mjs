@@ -46,8 +46,7 @@ await page.getByRole('heading', { name: 'خانه' }).waitFor({ timeout: 30000 }
 await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()
 await page.getByRole('heading', { name: 'میز فروش' }).waitFor()
 await page.getByRole('button', { name: 'عمده', exact: true }).click()
-await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).first().click()
-await page.getByRole('dialog').getByRole('button').filter({ hasText: '42 سیاه' }).first().click()
+await page.getByRole('button', { name: /کوهستان 42 سیاه/ }).first().click()
 await page.waitForTimeout(400)
 await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
 // قرضی کامل: دریافتی صفر — فروش قرضی بدون مشتری رد می‌شود و خانهٔ مشتری باز می‌شود

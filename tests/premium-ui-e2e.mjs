@@ -25,11 +25,7 @@ try {
   await page.locator('.sale-product-card').first().waitFor()
   await page.screenshot({ path: 'qa-premium-desktop.png', fullPage: true })
   const add = async () => {
-    await page.locator('.sale-product-card').first().click()
-    const dialog = page.getByRole('dialog')
-    await dialog.waitFor()
-    assert.equal(await dialog.evaluate(el => el.contains(document.activeElement)), true, 'dialog focus is trapped inside')
-    await dialog.getByRole('button', { name: /42 سیاه/ }).click()
+    await page.locator('.sale-product-card').first().getByRole('button', { name: /42 سیاه/ }).click()
   }
   await add()
   await page.setViewportSize({ width: 390, height: 844 })

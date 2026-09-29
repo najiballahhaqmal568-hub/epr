@@ -22,26 +22,20 @@ try {
     window.result = async () => ({ cash: (await db.cashMovements.toArray()).filter(x => !x.deleted).reduce((s, x) => s + x.amount, 0), sales: (await db.sales.toArray()).filter(x => !x.deleted).map(s => ({ total: s.total, paid: s.paid })) })
   })
   await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()
-  await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
-
-  // 1) Grid: one section per colour, sizes as tiles with what is left; sold-out tile disabled.
-  const dialog = page.getByRole('dialog', { name: 'انتخاب سایز — کوهستان' })
-  const black = dialog.getByRole('region', { name: 'رنگ سیاه' })
+  // 1) Sizes sit open on the model card: one row per colour, tiles with what is left; sold-out tile disabled.
+  const card = page.locator('.sale-product-card').filter({ hasText: 'کوهستان' })
+  const black = card.getByRole('group', { name: 'رنگ سیاه' })
   assert.equal(await black.getByRole('button').count(), 3)
-  assert.equal(await dialog.getByRole('region', { name: 'رنگ قهوه‌ای' }).getByRole('button').count(), 1)
-  assert.equal(await black.getByRole('button', { name: /^43 سیاه — ختم شده/ }).isDisabled(), true)
-  assert.match(await black.innerText(), /۹۰۰ ؋/)
+  assert.equal(await card.getByRole('group', { name: 'رنگ قهوه‌ای' }).getByRole('button').count(), 1)
+  assert.equal(await black.getByRole('button', { name: /43 سیاه — ختم شده/ }).isDisabled(), true)
+  assert.match(await card.innerText(), /۹۰۰ ؋/)
   await page.screenshot({ path: `${shots}/size-grid-390.png` })
-  await black.getByRole('button', { name: /^41 سیاه — ۳ جوړه باقی/ }).click()
-  await dialog.waitFor({ state: 'detached' })
+  await black.getByRole('button', { name: /41 سیاه — ۳ جوړه باقی/ }).click()
   assert.ok(await page.evaluate(() => window.marks.includes('fly-dot')), 'a pill flew to the cart')
   await page.getByRole('textbox', { name: 'تعداد کوهستان 41', exact: true }).waitFor()
 
-  // Reopen: the tile shows what is already in the cart and what is left.
-  await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
-  await dialog.getByRole('button', { name: /^41 سیاه — ۲ جوړه باقی — ۹۰۰ ؋ — ۱ در سبد/ }).waitFor()
-  await page.keyboard.press('Escape')
-  await dialog.waitFor({ state: 'detached' })
+  // The tile shows what is already in the cart and what is left.
+  await card.getByRole('button', { name: /41 سیاه — ۲ جوړه باقی — ۹۰۰ ؋ — ۱ در سبد/ }).waitFor()
 
   // 2) Below-cost price: red border and nudge once the field is left.
   const price = page.getByLabel('قیمت کوهستان 41', { exact: true })
@@ -91,8 +85,7 @@ try {
   // 6) Reduced motion: no flying pill, the sale still adds.
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() => { window.marks = [] })
-  await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
-  await dialog.getByRole('button', { name: /^42 قهوه‌ای/ }).click()
+  await card.getByRole('button', { name: /42 قهوه‌ای/ }).click()
   await page.getByRole('textbox', { name: 'تعداد کوهستان 42', exact: true }).waitFor()
   assert.equal(await page.evaluate(() => window.marks.includes('fly-dot')), false)
   // 7) Sales saved before this fix are listed (read-only) in «کنترل حساب‌ها».

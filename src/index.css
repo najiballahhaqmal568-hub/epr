@@ -318,7 +318,7 @@ button { transition: background-color 120ms ease, border-color 120ms ease, box-s
   .app-nav { height: calc(72px + env(safe-area-inset-bottom)); }
   .sale-embedded .sale-commit-bar { position: fixed; inset-inline: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); padding: 10px 12px; z-index: 39; }
   .sale-embedded .sale-commit-bar[data-empty="true"] { display: none; }
-  .sale-embedded .sale-checkout { padding-bottom: 180px; }
+  .sale-embedded .sale-checkout { padding-bottom: 270px; }
   .sale-product-grid { max-height: 42dvh; overflow-y: auto; padding: 2px; }
   .sale-product-placeholder, .sale-product-card img { height: 80px; }
 }
@@ -572,3 +572,25 @@ input[type='number'] {
 .error-screen pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .history-toggle > button { min-height: 40px; padding-inline: 0.5rem; color: var(--action); font-size: 0.75rem; font-weight: 700; }
 .history-toggle .doc-timeline { margin-top: 0.25rem; text-align: start; }
+
+/* میز فروش: سایزها روی کارت هر مدل باز است؛ یک لمس = یک جوړه */
+.sale-model-list { display: grid; gap: 12px; }
+.sale-model-card { display: grid; gap: 8px; padding: 12px; }
+.sale-model-card[data-in-cart="true"] { border-color: var(--action); }
+.sale-model-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sale-model-meta { font-size: 0.75rem; color: var(--text-secondary); }
+.sale-model-side { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.sale-model-carton { min-height: 2rem; padding: 0 0.75rem; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--surface); font-size: 0.8125rem; font-weight: 700; color: var(--action); }
+.sale-model-color-name { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 0.8125rem; font-weight: 700; color: var(--text-secondary); }
+.sale-size-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr)); gap: 6px; }
+.sale-size-tile { min-height: 3.5rem; padding: 0.25rem; }
+.sale-size-tile .size-tile-size { font-size: 1.25rem; }
+.sale-size-tile[data-low="true"] .size-tile-stock { color: #8A4B00; }
+.sale-size-tile[data-in-cart="true"] { border: 2px solid var(--action); background: var(--action-tint); }
+.sale-quick-actions { display: grid; grid-template-columns: minmax(0, 1fr) 5rem; gap: 8px; width: 100%; flex-basis: 100%; }
+.sale-cash-button { min-height: 3.5rem; border: 0; border-radius: var(--radius-control); background: #0E7A55; color: #fff; font-size: 1.25rem; font-weight: 800; }
+.sale-credit-button { min-height: 3.5rem; border: 2px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); font-size: 1.0625rem; font-weight: 800; }
+.sale-quick-actions button:disabled { opacity: 0.4; }
+.sale-quick-secondary { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; }
+.sale-quick-secondary button { min-height: 2.5rem; padding: 0 0.5rem; background: transparent; border: 0; font-size: 0.875rem; font-weight: 700; color: var(--text-secondary); }
+.sale-quick-secondary button:first-child { color: #8A4B00; }
