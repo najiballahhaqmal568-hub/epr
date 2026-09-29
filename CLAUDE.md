@@ -77,6 +77,10 @@ inside `sync.ts` or `integrity.ts` — that duplication is what caused both mone
 bugs this project has had (in-transit purchases counted twice, and landing cost
 attributed wholly to the last `via`).
 
+Writing an effect onto a stored number is also one function: `applyDocument()` / `applyEffectList()` in
+`effects.ts` (`sync.ts`, `ops.ts`, direct trade and goods receipt all call it; the guard — missing row, deleted row,
+negative stock, whole numbers — is a parameter, not a copy). Do not write a new `row[field] + delta` loop.
+
 `ops.ts` still writes locally (it also does guards, cash movements and
 transactions), so it is the one place that can drift. The fuzzer is what holds
 it honest — it compares stored numbers against `effectsOf` after every step.
@@ -145,7 +149,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1416 checks in 144 scenarios
+npm test          # tests/checks.ts — currently 1429 checks in 145 scenarios
 ```
 
 ```bash

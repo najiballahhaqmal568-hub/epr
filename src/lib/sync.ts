@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { applyRebuiltCosts } from './costing'
-import { effectsOf, type DocTable } from './effects'
+import { applyDocument, type DocTable } from './effects'
 import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable, type Purchase } from '../db'
 import { getSupa, getProfile } from './supa'
 import { receiptReplayDecision } from './customerGoodsReceiptSync'
@@ -331,11 +331,7 @@ const MASTERS: SyncTable[] = ['products', 'variants', 'customers', 'suppliers', 
  * «کنترل حساب‌ها» و با ops.ts هرگز فرق نکنند.
  */
 export async function applyDocEffects(table: SyncTable, rec: Record<string, unknown>, reverse: boolean) {
-  const sign = reverse ? -1 : 1
-  for (const e of effectsOf(table as DocTable, rec)) {
-    const row = await db.table(e.table).get(e.id!)
-    if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) + e.delta * sign })
-  }
+  await applyDocument(table as DocTable, rec, reverse ? -1 : 1) // a row missing here is skipped: replay from another phone
 }
 
 async function rebuildReceiptAdjustmentCosts(receiptUuid: string): Promise<void> {

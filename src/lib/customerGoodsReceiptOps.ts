@@ -1,6 +1,6 @@
 import { accessFlags, db, SYNC_TABLES, type Adjustment, type Payment, type Sale } from '../db'
 import { applyRebuiltCosts, computeCosts } from './costing'
-import { effectsOf, type DocTable } from './effects'
+import { applyDocument, type DocTable } from './effects'
 import { boxOf, postCashMovement } from './financialPosting'
 import { customerGoodsReceiptFeatureEnabled, loadCustomerGoodsReceipt } from './customerGoodsReceiptState'
 import { receiptCanonical, receiptInteger, receiptStableUuid, receiptTotals, RECEIPT_UUID, type CreateCustomerGoodsReceiptInput, type CustomerGoodsReceiptMeta, type CustomerGoodsReceiptSnapshot, type CustomerGoodsReceiptState, type CustomerGoodsReceiptPreview } from './customerGoodsReceiptTypes'
@@ -92,14 +92,8 @@ async function normalized(input: CreateCustomerGoodsReceiptInput): Promise<Custo
   receiptTotals(snapshot)
   return snapshot
 }
-async function apply(table: DocTable, doc: unknown, sign = 1): Promise<void> {
-  for (const effect of effectsOf(table, doc)) {
-    const row = await db.table(effect.table).get(effect.id!)
-    if (!row || row.deleted) throw new Error('طرف حساب یا جنس یافت نشد.')
-    const value = (row[effect.field] ?? 0) + sign * effect.delta
-    if (!Number.isSafeInteger(value) || (effect.field === 'stockQty' && value < 0)) throw new Error('موجودی یا حساب از حد مجاز خارج است.')
-    await db.table(effect.table).update(effect.id!, { [effect.field]: value })
-  }
+async function apply(table: DocTable, doc: unknown, sign: 1 | -1 = 1): Promise<void> {
+  await applyDocument(table, doc, sign, { missing: 'طرف حساب یا جنس یافت نشد.', rejectDeleted: true, wholeNumbers: 'موجودی یا حساب از حد مجاز خارج است.', noNegativeStock: 'موجودی یا حساب از حد مجاز خارج است.' })
 }
 async function insert(snapshot: CustomerGoodsReceiptSnapshot, correctionOfUuid?: string, reason?: string): Promise<void> {
   const totals = receiptTotals(snapshot), receiptUuid = snapshot.receiptUuid

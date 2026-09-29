@@ -5468,6 +5468,36 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('فروش ثبت شد', typeof saleId, 'number')
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
+  },
+  {
+    name: 'فروش — قرض بدون مشتری و دو خط از یک سایز',
+    run: async () => {
+      const variantId = await makeVariant({ purchasePrice: 500, retailPrice: 900 })
+      await setOpeningStock(variantId, 5, 'اسپرتکس')
+      const customerId = (await db.customers.add({ name: 'احمد', type: 'retail', balance: 0, createdAt: Date.now() })) as number
+      const line = (qty: number) => ({ variantId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty, unitPrice: 900 })
+
+      // پیش از این، قرضِ بی‌نام بی‌صدا در هیچ حسابی نمی‌نشست و گم می‌شد
+      await throws('قرض بدون مشتری رد می‌شود', () => addSale({ date: Date.now(), saleType: 'retail', lines: [line(1)], total: 900, paid: 0 }))
+      eq('رد شدن گدام را تغییر نداد', await stockOf(variantId), 5)
+      eq('رد شدن فروشی نساخت', await db.sales.count(), 0)
+
+      // دو خط از یک سایز روی هم حساب می‌شود: ۳ + ۳ از ۵ جوړه
+      await throws('دو خط ۳ + ۳ از موجودی ۵ رد می‌شود', () => addSale({ date: Date.now(), saleType: 'retail', lines: [line(3), line(3)], total: 5400, paid: 5400 }))
+      eq('گدام هنوز ۵', await stockOf(variantId), 5)
+      eq('صندوق هنوز صفر', await cashBalance(), 0)
+
+      // ۲ + ۳ = ۵ درست است و گدام را صفر می‌کند؛ حذفش همه را برمی‌گرداند
+      const id = await addSale({ date: Date.now(), customerId, customerName: 'احمد', saleType: 'retail', lines: [line(2), line(3)], total: 4500, paid: 1000 })
+      eq('گدام صفر شد', await stockOf(variantId), 0)
+      eq('قرض احمد ۳٬۵۰۰', (await db.customers.get(customerId))!.balance, 3500)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      await deleteSale(id)
+      eq('حذف گدام را برگرداند', await stockOf(variantId), 5)
+      eq('حذف قرض را برگرداند', (await db.customers.get(customerId))!.balance, 0)
+      eq('حذف صندوق را برگرداند', await cashBalance(), 0)
+      is('کنترل حساب‌ها بعد از حذف سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
   }
 ]
 

@@ -1,5 +1,5 @@
 import { accessFlags, db, SYNC_TABLES, type Payment, type Purchase, type Sale } from '../db'
-import { effectsOf } from './effects'
+import { applyDocument } from './effects'
 import { directTotals, validateDirectPayments } from './directTradeMath'
 import { assertDirectWriteReady, directFeatureEnabled, loadDirectTrade } from './directTradeState'
 import type { DirectLine, DirectPaymentInput } from './directTradeTypes'
@@ -68,11 +68,7 @@ function creationFingerprint(input: CreateDirectTradeInput, customerUuid: string
 }
 /** Apply (sign 1) or reverse (sign −1) a document's shared effects inside the caller's transaction. */
 export async function applyEffects(doc: Payment | Sale | Purchase, table: 'payments' | 'sales' | 'purchases', sign: 1 | -1 = 1): Promise<void> {
-  for (const effect of effectsOf(table, doc)) {
-    const row = await db.table(effect.table).get(effect.id!) as Record<string, number> | undefined
-    if (!row) throw new Error('طرف حساب سند یافت نشد')
-    await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta * sign })
-  }
+  await applyDocument(table, doc, sign, { missing: 'طرف حساب سند یافت نشد' })
 }
 
 export function buildPayment(input: DirectPaymentInput, customer: { id?: number; uuid?: string; name: string },

@@ -1,5 +1,5 @@
 import { applyRebuiltCosts, historicalCostRevision, landedUnitCost, weightedCost } from './costing'
-import { effectsOf } from './effects'
+import { applyDocument, effectsOf } from './effects'
 import { GOODS_RECEIPT_ERROR } from './customerGoodsReceiptTypes'
 import { validateDirectBackup } from './directTradeBackup'
 import { validateCustomerGoodsReceiptBackup, validateCustomerGoodsReceiptConflictEvidence } from './customerGoodsReceiptBackup'
@@ -197,24 +197,24 @@ export async function addSale(sale: Sale): Promise<number> {
   if (discount < 0 || discount > gross) throw new Error('تخفیف باید بین صفر و قیمت جنس باشد')
   if (sale.total !== gross - discount) throw new Error('مجموع فروش با قیمت جنس و تخفیف نمی‌خواند')
   if (sale.paid < 0 || (sale.cashPaid ?? 0) < 0) throw new Error('پول دریافتی منفی نمی‌شود')
+  // پولی که نگرفته‌اید باید به نام کسی قرض شود؛ وگرنه قرض در هیچ حسابی نمی‌نشست و گم می‌شد
+  const remainder = saleCreditAmount(sale)
+  if (remainder > 0 && !sale.customerId) throw new Error('برای فروش قرضی باید مشتری انتخاب شود')
   return db.transaction('rw', db.sales, db.variants, db.customers, db.cashMovements, async () => {
+    const wanted = new Map<number, number>()
     for (const line of sale.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')
-      if (v.stockQty < line.qty) throw new Error(`موجودی کافی نیست: ${line.productName} ${line.size}`)
+      // چند خط از یک سایز روی هم حساب می‌شود، نه هر خط جدا
+      wanted.set(line.variantId, (wanted.get(line.variantId) ?? 0) + line.qty)
+      if (v.stockQty < (wanted.get(line.variantId) ?? 0)) throw new Error(`موجودی کافی نیست: ${line.productName} ${line.size}`)
       // قیمت خرید همین لحظه در فاکتور ثبت می‌شود تا مفاد بعداً تغییر نکند
       line.unitCost = v.purchasePrice
-      await db.variants.update(line.variantId, { stockQty: v.stockQty - line.qty })
     }
-    const remainder = saleCreditAmount(sale)
-    if (remainder > 0 && sale.customerId) {
-      const c = await db.customers.get(sale.customerId)
-      if (c) {
-        await db.customers.update(sale.customerId, {
-          balance: c.balance + remainder,
-          ...(sale.promiseDate ? { promiseDate: sale.promiseDate } : {})
-        })
-      }
+    // گدام و قرض مشتری از همان قاعدهٔ مشترک (effects.ts) کم و زیاد می‌شود، نه دستی
+    await applyDocument('sales', sale, 1, { noNegativeStock: 'موجودی کافی نیست' })
+    if (remainder > 0 && sale.promiseDate && sale.customerId) {
+      await db.customers.update(sale.customerId, { promiseDate: sale.promiseDate })
     }
     const id = (await db.sales.add(sale)) as number
     const cash = saleCashPaid(sale)
@@ -232,25 +232,14 @@ export async function deleteSale(saleId: number): Promise<void> {
     if (sale.uuid && await db.payments.filter((p) => !p.deleted && p.shipping?.saleUuid === sale.uuid).first()) {
       throw new Error('این فروش کرایهٔ بار دارد؛ ابتدا سند کرایه را بررسی کنید. مرجوعی جنس کرایه را خودکار پس نمی‌دهد.')
     }
-    for (const line of sale.lines) {
-      const v = await db.variants.get(line.variantId)
-      if (v) await db.variants.update(line.variantId, { stockQty: v.stockQty + line.qty })
-    }
-    const remainder = saleCreditAmount(sale)
-    if (remainder > 0 && sale.customerId) {
-      const c = await db.customers.get(sale.customerId)
-      if (c) await db.customers.update(sale.customerId, { balance: c.balance - remainder })
-    }
+    await applyDocument('sales', sale, -1)
     // کفشِ قرض‌دهنده دو نیمه دارد: فروش برای گدام/مفاد و پرداخت برای حساب شخص.
     // حذف هر کدام باید نیمهٔ دیگر را هم برگرداند تا سند نیمه‌تمام نماند.
     const linkedPayment = sale.groupUuid
       ? await db.payments.filter((p) => !p.deleted && p.groupUuid === sale.groupUuid).first()
       : undefined
     if (linkedPayment) {
-      for (const e of effectsOf('payments', linkedPayment)) {
-        const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
-        if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
-      }
+      await applyDocument('payments', linkedPayment, -1)
       const linkedCash = paymentCashDelta(linkedPayment)
       if (linkedCash !== 0) {
         const linkedBox = await documentBox(linkedPayment.box, linkedPayment.id, (m) => m.date === linkedPayment.date && m.amount === linkedCash)
@@ -655,13 +644,7 @@ async function assertPurchaseCanChange(purchase: Purchase, nextVariantIds: numbe
 }
 
 async function applyLocalEffects(table: 'purchases' | 'adjustments', doc: Purchase | Adjustment, sign: 1 | -1): Promise<void> {
-  for (const effect of effectsOf(table, doc)) {
-    const row = await db.table(effect.table).get(effect.id!)
-    if (!row) throw new Error('حساب مربوط به سند یافت نشد')
-    const next = Number(row[effect.field] ?? 0) + effect.delta * sign
-    if (effect.field === 'stockQty' && next < 0) throw new Error('موجودی برای اصلاح یا ابطال این خرید کافی نیست')
-    await db.table(effect.table).update(effect.id!, { [effect.field]: next })
-  }
+  await applyDocument(table, doc, sign, { missing: 'حساب مربوط به سند یافت نشد', noNegativeStock: 'موجودی برای اصلاح یا ابطال این خرید کافی نیست' })
 }
 
 async function rebuildLastPurchaseDates(variantIds: Set<number>): Promise<void> {
@@ -1026,11 +1009,7 @@ export async function correctSupplierPayment(
     const supplier = await db.suppliers.get(current.partyId)
     if (!supplier || supplier.deleted) throw new Error('فروشنده یافت نشد')
 
-    for (const effect of effectsOf('payments', current)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('حساب مربوط به سند قبلی یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
-    }
+    await applyDocument('payments', current, -1, { missing: 'حساب مربوط به سند قبلی یافت نشد' })
 
     const correctedAt = Date.now()
     const previousUuid = current.uuid ?? newUuid()
@@ -1070,11 +1049,7 @@ export async function correctSupplierPayment(
     }
     const replacementId = (await db.payments.add(replacement)) as number
 
-    for (const effect of effectsOf('payments', replacement)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('حساب مربوط به سند اصلاح‌شده یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
-    }
+    await applyDocument('payments', replacement, 1, { missing: 'حساب مربوط به سند اصلاح‌شده یافت نشد' })
 
     const newCashDelta = paymentCashDelta(replacement, supplier.kind)
     const replacementBox = boxOf(replacement)
@@ -1189,11 +1164,7 @@ export async function correctCustomerPayment(
     if (!current || current.deleted) throw new Error('سند پرداخت یافت نشد')
     const replacement = await customerPaymentReplacement(current, input)
 
-    for (const effect of effectsOf('payments', current)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('حساب مربوط به سند قبلی یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
-    }
+    await applyDocument('payments', current, -1, { missing: 'حساب مربوط به سند قبلی یافت نشد' })
 
     const correctedAt = Date.now()
     const previousUuid = current.uuid ?? newUuid()
@@ -1230,11 +1201,7 @@ export async function correctCustomerPayment(
     }
     const replacementId = (await db.payments.add(replacement)) as number
 
-    for (const effect of effectsOf('payments', replacement)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('حساب مربوط به سند اصلاح‌شده یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
-    }
+    await applyDocument('payments', replacement, 1, { missing: 'حساب مربوط به سند اصلاح‌شده یافت نشد' })
 
     const newCashDelta = paymentCashDelta(replacement)
     const replacementBox = boxOf(replacement)
@@ -1299,11 +1266,7 @@ export async function correctOpeningDebt(paymentId: number, input: OpeningDebtCo
     if (amount <= 0) throw new Error('مبلغ باید بیشتر از صفر باشد')
     if (!input.reason.trim()) throw new Error('دلیل اصلاح را بنویسید')
 
-    for (const effect of effectsOf('payments', current)) {
-      const r = (await db.table(effect.table).get(effect.id!)) as Record<string, number> | undefined
-      if (!r) throw new Error('طرف حساب سند قبلی یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (r[effect.field] ?? 0) - effect.delta })
-    }
+    await applyDocument('payments', current, -1, { missing: 'طرف حساب سند قبلی یافت نشد' })
 
     const correctedAt = Date.now()
     const previousUuid = current.uuid ?? newUuid()
@@ -1339,11 +1302,7 @@ export async function correctOpeningDebt(paymentId: number, input: OpeningDebtCo
     }
     const replacementId = (await db.payments.add(replacement)) as number
 
-    for (const effect of effectsOf('payments', replacement)) {
-      const r = (await db.table(effect.table).get(effect.id!)) as Record<string, number> | undefined
-      if (!r) throw new Error('طرف حساب سند جدید یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (r[effect.field] ?? 0) + effect.delta })
-    }
+    await applyDocument('payments', replacement, 1, { missing: 'طرف حساب سند جدید یافت نشد' })
     return replacementId
   })
 }
@@ -1575,18 +1534,12 @@ export async function deletePayment(paymentId: number): Promise<void> {
     if (!p || p.deleted) return
     assertOrdinaryPayment(p)
     if (p.shipping) throw new Error('کرایه را از بخش کرایهٔ بار اصلاح یا لغو کنید تا صندوق و مصرف هم یکجا برگردد')
-    for (const e of effectsOf('payments', p)) {
-      const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
-      if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
-    }
+    await applyDocument('payments', p, -1)
     const linkedSale = p.groupUuid
       ? await db.sales.filter((s) => !s.deleted && s.groupUuid === p.groupUuid).first()
       : undefined
     if (linkedSale) {
-      for (const e of effectsOf('sales', linkedSale)) {
-        const row = (await db.table(e.table).get(e.id!)) as Record<string, number> | undefined
-        if (row) await db.table(e.table).update(e.id!, { [e.field]: (row[e.field] ?? 0) - e.delta })
-      }
+      await applyDocument('sales', linkedSale, -1)
       await db.sales.update(linkedSale.id!, { deleted: true })
     }
     const primary = p.partyType === 'customer' ? await db.customers.get(p.partyId) : await db.suppliers.get(p.partyId)
@@ -2136,11 +2089,7 @@ export async function correctLenderPayment(paymentId: number, input: LenderPayme
     const newAmount = current.amount < 0 ? -mag : mag
     const newCashDelta = current.via === 'opening' ? 0 : current.amount < 0 ? mag : -mag
 
-    for (const effect of effectsOf('payments', current)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('حساب مربوط به سند قبلی یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
-    }
+    await applyDocument('payments', current, -1, { missing: 'حساب مربوط به سند قبلی یافت نشد' })
 
     const correctedAt = Date.now()
     const previousUuid = current.uuid ?? newUuid()
@@ -2188,11 +2137,7 @@ export async function correctLenderPayment(paymentId: number, input: LenderPayme
     }
     const replacementId = (await db.payments.add(replacement)) as number
 
-    for (const effect of effectsOf('payments', replacement)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('حساب مربوط به سند اصلاح‌شده یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
-    }
+    await applyDocument('payments', replacement, 1, { missing: 'حساب مربوط به سند اصلاح‌شده یافت نشد' })
 
     const replacementBox = boxOf(replacement)
     const balanceNow = await cashBalance(replacementBox)
@@ -2534,11 +2479,7 @@ export async function correctExpense(expenseId: number, input: ExpenseCorrection
     if (!current || current.deleted) throw new Error('سند مصرف یافت نشد')
     const replacement = await expenseReplacement(current, input)
 
-    for (const effect of effectsOf('expenses', current)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('طلبکار مربوط به سند قبلی یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) - effect.delta })
-    }
+    await applyDocument('expenses', current, -1, { missing: 'طلبکار مربوط به سند قبلی یافت نشد' })
 
     const correctedAt = Date.now()
     const previousUuid = current.uuid ?? newUuid()
@@ -2583,11 +2524,7 @@ export async function correctExpense(expenseId: number, input: ExpenseCorrection
     }
     const replacementId = (await db.expenses.add(replacement)) as number
 
-    for (const effect of effectsOf('expenses', replacement)) {
-      const row = await db.table(effect.table).get(effect.id!)
-      if (!row) throw new Error('طلبکار مربوط به سند اصلاح‌شده یافت نشد')
-      await db.table(effect.table).update(effect.id!, { [effect.field]: (row[effect.field] ?? 0) + effect.delta })
-    }
+    await applyDocument('expenses', replacement, 1, { missing: 'طلبکار مربوط به سند اصلاح‌شده یافت نشد' })
 
     const newCashPaid = expenseCashPaid(replacement)
     if (newCashPaid > 0) {
