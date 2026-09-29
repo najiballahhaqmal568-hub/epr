@@ -85,7 +85,7 @@ import { allocate, afn } from '../src/lib/ops'
 import { calculateShipping } from '../src/lib/shipping'
 import * as shippingOps from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
-import { runIntegrityCheck, fixMismatch } from '../src/lib/integrity'
+import { runIntegrityCheck, fixMismatch, computeCustomerBalances } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects, applyRemoteRow, encodeRefs, decodeRefs, shouldResetForGeneration } from '../src/lib/sync'
 import { dailyFlow } from '../src/lib/cashflow'
@@ -94,7 +94,7 @@ import { soldInPeriod, soldVariantIds } from '../src/lib/sold'
 import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
-import { pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
+import { parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
@@ -279,6 +279,85 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('هیچ خریدی ثبت نشد', await db.purchases.count(), 0)
       await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1000 })
       eq('پرداخت پوره هنوز کار می‌کند', await cashBalance(), 4000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — خواندن مبلغ با جداکنندهٔ هزار دری',
+    run: async () => {
+      // اپ خودش مبلغ را «۱٬۵۰۰» نشان می‌دهد؛ اگر همین کاپی و paste شود، ۱ خوانده می‌شد
+      eq('۱٬۵۰۰', parseNum('۱٬۵۰۰'), 1500)
+      eq('۱۲٬۳۴۵٬۶۷۸', parseNum('۱۲٬۳۴۵٬۶۷۸'), 12345678)
+      eq('با واحد پول', parseNum('۱٬۵۰۰ ؋'), 1500)
+      eq('کامهٔ لاتین', parseNum('1,500'), 1500)
+      eq('ممیز دری', parseNum('۲٫۵'), 2.5)
+      eq('خالی صفر', parseNum(''), 0)
+    }
+  },
+  {
+    name: 'بازبینی کامل — دفتر مشتری با قرض ثبت‌شده یکی است، حتی با فروش قدیمیِ پول اضافه',
+    run: async () => {
+      const cId = await newCustomer()
+      const sales = [
+        // فروش قدیمی پیش از قاعدهٔ «پول اضافه در صندوق نمی‌ماند»: ۱٬۰۰۰ برای ۹۰۰
+        { id: 1, date: 1, customerId: cId, saleType: 'retail', lines: [], total: 900, paid: 1000 },
+        { id: 2, date: 2, customerId: cId, saleType: 'retail', lines: [], total: 500, paid: 200 }
+      ] as unknown as Sale[]
+      const ledger = buildCustomerLedger(sales, [], [])
+      const expected = computeCustomerBalances(sales, [], []).get(cId) ?? 0
+      eq('قرض مورد انتظار', expected, 300)
+      eq('آخر دفتر = قرض ثبت‌شده', ledger.length ? ledger[ledger.length - 1].balance : 0, expected)
+    }
+  },
+  {
+    name: 'بازبینی کامل — جنس در راه جزء دارایی است؛ خرید در راه نقصِ ساختگی نمی‌سازد',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 100 })
+      const sId = await newSupplier()
+      await seedCash(5000)
+      const before = (await netWorth()).assets
+      // ۱۰ جوړه × ۱۰۰ نقد خریده شد، هنوز نرسیده: پول رفت، جنس از دکان ماست
+      const pid = await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 10, unitCost: 100 }], total: 1000, paid: 1000, received: false })
+      const inTransit = await netWorth()
+      eq('دارایی خالص با خرید در راه عوض نمی‌شود', inTransit.assets, before)
+      eq('ارزش جنس در راه جدا نشان داده می‌شود', inTransit.inTransit, 1000)
+      await receivePurchase(pid)
+      const arrived = await netWorth()
+      eq('بعد از رسیدن هم همان دارایی', arrived.assets, before)
+      eq('بعد از رسیدن در راه صفر', arrived.inTransit, 0)
+      eq('بعد از رسیدن در گدام', arrived.stock, 1000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — بستن سال: یا همه پرداخت می‌شود یا هیچ‌کدام',
+    run: async () => {
+      const a = await db.suppliers.add({ name: 'شریک الف', balance: 0, kind: 'partner', capital: 1000, share: 50 }) as number
+      const b = await db.suppliers.add({ name: 'شریک ب', balance: 0, kind: 'partner', capital: 1000, share: 50 }) as number
+      await seedCash(700)
+      // هر کدام ۵۰۰ می‌گیرد؛ صندوق فقط ۷۰۰ دارد — دومی رد می‌شود و اولی هم نباید بیرون برود
+      await throws('پول کافی نیست — رد', () => settleYear({ choices: { [a]: 'take', [b]: 'take' }, payCash: true, yearProfit: 1000, withdrawnBy: () => 0 }))
+      eq('صندوق دست نخورد', await cashBalance(), 700)
+      eq('هیچ برداشت نیمه‌کاره نماند', (await db.cashMovements.toArray()).filter(m => m.type === 'withdrawal').length, 0)
+      is('سال باز ماند', (await db.settings.get('partnershipStart'))?.value, undefined)
+    }
+  },
+  {
+    name: 'بازبینی کامل — بستن سال: سهم‌ها دقیقاً برابر مفاد سال',
+    run: async () => {
+      const ids = [
+        await db.suppliers.add({ name: 'الف', balance: 0, kind: 'partner', capital: 0, share: 50 }) as number,
+        await db.suppliers.add({ name: 'ب', balance: 0, kind: 'partner', capital: 0, share: 30 }) as number,
+        await db.suppliers.add({ name: 'ج', balance: 0, kind: 'partner', capital: 0, share: 20 }) as number
+      ]
+      // ۱٬۰۰۳ × ۵۰٪/۳۰٪/۲۰٪ = ۵۰۱٫۵ / ۳۰۰٫۹ / ۲۰۰٫۶ — گرد کردن جدا ۱٬۰۰۴ می‌ساخت
+      const choices = Object.fromEntries(ids.map(id => [id, 'reinvest' as const]))
+      await settleYear({ choices, payCash: false, yearProfit: 1003, withdrawnBy: () => 0 })
+      const caps = await Promise.all(ids.map(async id => (await db.suppliers.get(id))!.capital ?? 0))
+      eq('جمع سهم‌ها = مفاد سال', caps.reduce((x, y) => x + y, 0), 1003)
+      // نقص هم دقیق تقسیم می‌شود
+      for (const id of ids) await db.suppliers.update(id, { capital: 1000 })
+      await settleYear({ choices, payCash: false, yearProfit: -1003, withdrawnBy: () => 0 })
+      const after = await Promise.all(ids.map(async id => (await db.suppliers.get(id))!.capital ?? 0))
+      eq('جمع نقص‌ها = نقص سال', after.reduce((x, y) => x + y, 0), 3000 - 1003)
     }
   },
   {

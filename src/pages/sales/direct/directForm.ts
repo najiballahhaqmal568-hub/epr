@@ -6,7 +6,7 @@ export const routeLabels: Record<DirectPaymentRoute, string> = {
   customerCash: 'دریافت از مشتری', supplierPayment: 'پرداخت به فروشنده', customerToSupplier: 'مشتری مستقیم به فروشنده داده'
 }
 export function numberInput(value: string): number {
-  const normalized = toLatinDigits(value).replace(/[,،]/g, '').trim()
+  const normalized = toLatinDigits(value).replace(/[,،٬]/g, '').trim()
   return /^\d+$/.test(normalized) && Number.isSafeInteger(Number(normalized)) ? Number(normalized) : NaN
 }
 export function paymentDraft() {

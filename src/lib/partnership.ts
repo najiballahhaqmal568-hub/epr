@@ -16,7 +16,7 @@
  * «دارایی خالص منهای سرمایهٔ شرکا» است و هرگز با دست تایپ نمی‌شود.
  */
 import { db, type Supplier } from '../db'
-import { afn, addPartnerWithdrawal, recordCapitalCash } from './ops'
+import { afn, allocate, addPartnerWithdrawal, recordCapitalCash } from './ops'
 import { netWorth } from './networth'
 
 export const PARTNERSHIP_START = 'partnershipStart'
@@ -161,30 +161,33 @@ export async function settleYear(input: SettleInput): Promise<SettleResult> {
   const partners = await listPartners()
   const result: SettleResult = { paid: [], exited: [] }
 
-  // پرداخت‌ها سند نقدی می‌سازند و ممکن است به خاطر کمبود پول رد شوند —
-  // پس اول همه را حساب می‌کنیم تا نیمه‌کاره نماند
-  const plan = partners.map((p) => {
-    const share = Math.round((input.yearProfit * (p.share ?? 0)) / 100)
+  // سهم هر شریک با allocate: جمع سهم‌ها دقیقاً برابر مفاد سال (گرد کردن جدا یک افغانی کم/زیاد می‌ساخت).
+  // بخشی که به هیچ شریکی نرسیده (مجموع فیصدی کمتر از ۱۰۰) در خانهٔ آخر می‌ماند و تقسیم نمی‌شود.
+  const weights = partners.map((p) => p.share ?? 0)
+  const unassigned = Math.max(0, 100 - weights.reduce((x, y) => x + y, 0))
+  const parts = allocate(Math.abs(input.yearProfit), [...weights, unassigned]).slice(0, partners.length)
+  const plan = partners.map((p, i) => {
+    const share = input.yearProfit < 0 ? -parts[i] : parts[i]
     const pay = share - input.withdrawnBy(p.name)
     return { p, pay, choice: input.choices[p.id!] ?? ('take' as SettleChoice) }
   })
 
-  for (const { p, pay, choice } of plan) {
-    if (choice === 'exit') {
-      const total = (p.capital ?? 0) + pay
-      if (input.payCash && total > 0) {
-        await addPartnerWithdrawal(p.name, total, 'تصفیهٔ خروج از شراکت')
-        result.paid.push({ name: p.name, amount: total })
+  // پرداخت‌ها، سرمایه‌ها و تاریخ سال نو در یک transaction: اگر پول صندوق برای یکی کافی نباشد،
+  // هیچ پرداختی ثبت نمی‌شود و سال باز می‌ماند — نه اینکه نصف شرکا پول گرفته باشند.
+  await db.transaction('rw', db.suppliers, db.settings, db.cashMovements, async () => {
+    for (const { p, pay, choice } of plan) {
+      if (choice === 'exit') {
+        const total = (p.capital ?? 0) + pay
+        if (input.payCash && total > 0) {
+          await addPartnerWithdrawal(p.name, total, 'تصفیهٔ خروج از شراکت')
+          result.paid.push({ name: p.name, amount: total })
+        }
+        result.exited.push(p.name)
+      } else if (choice === 'take' && pay > 0 && input.payCash) {
+        await addPartnerWithdrawal(p.name, pay, 'سهم فایدهٔ سال')
+        result.paid.push({ name: p.name, amount: pay })
       }
-      result.exited.push(p.name)
-    } else if (choice === 'take' && pay > 0 && input.payCash) {
-      await addPartnerWithdrawal(p.name, pay, 'سهم فایدهٔ سال')
-      result.paid.push({ name: p.name, amount: pay })
     }
-  }
-
-  // نوشتن سرمایه‌ها و تاریخ سال نو — اتمی
-  await db.transaction('rw', db.suppliers, db.settings, async () => {
     for (const { p, pay, choice } of plan) {
       if (choice === 'exit') await db.suppliers.update(p.id!, { deleted: true })
       else if (choice === 'reinvest') await db.suppliers.update(p.id!, { capital: Math.max(0, (p.capital ?? 0) + pay) })

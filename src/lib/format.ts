@@ -96,7 +96,9 @@ export function toLatinDigits(s: string): string {
 }
 
 export function parseNum(s: string): number {
-  const n = parseFloat(toLatinDigits(s).replace(/[,،]/g, ''))
+  // جداکنندهٔ هزار: کامهٔ لاتین، «،» و «٬» (همان که اپ خودش نشان می‌دهد) — بدون آن «۱٬۵۰۰» ۱ خوانده می‌شد.
+  // «٫» ممیز دری است.
+  const n = parseFloat(toLatinDigits(s).replace(/[,،٬\s]/g, '').replace(/٫/g, '.'))
   return isNaN(n) ? 0 : n
 }
 
