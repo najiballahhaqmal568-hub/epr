@@ -5,7 +5,10 @@ import ts from 'typescript'
 const encode = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 const compile = (path) => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
 const format = encode(compile('../src/lib/format.ts'))
-const drafts = await import(encode(compile('../src/lib/saleDrafts.ts').replace("'./format'", JSON.stringify(format))))
+// saleDrafts reads its total from checkout.ts (which uses format and shipping); compile that chain too
+const shipping = encode(compile('../src/lib/shipping.ts'))
+const checkout = encode(compile('../src/lib/checkout.ts').replace("'./format'", JSON.stringify(format)).replace("'./shipping'", JSON.stringify(shipping)))
+const drafts = await import(encode(compile('../src/lib/saleDrafts.ts').replace("'./format'", JSON.stringify(format)).replace("'./checkout'", JSON.stringify(checkout))))
 assert.equal(typeof drafts.writeWorkingSale, 'function', 'working draft persistence is available')
 const memory = new Map()
 globalThis.sessionStorage = {
