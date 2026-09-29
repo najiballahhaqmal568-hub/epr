@@ -130,7 +130,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1235 checks in 121 scenarios
+npm test          # tests/checks.ts — currently 1349 checks in 139 scenarios
 ```
 
 ```bash
