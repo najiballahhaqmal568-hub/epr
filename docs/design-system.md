@@ -109,6 +109,18 @@ The owner opens the app standing at the counter, so the page answers three quest
 - Colour on the home is meaning, not decoration: lapis = the month card, gold = the one action to take,
   blue = money owed to us, amber = money we owe, red = loss.
 
+## Sale desk (`pages/sales/NewSaleModal.tsx`)
+
+Busy-shop rule: a normal cash sale is **two touches** — a size, then «نقد».
+
+- Every model with stock is a card with **all its sizes open** (one row per colour). One touch on a size = one pair in
+  the cart; the tile shows what is left after the cart (amber at ≤ 2, «ختم» and disabled at 0). No size window.
+- The bar under the goods shows the total and: **«نقد»** (saves at once: paid = total, no customer, nothing typed),
+  **«قرض»** (opens the payment page with nothing paid and the customer box open), «معطل», and «ادامه به پرداخت»
+  (the old page, for a discount, part-payment, shipping or a page number; it always starts as cash).
+- «نقد» goes through the same `save()` guards as the payment page (stock, shipping needs a customer, `paid = min(…, total)`).
+- Wholesale cartons: the card has a «کارتن» button that opens the carton / half-carton window.
+
 ## Checks
 
 | Test | Proves |

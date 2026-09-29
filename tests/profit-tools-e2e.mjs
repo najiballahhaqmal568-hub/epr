@@ -87,8 +87,7 @@ try {
 
   // 5) Sale time: a price under cost warns the owner with the cost and the loss.
   await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()
-  await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
-  await page.getByRole('dialog').getByRole('button').filter({ hasText: '40 سیاه' }).click()
+  await page.getByRole('button', { name: /کوهستان 40 سیاه/ }).click()
   const price = page.getByLabel('قیمت کوهستان 40', { exact: true })
   await price.fill('450')
   await page.getByRole('alert').filter({ hasText: 'زیر قیمت خرید (۵۰۰ ؋) — زیان ۵۰ ؋' }).waitFor()

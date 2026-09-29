@@ -18,8 +18,7 @@ try {
   await page.getByRole('navigation').getByRole('button', { name: 'فروش', exact: true }).click()
   const payment = () => page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
   const add = async () => {
-    await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
-    await page.getByRole('dialog').getByRole('button').filter({ hasText: '42 سیاه' }).click()
+    await page.getByRole('button', { name: /کوهستان 42 سیاه/ }).click()
   }
   await add()
   await page.emulateMedia({ reducedMotion: 'reduce' })

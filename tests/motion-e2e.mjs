@@ -67,8 +67,7 @@ try {
   // 4) Cart rows: removing a line leaves a fading copy for a moment; the others slide.
   await page.locator('nav').getByRole('button', { name: 'فروش', exact: true }).click()
   for (const size of ['40', '41']) {
-    await page.locator('.sale-product-card').filter({ hasText: 'کوهستان' }).click()
-    await page.getByRole('dialog').getByRole('button', { name: new RegExp(`^${size} سیاه`) }).click()
+    await page.getByRole('button', { name: new RegExp(`کوهستان ${size} سیاه`) }).click()
     await page.getByRole('textbox', { name: `تعداد کوهستان ${size}`, exact: true }).waitFor()
   }
   const ghost = await page.evaluate(async () => {

@@ -291,8 +291,10 @@ export function NewSaleModal({
     }
   }
 
-  async function save() {
+  async function save(cashOnly = false) {
     if (pendingRef.current) return
+    const paidNow = cashOnly ? total : paid
+    const remainderNow = total - paidNow
     if (!lines.length) return setError('حداقل یک جنس انتخاب کنید')
     if (shipping && (saleType !== 'wholesale' || !customerId)) return setError('کرایه به مشتری عمده مربوط است؛ مشتری را انتخاب کنید یا کرایه را بردارید')
     if (shipping) {
@@ -300,8 +302,8 @@ export function NewSaleModal({
       catch { return setError('معلومات کرایه درست نیست؛ کرایه را باز و اصلاح کنید') }
     }
     if (stockInvalid) return setError('موجودی بعضی سایزها کافی نیست یا تعداد درست نیست؛ سبد را اصلاح کنید')
-    if (paidTouched && !paidStr.trim()) return setError('مبلغ نقد دریافتی را وارد کنید؛ اگر هیچ نقد نگرفته‌اید، گزینهٔ قرض را انتخاب کنید.')
-    if (remainder > 0 && !customerId) {
+    if (!cashOnly && paidTouched && !paidStr.trim()) return setError('مبلغ نقد دریافتی را وارد کنید؛ اگر هیچ نقد نگرفته‌اید، گزینهٔ قرض را انتخاب کنید.')
+    if (remainderNow > 0 && !customerId) {
       setShowCust(true)
       return setError('برای فروش قرضی باید مشتری انتخاب شود')
     }
@@ -314,11 +316,11 @@ export function NewSaleModal({
       lines,
       total,
       // پول اضافه همان لحظه به مشتری پس داده می‌شود؛ صندوق فقط مجموع را می‌گیرد
-      paid: Math.min(paid, total),
+      paid: Math.min(paidNow, total),
       discount: discount > 0 ? discount : undefined,
-      promiseDate: remainder > 0 && promise ? fromDateInput(promise) : undefined,
+      promiseDate: remainderNow > 0 && promise ? fromDateInput(promise) : undefined,
       // صفحه فقط برای فروش قرضی معنا دارد — فروش نقدی در دفتر قرض نمی‌نشیند
-      bookPage: remainder > 0 && bookPage.trim() ? bookPage.trim() : undefined
+      bookPage: remainderNow > 0 && bookPage.trim() ? bookPage.trim() : undefined
     }
     pendingRef.current = true
     setPending(true)
@@ -404,37 +406,63 @@ export function NewSaleModal({
       {products?.length === 0 && <p className="py-8 text-center text-slate-500">هنوز جنسی در گدام نیست. نخست جنس اضافه کنید.</p>}
       {search.trim() && products && matches.length === 0 && <p className="py-8 text-center text-slate-500">جنسی با این جستجو پیدا نشد.</p>}
       {quickProducts.length > 0 && !search.trim() && (
-        <>
-          <p className="mb-3 text-sm text-slate-500">اجناس موجود · مدل را انتخاب کنید، سپس سایز و رنگ</p>
-          <div className="sale-product-grid mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {quickProducts.map((e) => {
-              const inStock = e.vs.filter((v) => v.stockQty > 0)
-              const minPrice = Math.min(...inStock.map((v) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)))
-              return (
-                <button
-                  key={e.p.id}
-                  onClick={() => {
-                    setPickerFor(e.p.id!)
-                    setPickerMode(saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0 ? 'choice' : 'single')
-                    setHalfQtys({})
-                  }}
-                  className="sale-product-card"
-                >
-                  {e.p.photo ? (
-                    <img src={e.p.photo} alt={e.p.name} className="mb-3 h-28 w-full rounded-lg object-cover" />
-                  ) : (
-                    <span className="sale-product-placeholder mb-3 flex h-28 items-center justify-center rounded-lg bg-slate-50 text-3xl text-slate-400" aria-hidden="true">{e.p.name.slice(0, 2)}</span>
-                  )}
-                  <p className="sale-product-name">{e.p.name}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {fmtNum(inStock.length)} سایز · {fmtNum(e.stock)} جوړه
-                  </p>
-                  <p className="sale-product-price">{fmtMoney(minPrice)}</p>
-                </button>
-              )
-            })}
-          </div>
-        </>
+        <div className="sale-model-list mb-3" aria-label="اجناس موجود">
+          {quickProducts.map((e) => {
+            const vs = [...e.vs].sort((x, y) => x.color.localeCompare(y.color) || parseNum(x.size) - parseNum(y.size))
+            const byColor = new Map<string, Variant[]>()
+            for (const v of vs) byColor.set(v.color, [...(byColor.get(v.color) ?? []), v])
+            const inStock = vs.filter((v) => v.stockQty > 0)
+            const priceOf = (v: Variant) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)
+            const minPrice = Math.min(...inStock.map(priceOf))
+            const inCart = vs.reduce((n, v) => n + selectedQty(v.id!), 0)
+            const hasCartons = saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0
+            return (
+              <section key={e.p.id} className="sale-product-card sale-model-card" data-in-cart={inCart > 0} aria-label={e.p.name}>
+                <div className="sale-model-head">
+                  <div className="min-w-0">
+                    <p className="sale-product-name">{e.p.name}</p>
+                    <p className="sale-model-meta">{fmtNum(e.stock)} جوړه{inCart > 0 ? ` · ${fmtNum(inCart)} در سبد` : ''}</p>
+                  </div>
+                  <div className="sale-model-side">
+                    <p className="sale-product-price">{fmtMoney(minPrice)}</p>
+                    {hasCartons && <button type="button" className="sale-model-carton" onClick={() => { setPickerFor(e.p.id!); setPickerMode('choice'); setHalfQtys({}) }}>کارتن</button>}
+                  </div>
+                </div>
+                {[...byColor].map(([color, list]) => {
+                  const prices = new Set(list.map(priceOf))
+                  return (
+                    <div key={color} className="sale-model-color" role="group" aria-label={`رنگ ${color || 'بی‌رنگ'}`}>
+                      <p className="sale-model-color-name">{color || 'بی‌رنگ'}{prices.size === 1 && list.length > 0 && priceOf(list[0]) !== minPrice ? <span>{fmtMoney(priceOf(list[0]))}</span> : null}</p>
+                      <div className="sale-size-row">
+                        {list.map((v) => {
+                          const left = remainingQty(v)
+                          const mine = selectedQty(v.id!)
+                          return (
+                            <button
+                              key={v.id}
+                              type="button"
+                              disabled={left <= 0}
+                              data-low={left > 0 && left <= 2}
+                              data-in-cart={mine > 0}
+                              aria-label={`${e.p.name} ${v.size} ${v.color} — ${left > 0 ? `${fmtNum(left)} جوړه باقی` : 'ختم شده'} — ${fmtMoney(priceOf(v))}${mine ? ` — ${fmtNum(mine)} در سبد` : ''}`}
+                              onClick={(ev) => { flyToCart(ev.currentTarget, v.size); addLine(v) }}
+                              className="size-tile sale-size-tile"
+                            >
+                              {mine > 0 && <span className="size-tile-in-cart">{fmtNum(mine)}</span>}
+                              <b className="size-tile-size">{v.size}</b>
+                              <span className="size-tile-stock">{left > 0 ? fmtNum(left) : 'ختم'}</span>
+                              {prices.size > 1 && <span className="size-tile-price">{fmtNum(priceOf(v))}</span>}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </section>
+            )
+          })}
+        </div>
       )}
 
       {saleType === 'wholesale' &&
@@ -747,26 +775,53 @@ export function NewSaleModal({
       </div>}
       {showShipping && <ShippingEditor sale={{ date: Date.now(), saleType, customerId: customerId || undefined, customerName: customers?.find(c => c.id === customerId)?.name, lines, total, paid }} prepared={shipping} onPrepared={setShipping} onClose={() => setShowShipping(false)} />}
       </div>
-      <div data-empty={!lines.length} data-cart-target className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
+      <div data-empty={!lines.length} data-stage={stage} data-cart-target className="sale-commit-bar mt-3 flex items-center gap-2 border-t border-slate-200 bg-white p-3 pb-4">
         <div className="flex-1">
-          <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : 'قابل پرداخت'}</p>
+          <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : `${fmtNum(lines.reduce((n, l) => n + l.qty, 0))} جوړه · قابل پرداخت`}</p>
           <p className="text-2xl font-bold text-teal-700"><RollingNumber value={total} /></p>
           {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
         </div>
-        <button
-          onClick={hold}
-          disabled={!lines.length || pending}
-          className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800 active:bg-amber-100 disabled:opacity-40"
-        >
-          معطل
-        </button>
-        <button
-          onClick={stage === 'selection' ? () => changeStage('payment') : save}
-          disabled={!lines.length || pending || stockInvalid}
-          className="rounded-xl bg-[var(--action)] px-5 py-3 text-lg font-bold text-white disabled:opacity-40"
-        >
-          {pending ? 'در حال ثبت…' : stage === 'selection' ? 'ادامه به پرداخت' : 'ثبت فروش'}
-        </button>
+        {stage === 'selection' ? (
+          <div className="sale-quick-actions">
+            <button
+              type="button"
+              onClick={() => void save(true)}
+              disabled={!lines.length || pending || stockInvalid}
+              className="sale-cash-button"
+            >
+              {pending ? 'در حال ثبت…' : 'نقد'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPaidTouched(true); setPaidStr('0'); setShowCust(true); changeStage('payment') }}
+              disabled={!lines.length || pending || stockInvalid}
+              className="sale-credit-button"
+            >
+              قرض
+            </button>
+            <div className="sale-quick-secondary">
+              <button type="button" onClick={hold} disabled={!lines.length || pending}>معطل</button>
+              <button type="button" onClick={() => changeStage('payment')} disabled={!lines.length || pending || stockInvalid}>ادامه به پرداخت</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={hold}
+              disabled={!lines.length || pending}
+              className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-3 text-sm font-bold text-amber-800 active:bg-amber-100 disabled:opacity-40"
+            >
+              معطل
+            </button>
+            <button
+              onClick={() => void save()}
+              disabled={!lines.length || pending || stockInvalid}
+              className="rounded-xl bg-[var(--action)] px-5 py-3 text-lg font-bold text-white disabled:opacity-40"
+            >
+              {pending ? 'در حال ثبت…' : 'ثبت فروش'}
+            </button>
+          </>
+        )}
       </div>
       </section>
       </div>
@@ -908,50 +963,7 @@ export function NewSaleModal({
               </Modal>
             )
           }
-          const priceOf = (v: Variant) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)
-          const byColor = new Map<string, Variant[]>()
-          for (const v of vs) byColor.set(v.color, [...(byColor.get(v.color) ?? []), v])
-          return (
-            <Modal title={`انتخاب سایز — ${p.name}`} onClose={() => setPickerFor(null)}>
-              <div className="size-grid-head">
-                {p.photo && <img src={p.photo} alt="" />}
-                <span>یک لمس = یک جوړه در سبد. خانهٔ خط‌خورده ختم شده است.</span>
-              </div>
-              {[...byColor].map(([color, list]) => {
-                const prices = new Set(list.map(priceOf))
-                return (
-                  <section key={color} className="size-grid-group" aria-label={`رنگ ${color || 'بی‌رنگ'}`}>
-                    <h3 className="size-grid-color"><span>{color || 'بی‌رنگ'}</span>{prices.size === 1 && <span>{fmtMoney([...prices][0])}</span>}</h3>
-                    <div className="size-grid">
-                      {list.map((v) => {
-                        const left = remainingQty(v)
-                        const inCart = selectedQty(v.id!)
-                        return (
-                          <button
-                            key={v.id}
-                            disabled={left <= 0}
-                            aria-label={`${v.size} ${v.color} — ${left > 0 ? `${fmtNum(left)} جوړه باقی` : 'ختم شده'} — ${fmtMoney(priceOf(v))}${inCart ? ` — ${fmtNum(inCart)} در سبد` : ''}`}
-                            onClick={(e) => {
-                              flyToCart(e.currentTarget, v.size)
-                              addLine(v)
-                              setPickerFor(null)
-                            }}
-                            className="size-tile"
-                          >
-                            {inCart > 0 && <span className="size-tile-in-cart">{fmtNum(inCart)}</span>}
-                            <b className="size-tile-size">{v.size}</b>{' '}
-                            <span className="size-tile-color">{v.color}</span>{' '}
-                            <span className="size-tile-stock">{left > 0 ? `${fmtNum(left)} مانده` : 'ختم'}</span>
-                            {prices.size > 1 && <span className="size-tile-price">{fmtMoney(priceOf(v))}</span>}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </section>
-                )
-              })}
-            </Modal>
-          )
+          return null
         })()}
       </div>
     </Shell>
