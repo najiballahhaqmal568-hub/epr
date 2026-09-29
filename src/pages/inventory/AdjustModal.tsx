@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Product, type Variant, type AdjustReason } from '../../db'
 import { addAdjustment } from '../../lib/ops'
@@ -10,6 +11,7 @@ export function AdjustModal({ variant, product, onClose }: { variant: Variant; p
   const [qty, setQty] = useState('1')
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
+  const submit = useSubmitOnce()
 
   const live = useLiveQuery(() => db.variants.get(variant.id!), [variant.id])
   const v = live ?? variant
@@ -27,7 +29,7 @@ export function AdjustModal({ variant, product, onClose }: { variant: Variant; p
 
   async function save() {
     const n = parseNum(qty)
-    if (n < 0) return setError('عدد معتبر وارد کنید')
+    if (n < 0 || !Number.isInteger(n)) return setError('تعداد جوړه را عدد صحیح وارد کنید')
     let change: number
     if (reason === 'correction') {
       change = n - v.stockQty // qty = شمارش واقعی
@@ -91,7 +93,7 @@ export function AdjustModal({ variant, product, onClose }: { variant: Variant; p
         <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
       {error && <p className="mb-2 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700" role="alert">{error}</p>}
-      <PrimaryBtn onClick={save}>ثبت تعدیل</PrimaryBtn>
+      <PrimaryBtn onClick={() => void submit.run(save)} disabled={submit.busy}>ثبت تعدیل</PrimaryBtn>
 
       {history && history.length > 0 && (
         <>

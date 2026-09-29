@@ -11,6 +11,7 @@ import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
 import NewExpenseModal from '../src/pages/expenses/NewExpenseModal'
+import AdjustModal from '../src/pages/inventory/AdjustModal'
 import ExpenseCreditors from '../src/pages/expenses/ExpenseCreditors'
 import PartnersCard from '../src/pages/reports/PartnersCard'
 import DailyExpenseChecklist from '../src/pages/expenses/DailyExpenseChecklist'
@@ -280,6 +281,48 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('هیچ خریدی ثبت نشد', await db.purchases.count(), 0)
       await addPurchase({ date: Date.now(), supplierId: sId, supplierName: 'تأمین‌کننده', lines: [line], total: 1000, paid: 1000 })
       eq('پرداخت پوره هنوز کار می‌کند', await cashBalance(), 4000)
+    }
+  },
+  {
+    name: 'بازبینی کامل — دو لمس پشت‌سرهم «ذخیره» فقط یک سند می‌سازد',
+    run: async () => {
+      await seedCash(5000)
+      const catId = await db.expenseCategories.add({ name: 'نان' }) as number
+      const host = document.createElement('div')
+      document.body.append(host)
+      const root = createRoot(host)
+      try {
+        root.render(createElement(NewExpenseModal, { onClose: () => undefined }))
+        await waitUntil(() => Boolean(host.querySelector('select')) && Boolean(Array.from(host.querySelectorAll('option')).find((o) => o.value === String(catId))))
+        chooseSelect(host.querySelector('select')!, String(catId))
+        const amount = Array.from(host.querySelectorAll('label')).find((l) => l.textContent?.includes('مبلغ *'))!.querySelector('input')!
+        fillInput(amount, '300')
+        await new Promise((r) => setTimeout(r, 50))
+        const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ذخیره')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      } finally { root.unmount(); host.remove() }
+      eq('یک مصرف ثبت شد، نه دو', (await db.expenses.toArray()).filter((e) => !e.deleted).length, 1)
+      eq('صندوق فقط یک بار کم شد', await cashBalance(), 4700)
+
+      const vId = await makeVariant({ purchasePrice: 100 })
+      await setOpeningStock(vId, 5)
+      const variant = (await db.variants.get(vId))!
+      const product = (await db.products.get(variant.productId))!
+      const adjHost = document.createElement('div')
+      document.body.append(adjHost)
+      const adjRoot = createRoot(adjHost)
+      try {
+        adjRoot.render(createElement(AdjustModal, { variant, product, onClose: () => undefined }))
+        await waitUntil(() => Boolean(Array.from(adjHost.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ثبت تعدیل')))
+        const save = Array.from(adjHost.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'ثبت تعدیل')!
+        save.click(); save.click()
+        await new Promise((r) => setTimeout(r, 400))
+      } finally { adjRoot.unmount(); adjHost.remove() }
+      eq('داغمه یک بار: موجودی ۴', await stockOf(vId), 4)
+      // تعداد جوړه عدد صحیح است — ۱٫۵ جوړه وجود ندارد
+      await throws('تعدیل با کسر رد می‌شود', () => addAdjustment({ date: Date.now(), variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qtyChange: 1.5, reason: 'correction' }))
+      eq('موجودی دست نخورد', await stockOf(vId), 4)
     }
   },
   {

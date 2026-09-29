@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Variant } from '../../db'
 import { applyStocktake, type StocktakeResult } from '../../lib/ops'
@@ -18,6 +19,8 @@ const SCOPES: { id: Scope; label: string }[] = [
 
 export function StocktakeModal({ onClose }: { onClose: () => void }) {
   const [counts, setCounts] = useState<Record<number, string>>({})
+  const submit = useSubmitOnce()
+  const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
   const [scope, setScope] = useState<Scope>('lastMonth')
   const [phase, setPhase] = useState<'counting' | 'confirm' | 'done'>('counting')
@@ -67,9 +70,14 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
   const productName = (v: Variant) => products?.find((p) => p.id === v.productId)?.name ?? ''
 
   async function apply() {
-    const r = await applyStocktake(diffs.map((d) => ({ variantId: d.v.id!, counted: d.counted })))
-    setResult(r)
-    setPhase('done')
+    setError('')
+    try {
+      const r = await applyStocktake(diffs.map((d) => ({ variantId: d.v.id!, counted: d.counted })))
+      setResult(r)
+      setPhase('done')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   return (
@@ -137,6 +145,7 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
         </>
       )}
 
+      {error && <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p>}
       {phase === 'confirm' && (
         <>
           <p className="mb-3 text-base font-bold text-slate-800">نتیجهٔ شمارش — قبل از ثبت بررسی کنید</p>
@@ -170,7 +179,7 @@ export function StocktakeModal({ onClose }: { onClose: () => void }) {
             <button onClick={() => setPhase('counting')} className="min-h-[44px] flex-1 rounded-xl bg-slate-100 px-3 font-bold text-slate-700">
               برگشت
             </button>
-            <button onClick={apply} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
+            <button onClick={() => void submit.run(apply)} disabled={submit.busy} className="min-h-[44px] flex-1 rounded-xl bg-blue-700 px-3 font-bold text-white active:bg-blue-800">
               ثبت شمارش
             </button>
           </div>

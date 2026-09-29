@@ -1,4 +1,5 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useState } from 'react'
 import { db, type PurchaseLine, type Product, type Variant } from '../../db'
 import { addVariant } from '../../lib/ops'
@@ -26,6 +27,7 @@ export function CartonWizardModal({
   const isNew = !product
   const first = variants[0]
   const [step, setStep] = useState(1)
+  const submit = useSubmitOnce()
   const [name, setName] = useState(defaults?.name ?? product?.name ?? '')
   const [color, setColor] = useState(defaults?.color ?? first?.color ?? '')
   const [cost, setCost] = useState(defaults?.cost || String(first?.purchasePrice || ''))
@@ -284,7 +286,7 @@ export function CartonWizardModal({
             بعدی
           </button>
         ) : (
-          <button onClick={() => void confirm()} className="flex-1 rounded-xl bg-[var(--action)] py-3 font-bold text-white active:bg-[var(--action-pressed)]">
+          <button onClick={() => void submit.run(confirm)} disabled={submit.busy} className="flex-1 rounded-xl bg-[var(--action)] py-3 font-bold text-white active:bg-[var(--action-pressed)]">
             ✓ افزودن به خرید
           </button>
         )}

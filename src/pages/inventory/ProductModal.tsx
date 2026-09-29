@@ -1,4 +1,5 @@
 import DuplicateNameHint from '../../components/DuplicateNameHint'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import ProductPhotoPicker from './ProductPhotoPicker'
 import { useState } from 'react'
 import { db, type Product, type Variant } from '../../db'
@@ -23,6 +24,7 @@ export function ProductModal({
   onClose: () => void
 }) {
   const [name, setName] = useState(product?.name ?? draft?.name ?? '')
+  const submit = useSubmitOnce()
   const [brand, setBrand] = useState(product?.brand ?? draft?.brand ?? '')
   const [category, setCategory] = useState(product?.category ?? '')
   const [photo, setPhoto] = useState<string | undefined>(product?.photo ?? draft?.photo)
@@ -335,7 +337,7 @@ export function ProductModal({
       </section>
 
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-      <PrimaryBtn onClick={save}>ذخیره</PrimaryBtn>
+      <PrimaryBtn onClick={() => void submit.run(save)} disabled={submit.busy}>ذخیره</PrimaryBtn>
       {product && (
         <button className="mt-3 w-full text-sm text-red-600" onClick={remove}>
           حذف بوت

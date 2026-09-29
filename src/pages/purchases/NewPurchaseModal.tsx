@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type PurchaseLine, type Product } from '../../db'
 import { addPurchase } from '../../lib/ops'
@@ -12,6 +13,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<PurchaseLine[]>([])
   const [paidStr, setPaidStr] = useState('')
   const [paidTouched, setPaidTouched] = useState(false)
+  const submit = useSubmitOnce()
   const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [received, setReceived] = useState(true)
@@ -258,8 +260,8 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
           {remainder > 0 && <p className="text-xs font-bold text-red-600">باقی: {fmtMoney(remainder)}</p>}
         </div>
         <button
-          onClick={save}
-          disabled={!lines.length || !supplierId || remainder < 0 || paid < 0}
+          onClick={() => void submit.run(save)}
+          disabled={!lines.length || !supplierId || remainder < 0 || paid < 0 || submit.busy}
           className="primary-button primary-button-inline py-3 text-lg"
         >
           ثبت خرید

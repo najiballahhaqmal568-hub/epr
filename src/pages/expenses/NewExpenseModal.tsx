@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Expense, type ExpenseCategory } from '../../db'
 import { addExpense, addPartnerWithdrawal, deleteExpense } from '../../lib/ops'
@@ -24,6 +25,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
 
   const categories = useLiveQuery(() => db.expenseCategories.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const partners = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'partner').toArray(), [])
+  const submit = useSubmitOnce()
   const creditors = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'expenseCreditor').toArray(), [])
 
   const type = mode === 'partner' ? 'withdrawal' : mode
@@ -228,7 +230,7 @@ export function NewExpenseModal({ onClose, preset }: { onClose: () => void; pres
         <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
       </Field>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-      <PrimaryBtn onClick={save}>ذخیره</PrimaryBtn>
+      <PrimaryBtn onClick={() => void submit.run(save)} disabled={submit.busy}>ذخیره</PrimaryBtn>
     </Modal>
   )
 }

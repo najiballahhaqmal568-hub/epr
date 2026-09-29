@@ -2606,6 +2606,8 @@ export async function renameCategory(categoryId: number, newName: string): Promi
 /** تعدیل گدام با دلیل (داغمه/مفقود/تصحیح) */
 export async function addAdjustment(adj: Adjustment): Promise<number> {
   if (adj.goodsReceiptChild) throw new Error(GOODS_RECEIPT_ERROR)
+  // جوړه نیمه ندارد: «۱٫۵» موجودی را کسری می‌ساخت
+  if (!Number.isInteger(adj.qtyChange)) throw new Error('تعداد جوړه باید عدد صحیح باشد')
   return db.transaction('rw', db.adjustments, db.variants, async () => {
     const v = await db.variants.get(adj.variantId)
     if (!v) throw new Error('جنس یافت نشد')
@@ -2908,6 +2910,7 @@ export async function applyStocktake(entries: { variantId: number; counted: numb
     let fixed = 0
     let valueDiff = 0
     for (const e of entries) {
+      if (!Number.isInteger(e.counted) || e.counted < 0) throw new Error('شمارش هر سایز باید عدد صحیح و مثبت باشد')
       const v = await db.variants.get(e.variantId)
       if (!v || v.deleted) continue
       const diff = e.counted - v.stockQty
