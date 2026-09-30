@@ -71,7 +71,7 @@ try {
   assert.match(heroText, /▲ ۷٬۰۰۰ ؋ مفاد/)
   assert.match(heroText, /مفاد فروش ۸٬۰۰۰ ؋/)
   assert.match(heroText, /مصرف ۱٬۰۰۰ ؋/)
-  assert.match(heroText, /بزرگ‌ترین مصرف «کسر صندوق» است \(۶۰۰ ؋\)/)
+  assert.match(heroText, /بزرگ‌ترین مصرف این ماه «کسر صندوق» است \(۶۰۰ ؋\)/)
   assert.doesNotMatch(heroText, /صبح بخیر|روز را ببندید/)
 
   // today strip: sales 3,000 + 6,000 + 3,000 = 12,000; 4 pairs; cash 3,000 + 1,000 + 3,000 = 7,000

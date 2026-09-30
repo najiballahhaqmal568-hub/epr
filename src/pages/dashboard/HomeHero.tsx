@@ -7,7 +7,9 @@ import type { ExpenseAlert } from '../../lib/profit'
 /**
  * بالای صفحهٔ خانه دو چیز می‌آید:
  *  • TimePrompt — یک کارت روشن که فقط صبح (صندوق را بشمارید) و شام (روز را ببندید) می‌آید.
- *  • HomeHero — کارت تیرهٔ «این ماه» که همیشه سر جایش است. مفاد یا زیان ماه هیچ ساعتی پنهان نمی‌شود.
+ *  • HomeHero — کارت تیره که همیشه سر جایش است: اول مفاد یا زیان «امسال» (از ۱ حمل تا امروز) — یک ماه
+ *    با مصرف‌های سنگین ممکن است زیان نشان دهد در حالی که سال در مفاد است؛ مالک اول سال را می‌بیند —
+ *    بعد «این ماه» با مقایسه، هشدار و هدف ماه.
  * کارگر مفاد نمی‌بیند؛ برایش فقط فروش امروز می‌آید.
  * هر عددی که اینجا دیده می‌شود از همان حساب‌های صفحه می‌آید؛ هیچ جمله‌ای حدس نیست.
  */
@@ -20,6 +22,11 @@ export interface HeroProps {
   todayTotal: number
   todayCount: number
   todayCash: number
+  /** از ۱ حمل تا امروز — همان profitSummary و همان مرز «امسال» در راپورها */
+  yearNet: number
+  yearProfit: number
+  yearExpenses: number
+  onOpenYear: () => void
   monthNet: number
   monthProfit: number
   monthExpenses: number
@@ -75,7 +82,7 @@ function Shell({ tag, children }: { tag: string; children: ReactNode }) {
 
 export default function HomeHero(p: HeroProps) {
   if (p.state === 'loading') {
-    return <Shell tag="این ماه"><Skeleton rows={3} label="در حال خواندن حساب ماه…" /></Shell>
+    return <Shell tag="امسال تا امروز"><Skeleton rows={3} label="در حال خواندن حساب سال…" /></Shell>
   }
 
   if (p.state === 'today') {
@@ -95,39 +102,54 @@ export default function HomeHero(p: HeroProps) {
 
   // month
   const loss = p.monthNet < 0
-  const top = Math.max(p.monthProfit, p.monthExpenses, 1)
+  const yearLoss = p.yearNet < 0
+  const top = Math.max(p.yearProfit, p.yearExpenses, 1)
   const bar = (v: number) => `${Math.max(0, Math.min(100, (v / top) * 100))}%`
   const facts: string[] = []
   // وقتی هشدار هست، متنش خودش «بیشترین مصرف» را می‌گوید؛ جملهٔ جدا نمی‌آید تا حرف دوبار نیاید
-  if (!p.alert && p.topCategory) facts.push(`بزرگ‌ترین مصرف «${p.topCategory.name}» است (${fmtMoney(p.topCategory.amount)}).`)
+  if (!p.alert && p.topCategory) facts.push(`بزرگ‌ترین مصرف این ماه «${p.topCategory.name}» است (${fmtMoney(p.topCategory.amount)}).`)
   if (p.pendingExpenses > 0) facts.push(`${fmtNum(p.pendingExpenses)} روز مصرف ثبت نشده.`)
   // فقط یک قاعدهٔ اپ را می‌گوید، نه حدس دربارهٔ دلیل عدد این ماه
   if (p.topCategory?.name === 'کسر صندوق' && p.pendingExpenses > 0) facts.push('مصرفی که ثبت نشود، هنگام شمارش نقد «کسر صندوق» دیده می‌شود.')
   return (
-    <Shell tag="این ماه تا امروز">
+    <Shell tag="امسال تا امروز · از ۱ حمل">
+      <button
+        type="button"
+        aria-label={`مفاد خالص امسال ${fmtMoney(p.yearNet)} — از کجا آمد`}
+        onClick={p.onOpenYear}
+        className="flex flex-col gap-3.5 text-right"
+      >
+        <span className="text-[1.9375rem] font-extrabold leading-snug">
+          <span className={yearLoss ? 'text-[#FFB0A3]' : 'text-[#7FD8B0]'}>{yearLoss ? '▼' : '▲'} <RollingNumber value={Math.abs(p.yearNet)} flash={ON_DARK} /></span>{' '}{yearLoss ? 'زیان' : 'مفاد'}
+        </span>
+        <span className="flex flex-col gap-2.5">
+          <span className="flex flex-col gap-1.5">
+            <span className="flex justify-between text-sm text-[#DCE3F3]"><span>مفاد فروش امسال</span><b>{fmtMoney(p.yearProfit)}</b></span>
+            <span className="block h-2.5 rounded-full bg-white/10"><span className="block h-2.5 rounded-full bg-[#7FD8B0]" style={{ width: bar(p.yearProfit) }} /></span>
+          </span>
+          <span className="flex flex-col gap-1.5">
+            <span className="flex justify-between text-sm text-[#DCE3F3]"><span>مصرف امسال</span><b>{fmtMoney(p.yearExpenses)}</b></span>
+            <span className="block h-2.5 rounded-full bg-white/10"><span className="block h-2.5 rounded-full bg-[#FF9C8C]" style={{ width: bar(p.yearExpenses) }} /></span>
+          </span>
+        </span>
+      </button>
       <button
         type="button"
         ref={p.monthRef}
         aria-label={`مفاد خالص این ماه ${fmtMoney(p.monthNet)} — از کجا آمد`}
         onClick={p.onOpenMonth}
-        className="flex flex-col gap-3.5 text-right"
+        className="flex flex-col gap-3 border-t border-white/15 pt-3.5 text-right"
       >
-        <span className="text-[1.9375rem] font-extrabold leading-snug">
-          <span className={loss ? 'text-[#FFB0A3]' : 'text-[#7FD8B0]'}>{loss ? '▼' : '▲'} <RollingNumber value={Math.abs(p.monthNet)} flash={ON_DARK} /></span>{' '}{loss ? 'زیان' : 'مفاد'}
-        </span>
-        <span className="flex flex-col gap-2.5">
-          <span className="flex flex-col gap-1.5">
-            <span className="flex justify-between text-sm text-[#DCE3F3]"><span>مفاد فروش</span><b>{fmtMoney(p.monthProfit)}</b></span>
-            <span className="block h-2.5 rounded-full bg-white/10"><span className="block h-2.5 rounded-full bg-[#7FD8B0]" style={{ width: bar(p.monthProfit) }} /></span>
-          </span>
-          <span className="flex flex-col gap-1.5">
-            <span className="flex justify-between text-sm text-[#DCE3F3]"><span>مصرف</span><b>{fmtMoney(p.monthExpenses)}</b></span>
-            <span className="block h-2.5 rounded-full bg-white/10"><span className="block h-2.5 rounded-full bg-[#FF9C8C]" style={{ width: bar(p.monthExpenses) }} /></span>
+        <span className="flex items-baseline justify-between gap-2">
+          <span className="text-[0.9375rem] font-bold text-[#DCE3F3]">این ماه تا امروز</span>
+          <span className="text-xl font-extrabold">
+            <span className={loss ? 'text-[#FFB0A3]' : 'text-[#7FD8B0]'}>{loss ? '▼' : '▲'} <RollingNumber value={Math.abs(p.monthNet)} flash={ON_DARK} /></span>{' '}{loss ? 'زیان' : 'مفاد'}
           </span>
         </span>
+        <span className="text-sm text-[#DCE3F3]">مفاد فروش {fmtMoney(p.monthProfit)} · مصرف {fmtMoney(p.monthExpenses)}</span>
         {p.alert && (
           <span className="block rounded-2xl bg-white/10 px-3.5 py-3 text-[0.9375rem] leading-8 text-[#DCE3F3]">
-            <b className={`block ${p.alert.level === 'danger' ? 'text-[#FFB0A3]' : 'text-[#F3C46B]'}`}>{p.alert.level === 'danger' ? 'مصرف از مفاد بیشتر شده' : 'مصرف این ماه بالا رفته'}</b>
+            <b className={`block ${p.alert.level === 'danger' ? 'text-[#FFB0A3]' : 'text-[#F3C46B]'}`}>{p.alert.level === 'danger' ? 'مصرف این ماه از مفاد بیشتر شده' : 'مصرف این ماه بالا رفته'}</b>
             {p.alert.text}
           </span>
         )}

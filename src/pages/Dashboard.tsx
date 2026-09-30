@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, type Customer, type Sale, type Variant } from '../db'
 import { netWorth } from '../lib/networth'
-import { addCalendarDays, fmtDayLabel, fmtMoney, fmtNum, startOfDay, startOfMonth } from '../lib/format'
+import { addCalendarDays, fmtDayLabel, fmtMoney, fmtNum, startOfDay, startOfMonth, startOfYear } from '../lib/format'
 import { daysLeftInMonth, expenseAlert, profitSummary } from '../lib/profit'
 import MonthProfitModal from './dashboard/MonthProfitModal'
 import DailyCloseModal from './dashboard/DailyCloseModal'
@@ -93,14 +93,17 @@ export default function Dashboard({
   // مفاد خالص این ماه و همین وقت ماه گذشته — همان فورمول راپورها (lib/profit.ts)
   const monthStart = startOfMonth()
   const prevStart = startOfMonth(monthStart - 1)
+  // امسال = از ۱ حمل تا امروز — همان مرز «امسال» در راپورها، پس هر دو یک عدد نشان می‌دهند
+  const yearStart = startOfYear()
+  const loadFrom = Math.min(prevStart, yearStart)
   const month = useLiveQuery(async () => {
     const [sales, returns, expenses] = await Promise.all([
-      db.sales.where('date').aboveOrEqual(prevStart).toArray(),
-      db.returns.where('date').aboveOrEqual(prevStart).toArray(),
-      db.expenses.where('date').aboveOrEqual(prevStart).toArray()
+      db.sales.where('date').aboveOrEqual(loadFrom).toArray(),
+      db.returns.where('date').aboveOrEqual(loadFrom).toArray(),
+      db.expenses.where('date').aboveOrEqual(loadFrom).toArray()
     ])
     return { sales, returns, expenses }
-  }, [prevStart])
+  }, [loadFrom])
 
   const variantMap = new Map<number, Variant>()
   variants?.forEach((variant) => variantMap.set(variant.id!, variant))
@@ -141,6 +144,7 @@ export default function Dashboard({
     variants: variants ?? [], readyTradeUuids: directReview.readyTradeUuids, readyReceiptUuids: receiptReview.readyReceiptUuids
   })
   const thisMonth = summaryFor(monthStart, Number.MAX_SAFE_INTEGER)
+  const thisYear = summaryFor(yearStart, Number.MAX_SAFE_INTEGER)
   const lastMonthSoFar = summaryFor(prevStart, prevEnd)
   const monthAlert = !isStaff && month ? expenseAlert(thisMonth, lastMonthSoFar, fmtMoney) : null
   const monthChange = thisMonth.netProfit - lastMonthSoFar.netProfit
@@ -211,6 +215,10 @@ export default function Dashboard({
         todayTotal={todayTotal}
         todayCount={todaySales.length}
         todayCash={todayCash}
+        yearNet={thisYear.netProfit}
+        yearProfit={thisYear.grossProfit}
+        yearExpenses={thisYear.businessExpenses}
+        onOpenYear={() => goTo('reports-year')}
         monthNet={thisMonth.netProfit}
         monthProfit={thisMonth.grossProfit}
         monthExpenses={thisMonth.businessExpenses}
