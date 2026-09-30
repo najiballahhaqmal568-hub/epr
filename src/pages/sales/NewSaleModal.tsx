@@ -216,6 +216,25 @@ export function NewSaleModal({
   const lineCost = (l: SaleLine) => variants?.find((v) => v.id === l.variantId)?.purchasePrice ?? 0
   /** Loss per pair when the price is under cost; 0 when cost is unknown. */
   const lineLoss = (l: SaleLine) => (lineCost(l) > 0 ? lossPerPair(l.unitPrice, lineCost(l)) : 0)
+  /** پرچون/عمده: قیمت هر جوړه از قیمت همان نوع دوباره خوانده می‌شود */
+  const chooseSaleType = (t: 'retail' | 'wholesale') => {
+    setSaleType(t)
+    setLines((ls) =>
+      ls.map((l) => {
+        const v = variants?.find((v) => v.id === l.variantId)
+        return v ? { ...l, unitPrice: t === 'retail' ? v.retailPrice : v.wholesalePrice } : l
+      })
+    )
+  }
+  const saleTypeToggle = () => (
+    <div className="segmented mb-4" role="group" aria-label="نوع فروش">
+      {(['retail', 'wholesale'] as const).map((t) => (
+        <button key={t} type="button" aria-pressed={saleType === t} onClick={() => chooseSaleType(t)} className="font-bold">
+          {t === 'retail' ? 'پرچون' : 'عمده'}
+        </button>
+      ))}
+    </div>
+  )
   const setLinePrice = (i: number, text: string) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(text) } : x)))
   /** هشدار فروش زیر قیمت خرید — کارگر قیمت خرید را نمی‌بیند، فقط هشدار را */
   const lossWarning = (l: SaleLine) => {
@@ -353,26 +372,7 @@ export function NewSaleModal({
       <div className={embedded ? 'sale-workspace' : ''} data-stage={stage}>
       <section className="sale-finder" hidden={stage !== 'selection'}>
       <h2 className="mb-4 text-xl font-bold">انتخاب جنس</h2>
-      <div className="segmented mb-4" role="group" aria-label="نوع فروش">
-        {(['retail', 'wholesale'] as const).map((t) => (
-          <button
-            key={t}
-            aria-pressed={saleType === t}
-            onClick={() => {
-              setSaleType(t)
-              setLines((ls) =>
-                ls.map((l) => {
-                  const v = variants?.find((v) => v.id === l.variantId)
-                  return v ? { ...l, unitPrice: t === 'retail' ? v.retailPrice : v.wholesalePrice } : l
-                })
-              )
-            }}
-            className="font-bold"
-          >
-            {t === 'retail' ? 'پرچون' : 'عمده'}
-          </button>
-        ))}
-      </div>
+      {saleTypeToggle()}
 
       <Field label="جستجوی جنس">
         <div className="relative"><span className="pointer-events-none absolute right-3 top-3 text-slate-400"><Icon name="search" /></span><input
@@ -578,6 +578,7 @@ export function NewSaleModal({
       <div hidden={stage !== 'payment'}>
       <div className="sale-payment-summary"><div><span>{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه · {saleType === 'retail' ? 'پرچون' : 'عمده'}</span><p className="mt-1 font-bold text-slate-800">{selectedCustomer?.name ?? (remainder > 0 ? 'مشتری را انتخاب کنید' : 'مشتری نقدی')}</p></div><div><span className="block text-xs">قابل پرداخت</span><strong>{fmtMoney(total)}</strong></div></div>
       {/* قیمت هر جوړه همین‌جا هم عوض می‌شود — در تیلفون سبد زیر همهٔ جنس‌ها است و از نوار «نقد/قرض» مستقیم به اینجا می‌آییم */}
+      {saleTypeToggle()}
       <div className="sale-payment-lines mb-3">
         {lines.map((l, i) => (
           <div key={l.variantId} className="border-b border-slate-100 py-2 last:border-0">
