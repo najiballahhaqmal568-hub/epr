@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { itemsLabel } from '../../lib/ledger'
-import { db, type Customer } from '../../db'
+import { db, saleCashPaid, type Customer } from '../../db'
+import { saleCustomerCredit } from '../../lib/salesFigures'
 import { fmtMoney, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
 import { commercialSaleLines } from '../../lib/commercialLines'
@@ -32,12 +33,12 @@ export function FamilyDetail({
   type Ev = { date: number; who: string; label: string; sub?: string; amount: number; red: boolean }
   const events: Ev[] = []
   sales?.forEach((s) => {
-    const rem = s.total - s.paid
+    const rem = saleCustomerCredit(s)
     events.push({
       date: s.date,
       who: nameOf.get(s.customerId!) ?? '',
       label: itemsLabel(commercialSaleLines(s)),
-      sub: `مجموع ${fmtMoney(s.total)} · نقد ${fmtMoney(s.paid)}`,
+      sub: `مجموع ${fmtMoney(s.total)} · نقد ${fmtMoney(saleCashPaid(s))}`,
       amount: rem,
       red: rem > 0
     })

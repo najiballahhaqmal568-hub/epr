@@ -112,7 +112,7 @@ import { ordinaryCustomerCollections } from '../src/lib/directTradeReports'
 import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
-import { saleCustomerCredit, summarizeSales } from '../src/lib/salesFigures'
+import { saleCustomerCredit, saleSettledByAccount, summarizeSales } from '../src/lib/salesFigures'
 import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment } from '../src/lib/checkout'
 import { saleDraftTotal } from '../src/lib/saleDrafts'
 import { kindFigures, per100, salesBuckets, waterfall } from '../src/lib/reportFigures'
@@ -5400,6 +5400,14 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       // نشان می‌دهد که فرمول قدیمی صفحه‌ها (کل − نقد) برای فروش تسویه عدد غلط می‌داد
       eq('فرمول قدیمی برای فروش تسویه «قرض ۱٬۸۰۰» نشان می‌داد', settlement.total - saleCashPaid(settlement), 1800)
       eq('قرض واقعی مشتری برای فروش تسویه صفر است', saleCustomerCredit(settlement), 0)
+
+      // رسید و فاکتور «نقد» را از saleCashPaid می‌خوانند و بخش تسویه را جدا می‌نویسند: جمع نقد + قرض + تسویه = مجموع
+      for (const sale of sales) {
+        eq(`نقد + قرض + تسویه = مجموع (فروش ${sale.total})`, saleCashPaid(sale) + saleCustomerCredit(sale) + saleSettledByAccount(sale), sale.total)
+      }
+      eq('تسویهٔ قرض‌دهنده ۱٬۸۰۰ است، نه نقد', saleSettledByAccount(settlement), 1800)
+      eq('و نقدش صفر است (رسید قدیمی «نقد ۱٬۸۰۰» می‌نوشت)', saleCashPaid(settlement), 0)
+      eq('فروش عادی تسویه ندارد', sales.filter((x) => !x.lenderAction).reduce((n, x) => n + saleSettledByAccount(x), 0), 0)
 
       const f = summarizeSales(sales)
       eq('تعداد فروش', f.count, 3)

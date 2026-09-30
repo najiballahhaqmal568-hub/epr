@@ -18,6 +18,14 @@ export function saleCustomerCredit(sale: Sale): number {
   return sale.directTrade ? 0 : saleCreditAmount(sale)
 }
 
+/**
+ * بخشی از فروش که نه نقد آمد نه قرض شد: کفشی که بابت تسویهٔ حساب قرض‌دهنده یا طلبکار مصرف داده شد.
+ * روی رسید و فاکتور جدا نوشته می‌شود تا «نقد» و «قرض» چیزی جز پولِ واقعی نشان ندهند.
+ */
+export function saleSettledByAccount(sale: Sale): number {
+  return Math.max(0, sale.total - saleCashPaid(sale) - saleCreditAmount(sale))
+}
+
 export function salePairs(sale: Sale): number {
   return commercialSaleLines(sale).reduce((sum, line) => sum + line.qty, 0)
 }

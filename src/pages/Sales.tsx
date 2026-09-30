@@ -5,7 +5,8 @@ import { directFeatureEnabled } from '../lib/directTradeState'
 import DirectTradeForm from './sales/direct/DirectTradeForm'
 import DirectTradeDetail from './sales/direct/DirectTradeDetail'
 import DirectTradeEnable from './sales/direct/DirectTradeEnable'
-import { accessFlags, db, type Sale } from '../db'
+import { accessFlags, db, saleCashPaid, type Sale } from '../db'
+import { saleCustomerCredit, saleSettledByAccount } from '../lib/salesFigures'
 import { deleteSale, deleteSaleImpact } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { clearWorkingSale, readWorkingSale, deleteSaleDraft, readSaleDrafts, saleDraftTotal, type SaleDraft } from '../lib/saleDrafts'
@@ -224,7 +225,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         </div>
       )}
       {view === 'list' && <SaleHistory>{(s) => {
-        const remainder = s.total - s.paid
+        const remainder = saleCustomerCredit(s)
         return (
             <button key={s.id} onClick={() => s.directTrade ? setDirectDetail(s.directTrade.uuid) : s.goodsReceiptChild ? setGoodsReceiptDetail(s.goodsReceiptChild.receiptUuid) : setDetail(s)} className="sale-history-row" aria-label={`جزئیات فروش ${s.customerName || 'مشتری نقدی'} ${fmtMoney(s.total)}`}>
             <div className="sale-history-row-heading">
@@ -268,7 +269,7 @@ export default function Sales({ isStaff, openNew = false, pending = false, onPen
         <div className="doc-paper-brand"><b>اتل</b><span>فروشگاه اتل · سند فروش {fmtNum(detail.id ?? 0)}</span></div>
         <div className="sale-document-heading"><strong>{detail.customerName || 'مشتری نقدی'}</strong><p>{fmtDate(detail.date)} · {detail.saleType === 'retail' ? 'پرچون' : 'عمده'}</p></div>
         <section aria-label="اجناس فروش" className="sale-detail-goods">{detail.lines.map((line, index) => <div key={index}><span>{line.productName} {line.size} {line.color}<small>{fmtNum(line.qty)} × {fmtMoney(line.unitPrice)}</small></span><strong>{fmtMoney(line.qty * line.unitPrice)}</strong></div>)}</section>
-        <div className="sale-document-totals"><p><span>مجموع اجناس</span><strong>{fmtMoney(detail.total + (detail.discount ?? 0))}</strong></p>{(detail.discount ?? 0) > 0 && <p><span>تخفیف</span><span>{fmtMoney(detail.discount!)}</span></p>}<p className="sale-document-net"><span>قابل پرداخت</span><strong>{fmtMoney(detail.total)}</strong></p><p><span>دریافتی</span><span>{fmtMoney(detail.paid)}</span></p>{detail.total > detail.paid && <p className="sale-status-debt"><span>قرض</span><strong>{fmtMoney(detail.total - detail.paid)}</strong></p>}{detail.bookPage && <p><span>صفحهٔ دفتر</span><span>{detail.bookPage}</span></p>}</div>
+        <div className="sale-document-totals"><p><span>مجموع اجناس</span><strong>{fmtMoney(detail.total + (detail.discount ?? 0))}</strong></p>{(detail.discount ?? 0) > 0 && <p><span>تخفیف</span><span>{fmtMoney(detail.discount!)}</span></p>}<p className="sale-document-net"><span>قابل پرداخت</span><strong>{fmtMoney(detail.total)}</strong></p><p><span>دریافتی</span><span>{fmtMoney(saleCashPaid(detail))}</span></p>{saleSettledByAccount(detail) > 0 && <p><span>تسویه با حساب (کفش)</span><span>{fmtMoney(saleSettledByAccount(detail))}</span></p>}{saleCustomerCredit(detail) > 0 && <p className="sale-status-debt"><span>قرض</span><strong>{fmtMoney(saleCustomerCredit(detail))}</strong></p>}{detail.bookPage && <p><span>صفحهٔ دفتر</span><span>{detail.bookPage}</span></p>}</div>
         </div>
         <div className="sale-document-actions"><button className="primary-button" onClick={() => { setReceiptFor(detail); setDetail(null) }}>رسید</button><button className="sale-secondary-action" onClick={() => { setInvoiceFor(detail); setDetail(null) }}>فاکتور</button></div>
         <SaleShipping sale={detail} />
