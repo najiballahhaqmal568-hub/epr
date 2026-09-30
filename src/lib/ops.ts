@@ -372,6 +372,22 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
  * مبلغ کل مساوی فی جوړه بین همهٔ جوړه‌های آن خریدها پخش و در قیمت تمام‌شده می‌نشیند.
  * اگر قبلاً مصرفی ثبت شده باشد، مبلغ نو روی آن جمع می‌شود.
  */
+/**
+ * هر خرید فقط یک صرافِ ثبت‌شده دارد (landingSarrafId). صرافِ دوم روی همان خرید، طلبِ اولی را در
+ * دفتر جا می‌گذارد ولی بازسازی از روی سند همه را به صرافِ آخر می‌بندد — دو گوشی دو عدد می‌سازند.
+ * پس تا وقتی چیزی به صرافِ اول بدهکاریم، صرافِ دیگر رد می‌شود.
+ */
+function assertSameSarraf(p: Purchase, sarrafId: number): void {
+  if (landingSarrafOwed(p) > 0 && p.landingSarrafId !== undefined && p.landingSarrafId !== sarrafId) {
+    throw new Error(`مصارف رسیدن این خرید به «${p.landingSarrafName ?? 'صرافِ دیگر'}» ثبت شده؛ برای صرافِ دیگر جداگانه ثبت نمی‌شود. با همان صراف اصلاح کنید یا مبلغ را «نقد» یا «بعداً» بگیرید.`)
+  }
+}
+
+/** پولِ نقدی که واقعاً بابت مصارف رسیدن رفته (نه بخش صراف، نه باقیِ «بعداً»): بیشتر از این به صندوق برنمی‌گردد */
+function landingCashPart(p: Purchase): number {
+  return Math.max(0, (p.landingCost ?? 0) - landingUnpaidOf(p) - landingSarrafOwed(p))
+}
+
 export async function addLandingCost(
   purchaseIds: number[],
   amount: number,
@@ -384,6 +400,7 @@ export async function addLandingCost(
     const list = (await db.purchases.bulkGet(purchaseIds)).filter((p): p is Purchase => Boolean(p) && !p!.deleted)
     if (!list.length) throw new Error('خریدی یافت نشد')
     for (const purchase of list) assertOrdinaryPurchase(purchase)
+    if (via === 'sarraf' && sarraf) for (const purchase of list) assertSameSarraf(purchase, sarraf.id)
     const pairsOf = (p: Purchase) => p.lines.reduce((a, l) => a + l.qty, 0)
     const totalPairs = list.reduce((s, p) => s + pairsOf(p), 0)
     if (totalPairs <= 0) throw new Error('تعداد جوړه صفر است')
@@ -472,6 +489,7 @@ export async function correctLandingTotal(purchaseId: number, input: LandingCorr
     if (input.bucket === 'sarraf') {
       const sf = await db.suppliers.get(input.sarraf!.id)
       if (!sf || sf.deleted || sf.kind !== 'sarraf') throw new Error('صراف یافت نشد')
+      assertSameSarraf(p, sf.id!)
       // بخش صرافِ قبلی صریح نوشته می‌شود تا قاعدهٔ کهنهٔ خواندن سر کار نیفتد
       const oldSarrafPart = p.landingSarrafAmount ?? 0
       const newSarrafPart = oldSarrafPart + delta
@@ -484,11 +502,14 @@ export async function correctLandingTotal(purchaseId: number, input: LandingCorr
       const unpaidBefore = landingUnpaidOf(p)
       const unpaidAfter = unpaidBefore + delta
       if (unpaidAfter < 0) {
-        // بیش از باقی‌مانده کم شده — مازاد به صندوق برمی‌گردد (پولی که پیش‌تر نقد رفته بود)
+        // بیش از باقی‌مانده کم شده — مازاد به صندوق برمی‌گردد (پولی که پیش‌تر نقد رفته بود)؛
+        // اما فقط تا اندازهٔ پولی که واقعاً نقد رفته، نه بخشی که صراف داده بود
+        if (-unpaidAfter > landingCashPart(p)) throw new Error('این مقدار را نمی‌شود به صندوق برگرداند: پولِ نقد کمتر از این بابت مصارف رسیدن رفته. بخشِ صراف را با گزینهٔ «صراف» کم کنید.')
         await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -unpaidAfter, box: SHOP_BOX, note: `اصلاح مصارف رسیدن — ${p.supplierName}` })
       }
       update.landingUnpaid = Math.max(0, unpaidAfter)
     } else {
+      if (delta < 0 && -delta > landingCashPart(p)) throw new Error('این مقدار را نمی‌شود به صندوق برگرداند: پولِ نقد کمتر از این بابت مصارف رسیدن رفته. بخشِ صراف را با گزینهٔ «صراف» کم کنید.')
       await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -delta, box: SHOP_BOX, note: `اصلاح مصارف رسیدن — ${p.supplierName}` })
     }
 
@@ -2572,7 +2593,11 @@ export async function addAdjustment(adj: Adjustment): Promise<number> {
 }
 
 /** مرجوعی مشتری: برگشت به گدام یا داغمه + تصفیه (نقد/کاهش قرض) */
-export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
+/**
+ * @param opts.exchange تبادله: ارزش جنسِ برگشتی همان لحظه بابت جنس نو پرداخت می‌شود (فروش نو «paid» را با آن می‌گیرد
+ *   و صندوق فقط تفاوت را می‌بیند). پس «بازپرداخت نقدی»اش پولِ بیرون‌رفته نیست و سقفِ نقدِ رسیده اینجا نمی‌آید.
+ */
+export async function addCustomerReturn(ret: ReturnDoc, opts: { exchange?: boolean } = {}): Promise<number> {
   ret.amount = afn(ret.amount)
   ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
@@ -2588,6 +2613,15 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
         if (ret.amount < 0) throw new Error('پول مرجوعی منفی نمی‌شود')
         if (ret.amount > checked.refund.amount) {
           throw new Error(`پول مرجوعی از پولی که مشتری برای این جوړه‌ها داده بیشتر است — حداکثر ${fmtMoney(checked.refund.amount)} (قیمت منهای سهم تخفیف فاکتور).`)
+        }
+        // نقد فقط تا اندازهٔ پولی که واقعاً آمده و هنوز پس داده نشده؛ باقی از قرض مشتری کم می‌شود.
+        // وگرنه فروش قرضی بدون هیچ نقدی، با «بازپرداخت نقدی» از صندوق پول می‌برد و قرض هم می‌ماند.
+        if (!opts.exchange && ret.settlement === 'cashRefund' && ret.amount > 0) {
+          const refundedCash = prior.filter((r) => r.settlement === 'cashRefund').reduce((sum, r) => sum + r.amount, 0)
+          const room = Math.max(0, saleCashPaid(sale) - refundedCash)
+          if (ret.amount > room) {
+            throw new Error(`نقد بیشتر از پولی که مشتری واقعاً داده پس داده نمی‌شود — حداکثر ${fmtMoney(room)}. باقی را با «کم کردن از قرض» ثبت کنید.`)
+          }
         }
         // هرچه از قیمت جوړه‌ها پس داده نشد (سهم تخفیف و هرچه دکان نگه داشت) روی سند می‌ماند،
         // تا مفاد مرجوعی همان پولی باشد که واقعاً برگشت
@@ -2754,7 +2788,7 @@ export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
     // اول فروش (پول وارد صندوق)، بعد مرجوعی — تا در تبادله صندوق به اشتباه «کم» حساب نشود
     await addSale(sale)
-    await addCustomerReturn(ret)
+    await addCustomerReturn(ret, { exchange: true })
   })
 }
 

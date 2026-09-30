@@ -112,7 +112,7 @@ import { ordinaryCustomerCollections } from '../src/lib/directTradeReports'
 import { documentHistory, paymentHistory, saleHistory } from '../src/lib/docHistory'
 import { firstDayDone, firstDaySteps } from '../src/lib/firstDay'
 import { appendTiming, speedSummary, type SaleTiming } from '../src/lib/saleSpeed'
-import { saleCustomerCredit, summarizeSales } from '../src/lib/salesFigures'
+import { saleCustomerCredit, saleSettledByAccount, summarizeSales } from '../src/lib/salesFigures'
 import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment } from '../src/lib/checkout'
 import { saleDraftTotal } from '../src/lib/saleDrafts'
 import { kindFigures, per100, salesBuckets, waterfall } from '../src/lib/reportFigures'
@@ -5401,6 +5401,14 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('فرمول قدیمی برای فروش تسویه «قرض ۱٬۸۰۰» نشان می‌داد', settlement.total - saleCashPaid(settlement), 1800)
       eq('قرض واقعی مشتری برای فروش تسویه صفر است', saleCustomerCredit(settlement), 0)
 
+      // رسید و فاکتور «نقد» را از saleCashPaid می‌خوانند و بخش تسویه را جدا می‌نویسند: جمع نقد + قرض + تسویه = مجموع
+      for (const sale of sales) {
+        eq(`نقد + قرض + تسویه = مجموع (فروش ${sale.total})`, saleCashPaid(sale) + saleCustomerCredit(sale) + saleSettledByAccount(sale), sale.total)
+      }
+      eq('تسویهٔ قرض‌دهنده ۱٬۸۰۰ است، نه نقد', saleSettledByAccount(settlement), 1800)
+      eq('و نقدش صفر است (رسید قدیمی «نقد ۱٬۸۰۰» می‌نوشت)', saleCashPaid(settlement), 0)
+      eq('فروش عادی تسویه ندارد', sales.filter((x) => !x.lenderAction).reduce((n, x) => n + saleSettledByAccount(x), 0), 0)
+
       const f = summarizeSales(sales)
       eq('تعداد فروش', f.count, 3)
       eq('مجموع فروش', f.total, 4500)
@@ -5554,6 +5562,102 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('ده روز = ده ستون', buckets.length, 10)
       eq('جمع ستون‌های پرچون', buckets.reduce((n, b) => n + b.retail, 0), 2700)
       eq('جمع ستون‌های عمده', buckets.reduce((n, b) => n + b.wholesale, 0), 2400)
+    }
+  },
+  {
+    name: 'مصارف رسیدن — دو صراف روی یک خرید و کاهشِ بیش از آنچه نقد رفته',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const newSarraf = async (name: string) => ({ id: (await db.suppliers.add({ name, balance: 0, kind: 'sarraf' } as never)) as number, name })
+      const X = await newSarraf('حاجی صراف'), Y = await newSarraf('کریم صراف')
+      await seedCash(6000)
+      const p1 = await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+
+      // ۱) هر خرید یک صرافِ ثبت‌شده دارد؛ صرافِ دوم رد می‌شود، نه اینکه طلبِ اولی گم یا جابه‌جا شود
+      await addLandingCost([p1], 100, 'sarraf', X)
+      await throws('صرافِ دوم روی همان خرید رد می‌شود', () => addLandingCost([p1], 50, 'sarraf', Y))
+      await throws('اصلاح با صرافِ دیگر رد می‌شود', () => correctLandingTotal(p1, { newTotal: 150, bucket: 'sarraf', sarraf: Y, reason: 'اشتباه بود' }))
+      eq('طلب صرافِ اول همان ۱۰۰', (await db.suppliers.get(X.id))!.balance, 100)
+      eq('صرافِ دوم چیزی ندارد', (await db.suppliers.get(Y.id))!.balance, 0)
+      // با همان صراف درست است
+      await correctLandingTotal(p1, { newTotal: 150, bucket: 'sarraf', sarraf: X, reason: 'کمیشن بیشتر شد' })
+      eq('طلب صراف ۱۵۰', (await db.suppliers.get(X.id))!.balance, 150)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // ۲) کم کردن مصارفی که صراف داده به «بعداً» نباید پولِ ساختگی به صندوق بیاورد
+      const before = await cashBalance()
+      await throws('کاهش بیش از پولِ نقد رفته به صندوق رد می‌شود', () => correctLandingTotal(p1, { newTotal: 50, bucket: 'later', reason: 'کمتر شد' }))
+      eq('صندوق تغییری نکرد', await cashBalance(), before)
+      eq('مصارف تغییری نکرد', (await db.purchases.get(p1))!.landingCost, 150)
+      // راه درست: از بخش صراف کم شود
+      await correctLandingTotal(p1, { newTotal: 50, bucket: 'sarraf', sarraf: X, reason: 'کمتر شد' })
+      eq('طلب صراف ۵۰', (await db.suppliers.get(X.id))!.balance, 50)
+      is('کنترل حساب‌ها هنوز سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'بستن سال — بدون ثبت پرداخت، سهمِ نقد یا خروج رد می‌شود؛ با پرداخت، سال نو با مفاد صفر شروع می‌شود',
+    run: async () => {
+      const cId = await newCustomer()
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(100000)
+      await addPurchase(buy(supId, vId, 100, 500, { paid: 50000 }))
+      await addPartner({ name: 'شریک', capital: 20000, share: 40 })
+      await startYear('مالک')
+      await addSale(sell(vId, 10, 900, { customerId: cId, customerName: 'مشتری' })) // مفاد ۴٬۰۰۰
+      const profit = (await netWorth()).assets - (await totalCapital())
+      eq('مفاد سال', profit, 4000)
+      const partners = await listPartners()
+      const owner = partners.find((p) => p.name === 'مالک')!
+      const mate = partners.find((p) => p.name === 'شریک')!
+      const capBefore = await totalCapital()
+      const startBefore = (await db.settings.get('partnershipStart'))?.value
+
+      // بدون ثبت پرداخت، سهمی که «گرفته می‌شود» هیچ‌جا نمی‌نشست و سال بعد دوباره مفاد نشان می‌داد
+      await throws('گرفتن سهم بدون ثبت پرداخت رد می‌شود', () => settleYear({ choices: { [owner.id!]: 'take', [mate.id!]: 'take' }, payCash: false, yearProfit: profit, withdrawnBy: () => 0 }))
+      await throws('خروج بدون ثبت پرداخت رد می‌شود', () => settleYear({ choices: { [owner.id!]: 'reinvest', [mate.id!]: 'exit' }, payCash: false, yearProfit: profit, withdrawnBy: () => 0 }))
+      eq('سرمایه‌ها دست نخورد', await totalCapital(), capBefore)
+      is('سال باز ماند', (await db.settings.get('partnershipStart'))?.value, startBefore)
+      is('شریک نماند حذف شود', (await listPartners()).length, 2)
+
+      // با ثبت پرداخت: مالک ۶۰٪ = ۲٬۴۰۰ و شریک ۴۰٪ = ۱٬۶۰۰ از صندوق می‌رود؛ سال نو با مفاد صفر
+      const cashBefore = await cashBalance()
+      await settleYear({ choices: { [owner.id!]: 'take', [mate.id!]: 'take' }, payCash: true, yearProfit: profit, withdrawnBy: () => 0 })
+      eq('صندوق ۴٬۰۰۰ کم شد', cashBefore - (await cashBalance()), 4000)
+      eq('سرمایه‌ها همان ماند', await totalCapital(), capBefore)
+      eq('روز اول سال نو: مفاد دقیقاً صفر', (await netWorth()).assets - (await totalCapital()), 0)
+    }
+  },
+  {
+    name: 'مرجوعی — نقد فقط تا اندازهٔ پولی که واقعاً آمده؛ باقی از قرض کم می‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 20)
+      await seedCash(5000)
+      const cId = await newCustomer('احمد')
+      // ۲ جوړه ۱٬۰۰۰: مشتری ۳۰۰ نقد داد و ۱٬۷۰۰ قرضدار شد
+      const saleId = await addSale(sell(vId, 2, 1000, { customerId: cId, customerName: 'احمد', saleType: 'retail', total: 2000, paid: 300 }))
+      const sale = (await db.sales.get(saleId))!
+      const back = (qty: number, amount: number, settlement: 'cashRefund' | 'reduceDebt') => addCustomerReturn({ date: Date.now(), kind: 'customer', partyId: cId, partyName: 'احمد', refId: saleId, saleType: 'retail', lines: [{ ...sale.lines[0], qty, restock: true }], reason: 'سایز', settlement, amount })
+      const debt = async () => (await db.customers.get(cId))!.balance
+      const cash0 = await cashBalance()
+      eq('قرض احمد ۱٬۷۰۰', await debt(), 1700)
+
+      // یک جوړه ۱٬۰۰۰ برگشت: ۱٬۰۰۰ نقد پس دادن یعنی ۷۰۰ که هیچ‌وقت نیامده از صندوق می‌رود
+      await throws('نقد بیشتر از ۳۰۰ نقدِ رسیده رد می‌شود', () => back(1, 1000, 'cashRefund'))
+      eq('رد شدن صندوق را تغییر نداد', await cashBalance(), cash0)
+      eq('و قرض را', await debt(), 1700)
+      // راه درست: از قرض کم شود
+      await back(1, 1000, 'reduceDebt')
+      eq('قرض ۷۰۰ شد', await debt(), 700)
+      eq('صندوق دست نخورد', await cashBalance(), cash0)
+      // جوړهٔ دوم: ۳۰۰ نقد رسیده و هنوز پس داده نشده — همان مقدار مجاز است، نه بیشتر
+      await throws('باز هم بیشتر از ۳۰۰ رد می‌شود', () => back(1, 1000, 'cashRefund'))
+      await back(1, 300, 'cashRefund').catch(() => undefined)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      is('صندوق هیچ‌وقت بیشتر از پولِ آمده بیرون نرفت', cash0 - (await cashBalance()) <= 300, true)
     }
   }
 ]

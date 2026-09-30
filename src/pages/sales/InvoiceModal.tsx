@@ -1,4 +1,5 @@
-import { type Sale } from '../../db'
+import { saleCashPaid, type Sale } from '../../db'
+import { saleCustomerCredit, saleSettledByAccount } from '../../lib/salesFigures'
 import { fmtMoney, fmtNum, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
 import { commercialSaleLines } from '../../lib/commercialLines'
@@ -10,7 +11,9 @@ const escapeHtml = (text: string) => text.replace(/[&<>"']/g, character => ({ '&
  * بعد تخفیف، نقد و باقی. چاپ با iframe و اشتراک به شکل متن.
  */
 export function InvoiceModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
-  const remainder = sale.total - sale.paid
+  const remainder = saleCustomerCredit(sale)
+  const settled = saleSettledByAccount(sale)
+  const cashIn = saleCashPaid(sale)
   // Stored sale.total is already net of discount, as on the image receipt.
   const subtotal = sale.total + (sale.discount ?? 0)
   const rows = commercialSaleLines(sale).map((l, i) => ({
@@ -32,7 +35,8 @@ export function InvoiceModal({ sale, onClose }: { sale: Sale; onClose: () => voi
   ]
   if ((sale.discount ?? 0) > 0) textParts.push(`تخفیف: −${fmtMoney(sale.discount!)}`)
   textParts.push(`قابل پرداخت: ${fmtMoney(sale.total)}`)
-  textParts.push(`نقد: ${fmtMoney(sale.paid)}`)
+  textParts.push(`نقد: ${fmtMoney(cashIn)}`)
+  if (settled > 0) textParts.push(`تسویه با حساب (کفش): ${fmtMoney(settled)}`)
   if (remainder > 0) textParts.push(`باقی (قرض): ${fmtMoney(remainder)}`)
 
   function printInvoice() {
@@ -69,7 +73,8 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 <div class="row"><span>مجموع اجناس</span><span>${fmtMoney(subtotal)}</span></div>
 ${extra}
 <div class="row total"><span>قابل پرداخت</span><span>${fmtMoney(sale.total)}</span></div>
-<div class="row total"><span>نقد</span><span>${fmtMoney(sale.paid)}</span></div>
+<div class="row total"><span>نقد</span><span>${fmtMoney(cashIn)}</span></div>
+${settled > 0 ? `<div class="row"><span>تسویه با حساب (کفش)</span><span>${fmtMoney(settled)}</span></div>` : ''}
 ${rem}
 </body></html>`
     const f = document.createElement('iframe')
@@ -148,8 +153,14 @@ ${rem}
         <div className="sale-document-net"><span>قابل پرداخت</span><strong>{fmtMoney(sale.total)}</strong></div>
         <div className="mt-1 flex justify-between">
           <span>نقد</span>
-          <span>{fmtMoney(sale.paid)}</span>
+          <span>{fmtMoney(cashIn)}</span>
         </div>
+        {settled > 0 && (
+          <div className="mt-1 flex justify-between">
+            <span>تسویه با حساب (کفش)</span>
+            <span>{fmtMoney(settled)}</span>
+          </div>
+        )}
         {remainder > 0 && (
           <div className="mt-1 flex justify-between font-bold text-red-600">
             <span>باقی (قرض مشتری)</span>

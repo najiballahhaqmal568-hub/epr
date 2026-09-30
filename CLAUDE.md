@@ -131,6 +131,16 @@ correctness: a number on screen is always the true number (no count-through anim
 «چه کسی ثبت کرد» (`by`) is stamped by the db hook only on ordinary sales/expenses/payments/returns — never
 on direct-trade or goods-receipt documents, which compare their exact content.
 
+### Refusals that protect the books (found by the whole-app review)
+
+- `settleYear` refuses `payCash: false` when a partner's «take» or «exit» would pay out: the payout would be recorded
+  nowhere and the new year would show the same profit again. With payment on, the new year opens at profit exactly 0.
+- A **cash** refund on a customer return is capped by the cash that really came in for that sale (`saleCashPaid`) minus
+  cash already refunded from it; the rest must reduce debt. An exchange's own return is exempt (its value pays for the new
+  item inside the same document, so the till only sees the top-up).
+- A purchase has one registered sarraf: a second sarraf on it is refused, and a landing-cost correction can only return to
+  the till the cash that really went out (`landingCashPart`).
+
 ### Partnership accounting
 
 All of it lives in `src/lib/partnership.ts` — `startYear()`, `addPartner()`,
@@ -149,7 +159,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1462 checks in 146 scenarios
+npm test          # tests/checks.ts — currently 1497 checks in 149 scenarios
 ```
 
 ```bash

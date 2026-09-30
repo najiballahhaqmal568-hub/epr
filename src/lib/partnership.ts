@@ -172,6 +172,15 @@ export async function settleYear(input: SettleInput): Promise<SettleResult> {
     return { p, pay, choice: input.choices[p.id!] ?? ('take' as SettleChoice) }
   })
 
+  // بدون ثبت پرداخت، سهمی که «گرفته می‌شود» یا سرمایهٔ شریکِ خارج‌شونده هیچ‌جا نمی‌نشیند: صندوق و سرمایه
+  // همان می‌ماند و سال نو دوباره همان مفاد را نشان می‌دهد (بار بعد دوباره تقسیم می‌شود). پس رد می‌شود.
+  if (!input.payCash) {
+    const unpaid = plan.filter(({ p, pay, choice }) => (choice === 'take' && pay > 0) || (choice === 'exit' && (p.capital ?? 0) + pay > 0))
+    if (unpaid.length) {
+      throw new Error(`بدون ثبت پرداخت از صندوق نمی‌شود سال را بست: سهمِ ${unpaid.map(({ p }) => p.name).join('، ')} هیچ‌جا ثبت نمی‌شود. «پرداخت‌ها از صندوق ثبت شود» را روشن کنید یا برای آن‌ها «دوباره سرمایه‌گذاری» را انتخاب کنید.`)
+    }
+  }
+
   // پرداخت‌ها، سرمایه‌ها و تاریخ سال نو در یک transaction: اگر پول صندوق برای یکی کافی نباشد،
   // هیچ پرداختی ثبت نمی‌شود و سال باز می‌ماند — نه اینکه نصف شرکا پول گرفته باشند.
   await db.transaction('rw', db.suppliers, db.settings, db.cashMovements, async () => {

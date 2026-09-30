@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { type Sale } from '../../db'
+import { saleCashPaid, type Sale } from '../../db'
+import { saleCustomerCredit, saleSettledByAccount } from '../../lib/salesFigures'
 import { fmtNum, fmtDate } from '../../lib/format'
 import { Modal } from '../../components/ui'
 import { commercialSaleLines } from '../../lib/commercialLines'
@@ -66,10 +67,11 @@ export function ReceiptModal({ sale, onClose, onNext }: { sale: Sale; onClose: (
 function drawReceipt(sale: Sale): string {
   const lines = commercialSaleLines(sale)
   const W = 640
-  const remainder = sale.total - sale.paid
+  const remainder = saleCustomerCredit(sale)
+  const settled = saleSettledByAccount(sale)
   const discount = sale.discount ?? 0
   const subtotal = sale.total + discount
-  const extraRows = (discount > 0 ? 1 : 0) + (remainder > 0 ? 1 : 0)
+  const extraRows = (discount > 0 ? 1 : 0) + (remainder > 0 ? 1 : 0) + (settled > 0 ? 1 : 0)
   const code = (sale.uuid ?? '').replace(/-/g, '').slice(0, 6).toUpperCase()
   const PAD = 18 // light margin around the paper
   const TEETH = 14 // torn-paper edge at the bottom
@@ -154,7 +156,8 @@ function drawReceipt(sale: Sale): string {
     row('تخفیف', `${fmtNum(discount)} ؋`, '#d97706')
   }
   row('قابل پرداخت', `${fmtNum(sale.total)} ؋`, '#1d1d1f', true)
-  row('دریافتی', `${fmtNum(sale.paid)} ؋`)
+  row('دریافتی', `${fmtNum(saleCashPaid(sale))} ؋`)
+  if (settled > 0) row('تسویه با حساب (کفش)', `${fmtNum(settled)} ؋`)
   if (remainder > 0) row('باقی (قرض)', `${fmtNum(remainder)} ؋`, '#dc2626', true)
 
   x.beginPath(); x.moveTo(30, y - 8); x.lineTo(W - 30, y - 8); x.stroke()
