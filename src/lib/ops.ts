@@ -372,6 +372,22 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
  * مبلغ کل مساوی فی جوړه بین همهٔ جوړه‌های آن خریدها پخش و در قیمت تمام‌شده می‌نشیند.
  * اگر قبلاً مصرفی ثبت شده باشد، مبلغ نو روی آن جمع می‌شود.
  */
+/**
+ * هر خرید فقط یک صرافِ ثبت‌شده دارد (landingSarrafId). صرافِ دوم روی همان خرید، طلبِ اولی را در
+ * دفتر جا می‌گذارد ولی بازسازی از روی سند همه را به صرافِ آخر می‌بندد — دو گوشی دو عدد می‌سازند.
+ * پس تا وقتی چیزی به صرافِ اول بدهکاریم، صرافِ دیگر رد می‌شود.
+ */
+function assertSameSarraf(p: Purchase, sarrafId: number): void {
+  if (landingSarrafOwed(p) > 0 && p.landingSarrafId !== undefined && p.landingSarrafId !== sarrafId) {
+    throw new Error(`مصارف رسیدن این خرید به «${p.landingSarrafName ?? 'صرافِ دیگر'}» ثبت شده؛ برای صرافِ دیگر جداگانه ثبت نمی‌شود. با همان صراف اصلاح کنید یا مبلغ را «نقد» یا «بعداً» بگیرید.`)
+  }
+}
+
+/** پولِ نقدی که واقعاً بابت مصارف رسیدن رفته (نه بخش صراف، نه باقیِ «بعداً»): بیشتر از این به صندوق برنمی‌گردد */
+function landingCashPart(p: Purchase): number {
+  return Math.max(0, (p.landingCost ?? 0) - landingUnpaidOf(p) - landingSarrafOwed(p))
+}
+
 export async function addLandingCost(
   purchaseIds: number[],
   amount: number,
@@ -384,6 +400,7 @@ export async function addLandingCost(
     const list = (await db.purchases.bulkGet(purchaseIds)).filter((p): p is Purchase => Boolean(p) && !p!.deleted)
     if (!list.length) throw new Error('خریدی یافت نشد')
     for (const purchase of list) assertOrdinaryPurchase(purchase)
+    if (via === 'sarraf' && sarraf) for (const purchase of list) assertSameSarraf(purchase, sarraf.id)
     const pairsOf = (p: Purchase) => p.lines.reduce((a, l) => a + l.qty, 0)
     const totalPairs = list.reduce((s, p) => s + pairsOf(p), 0)
     if (totalPairs <= 0) throw new Error('تعداد جوړه صفر است')
@@ -472,6 +489,7 @@ export async function correctLandingTotal(purchaseId: number, input: LandingCorr
     if (input.bucket === 'sarraf') {
       const sf = await db.suppliers.get(input.sarraf!.id)
       if (!sf || sf.deleted || sf.kind !== 'sarraf') throw new Error('صراف یافت نشد')
+      assertSameSarraf(p, sf.id!)
       // بخش صرافِ قبلی صریح نوشته می‌شود تا قاعدهٔ کهنهٔ خواندن سر کار نیفتد
       const oldSarrafPart = p.landingSarrafAmount ?? 0
       const newSarrafPart = oldSarrafPart + delta
@@ -484,11 +502,14 @@ export async function correctLandingTotal(purchaseId: number, input: LandingCorr
       const unpaidBefore = landingUnpaidOf(p)
       const unpaidAfter = unpaidBefore + delta
       if (unpaidAfter < 0) {
-        // بیش از باقی‌مانده کم شده — مازاد به صندوق برمی‌گردد (پولی که پیش‌تر نقد رفته بود)
+        // بیش از باقی‌مانده کم شده — مازاد به صندوق برمی‌گردد (پولی که پیش‌تر نقد رفته بود)؛
+        // اما فقط تا اندازهٔ پولی که واقعاً نقد رفته، نه بخشی که صراف داده بود
+        if (-unpaidAfter > landingCashPart(p)) throw new Error('این مقدار را نمی‌شود به صندوق برگرداند: پولِ نقد کمتر از این بابت مصارف رسیدن رفته. بخشِ صراف را با گزینهٔ «صراف» کم کنید.')
         await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -unpaidAfter, box: SHOP_BOX, note: `اصلاح مصارف رسیدن — ${p.supplierName}` })
       }
       update.landingUnpaid = Math.max(0, unpaidAfter)
     } else {
+      if (delta < 0 && -delta > landingCashPart(p)) throw new Error('این مقدار را نمی‌شود به صندوق برگرداند: پولِ نقد کمتر از این بابت مصارف رسیدن رفته. بخشِ صراف را با گزینهٔ «صراف» کم کنید.')
       await movement({ date: Date.now(), type: 'landing', refId: purchaseId, amount: -delta, box: SHOP_BOX, note: `اصلاح مصارف رسیدن — ${p.supplierName}` })
     }
 

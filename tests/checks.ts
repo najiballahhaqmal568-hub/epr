@@ -5563,6 +5563,38 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('جمع ستون‌های پرچون', buckets.reduce((n, b) => n + b.retail, 0), 2700)
       eq('جمع ستون‌های عمده', buckets.reduce((n, b) => n + b.wholesale, 0), 2400)
     }
+  },
+  {
+    name: 'مصارف رسیدن — دو صراف روی یک خرید و کاهشِ بیش از آنچه نقد رفته',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      const newSarraf = async (name: string) => ({ id: (await db.suppliers.add({ name, balance: 0, kind: 'sarraf' } as never)) as number, name })
+      const X = await newSarraf('حاجی صراف'), Y = await newSarraf('کریم صراف')
+      await seedCash(6000)
+      const p1 = await addPurchase(buy(supId, vId, 10, 500, { paid: 5000 }))
+
+      // ۱) هر خرید یک صرافِ ثبت‌شده دارد؛ صرافِ دوم رد می‌شود، نه اینکه طلبِ اولی گم یا جابه‌جا شود
+      await addLandingCost([p1], 100, 'sarraf', X)
+      await throws('صرافِ دوم روی همان خرید رد می‌شود', () => addLandingCost([p1], 50, 'sarraf', Y))
+      await throws('اصلاح با صرافِ دیگر رد می‌شود', () => correctLandingTotal(p1, { newTotal: 150, bucket: 'sarraf', sarraf: Y, reason: 'اشتباه بود' }))
+      eq('طلب صرافِ اول همان ۱۰۰', (await db.suppliers.get(X.id))!.balance, 100)
+      eq('صرافِ دوم چیزی ندارد', (await db.suppliers.get(Y.id))!.balance, 0)
+      // با همان صراف درست است
+      await correctLandingTotal(p1, { newTotal: 150, bucket: 'sarraf', sarraf: X, reason: 'کمیشن بیشتر شد' })
+      eq('طلب صراف ۱۵۰', (await db.suppliers.get(X.id))!.balance, 150)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+
+      // ۲) کم کردن مصارفی که صراف داده به «بعداً» نباید پولِ ساختگی به صندوق بیاورد
+      const before = await cashBalance()
+      await throws('کاهش بیش از پولِ نقد رفته به صندوق رد می‌شود', () => correctLandingTotal(p1, { newTotal: 50, bucket: 'later', reason: 'کمتر شد' }))
+      eq('صندوق تغییری نکرد', await cashBalance(), before)
+      eq('مصارف تغییری نکرد', (await db.purchases.get(p1))!.landingCost, 150)
+      // راه درست: از بخش صراف کم شود
+      await correctLandingTotal(p1, { newTotal: 50, bucket: 'sarraf', sarraf: X, reason: 'کمتر شد' })
+      eq('طلب صراف ۵۰', (await db.suppliers.get(X.id))!.balance, 50)
+      is('کنترل حساب‌ها هنوز سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
   }
 ]
 
