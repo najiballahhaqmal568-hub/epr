@@ -3,7 +3,7 @@ import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import ProductPhotoPicker from './ProductPhotoPicker'
 import { useState } from 'react'
 import { db, type Product, type Variant } from '../../db'
-import { addVariant, setOpeningStock, setPurchaseCost } from '../../lib/ops'
+import { addVariant, deleteProduct, deleteVariants, setOpeningStock, setPurchaseCost } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { emptyVariant, type VariantForm, type ProductDraft } from './helpers'
@@ -120,6 +120,9 @@ export function ProductModal({
       return setError(`سایز ${noCost.size} موجودی دارد ولی قیمت خرید ندارد — بدون آن، ارزش گدام و مفاد غلط می‌شود`)
     try {
       let productId = product?.id
+      // سایزی که از فرم برداشته شد: پیش از هر نوشتن بررسی می‌شود تا رد شدنش نیمهٔ فرم را ذخیره نکند
+      const keptIds = new Set(valid.map((f) => f.id).filter(Boolean))
+      await deleteVariants(variants.filter((v) => !keptIds.has(v.id)).map((v) => v.id!))
       const cartonItems = valid
         .filter((f) => parseNum(f.cartonQty) > 0)
         .map((f) => ({ size: f.size.trim(), color: f.color.trim(), qty: parseNum(f.cartonQty) }))
@@ -138,8 +141,6 @@ export function ProductModal({
       if (productId) await db.products.update(productId, pData)
       else productId = (await db.products.add({ ...pData, createdAt: Date.now() })) as number
 
-      const keptIds = new Set(valid.map((f) => f.id).filter(Boolean))
-      for (const v of variants) if (!keptIds.has(v.id)) await db.variants.update(v.id!, { deleted: true })
 
       for (const f of valid) {
         const data = {
@@ -172,11 +173,12 @@ export function ProductModal({
   async function remove() {
     if (!product?.id) return
     if (!confirm('این بوت و همه سایزهای آن حذف شود؟')) return
-    await db.transaction('rw', db.products, db.variants, async () => {
-      await db.variants.where('productId').equals(product.id!).modify({ deleted: true })
-      await db.products.update(product.id!, { deleted: true })
-    })
-    onClose()
+    try {
+      await deleteProduct(product.id)
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   return (
@@ -336,7 +338,7 @@ export function ProductModal({
       })()}
       </section>
 
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {error && <p role="alert" className="mb-2 text-sm text-red-600">{error}</p>}
       <PrimaryBtn onClick={() => void submit.run(save)} disabled={submit.busy}>ذخیره</PrimaryBtn>
       {product && (
         <button className="mt-3 w-full text-sm text-red-600" onClick={remove}>

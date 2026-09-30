@@ -29,7 +29,7 @@ try {
   await page.getByRole('heading', { name: 'خانه' }).waitFor()
   const card = page.getByRole('button', { name: /مفاد خالص این ماه .* از کجا آمد/ })
   assert.match(await card.innerText(), /▼ ۲٬۲۰۰ ؋ زیان[\s\S]*مفاد فروش\s*۸۰۰ ؋[\s\S]*مصرف\s*۳٬۰۰۰ ؋[\s\S]*▼ ۱٬۷۰۰ ؋ کمتر/)
-  const alert = page.getByRole('button').filter({ hasText: 'مصرف از مفاد بیشتر شده' })
+  const alert = page.getByRole('button').filter({ hasText: 'مصرف این ماه از مفاد بیشتر شده' })
   assert.match(await alert.innerText(), /ترانسپورت/)
   await page.screenshot({ path: `${shots}/home-danger-390.png`, fullPage: true })
 

@@ -2012,7 +2012,9 @@ export async function convertLoanToCapital(lenderId: number, share: number): Pro
       capital: (l.capital ?? 0) + owed,
       share
     })
-    await db.settings.put({ key: 'partnershipStart', value: Date.now() })
+    // سال شراکتِ جاری ادامه دارد: شروعِ نو برداشت‌های تا امروز را از مفاد سال می‌انداخت و زیان ساختگی می‌ساخت
+    // (سرمایهٔ نو و دارایی به یک اندازه بالا رفتند، پس عدد سال بی تغییر می‌ماند). فقط اگر سالی شروع نشده، امروز.
+    if (!Number((await db.settings.get('partnershipStart'))?.value ?? 0)) await db.settings.put({ key: 'partnershipStart', value: Date.now() })
     return owed
   })
 }
@@ -2853,6 +2855,54 @@ export async function addVariant(
     await db.variants.update(id, { sku: makeSku(id, data.size) })
     if (opening !== 0) await setOpeningStock(id, opening, productName)
     return id
+  })
+}
+
+/**
+ * حذف سایزها — فقط سایزی که موجودی ندارد و خریدِ «در راه» هم ندارد.
+ * حذف یک سایزِ دارای موجودی، ارزشش را بی‌سند از گدام، دارایی و مفاد کم می‌کند و «کنترل حساب‌ها»
+ * هم آن را نمی‌بیند (ردیف حذف‌شده را نمی‌شمارد). پس اول موجودی با «تنظیم موجودی» صفر می‌شود؛ آن
+ * سند دلیلش را نگه می‌دارد. سایز حذف‌شده با فروش‌های قدیمی‌اش می‌ماند و فقط از فهرست می‌رود.
+ */
+export async function deleteVariants(variantIds: number[]): Promise<void> {
+  if (!variantIds.length) return
+  return db.transaction('rw', [db.variants, db.products, db.purchases], async () => {
+    const rows = (await db.variants.bulkGet(variantIds)).filter((v): v is Variant => Boolean(v) && !v!.deleted)
+    const held = rows.filter((v) => v.stockQty !== 0)
+    if (held.length) {
+      const pairs = held.reduce((s, v) => s + v.stockQty, 0)
+      throw new Error(`سایز ${held.map((v) => v.size).join('، ')} هنوز ${pairs} جوړه در گدام دارد — اول موجودی را با «تنظیم موجودی» صفر کنید (دلیلش ثبت می‌شود)، بعد حذف کنید`)
+    }
+    await refuseIfInTransit(rows)
+    for (const v of rows) await db.variants.update(v.id!, { deleted: true })
+  })
+}
+
+/**
+ * خریدِ «در راه» که هنوز نرسیده: ارزشش حالا «جنس در راه» است و روز رسیدن به همین سایز می‌آید.
+ * اگر سایز حذف شده باشد، موجودی روی ردیف حذف‌شده می‌نشیند و ارزشش از دارایی غیب می‌شود.
+ */
+async function refuseIfInTransit(rows: Variant[]): Promise<void> {
+  const ids = new Set(rows.map((v) => v.id))
+  const waiting = await db.purchases.filter((p) => !p.deleted && p.received === false && p.lines.some((l) => ids.has(l.variantId))).toArray()
+  if (waiting.length) {
+    const sizes = [...new Set(waiting.flatMap((p) => p.lines.filter((l) => ids.has(l.variantId)).map((l) => l.size)))]
+    throw new Error(`سایز ${sizes.join('، ')} خریدِ «در راه» دارد (${waiting.map((p) => p.supplierName).join('، ')}) — اول جنس برسد یا خرید لغو شود، بعد حذف کنید`)
+  }
+}
+
+/** حذف یک بوت با همهٔ سایزهایش — همان قاعدهٔ deleteVariants: اگر جایی موجودی مانده، رد می‌شود. */
+export async function deleteProduct(productId: number): Promise<void> {
+  return db.transaction('rw', [db.variants, db.products, db.purchases], async () => {
+    const variants = (await db.variants.where('productId').equals(productId).toArray()).filter((v) => !v.deleted)
+    const held = variants.filter((v) => v.stockQty !== 0)
+    if (held.length) {
+      const pairs = held.reduce((s, v) => s + v.stockQty, 0)
+      throw new Error(`این بوت هنوز ${pairs} جوړه در گدام دارد (سایز ${held.map((v) => v.size).join('، ')}) — اول موجودی را با «تنظیم موجودی» صفر کنید (دلیلش ثبت می‌شود)، بعد حذف کنید`)
+    }
+    await refuseIfInTransit(variants)
+    for (const v of variants) await db.variants.update(v.id!, { deleted: true })
+    await db.products.update(productId, { deleted: true })
   })
 }
 
