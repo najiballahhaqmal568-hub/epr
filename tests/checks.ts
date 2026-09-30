@@ -106,7 +106,7 @@ import { netWorth, computeNetWorth } from '../src/lib/networth'
 import { explainCash, explainPayables, explainReceivables, explainStock } from '../src/lib/numberSources'
 import { daysLeftInMonth, expenseAlert, lossPerPair, productProfits, profitSummary } from '../src/lib/profit'
 import { backupNudge, noteBackupDone, readBackupNudge, snoozeBackupNudge } from '../src/lib/backupReminder'
-import { fmtClock, fmtDayLabel, parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfMonth, startOfYear } from '../src/lib/format'
+import { fmtClock, fmtDayLabel, parseNum, pageOrder, familyPages, jalaliDateParts, jalaliMonthWindow, startOfDay, startOfMonth, startOfYear } from '../src/lib/format'
 import { periodBounds } from '../src/lib/period'
 import { keypadPress, quickCashOptions } from '../src/lib/quickCash'
 import { overpaidSales } from '../src/lib/overpaid'
@@ -5250,6 +5250,48 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('تاریخ بدون برداشت در میانه جابه‌جا شد', Number((await db.settings.get('partnershipStart'))!.value), started - 2000)
       eq('عدد سال باز هم صفر', await yearProfit(started - 2000), 0)
       await setYearStart(started - 2000) // بدون تغییر: خطا نمی‌دهد
+    }
+  },
+  {
+    name: 'بازبینی — امروز انتخاب می‌شود، جنسِ «در راه» حذف نمی‌شود، تبدیل قرض به سرمایه سال را از نو شروع نمی‌کند',
+    run: async () => {
+      const supId = await newSupplier()
+      await seedCash(50000)
+      await startYear('مالک')
+      const started = Number((await db.settings.get('partnershipStart'))!.value)
+      const yearProfit = async () => {
+        const start = Number((await db.settings.get('partnershipStart'))!.value)
+        const draws = (await db.cashMovements.toArray()).filter((m) => !m.deleted && m.date >= start && m.type === 'withdrawal').reduce((s, m) => s - m.amount, 0)
+        return (await netWorth()).assets + draws - (await totalCapital())
+      }
+
+      // «امروز» در تاریخ‌گزین = ظهر یا هر ساعتِ امروز؛ آینده نیست
+      await setYearStart(startOfDay(Date.now()) + 86400000 - 1000)
+      await setYearStart(started) // برگشت؛ بین این دو برداشتی نیست
+      await throws('فردا هنوز آینده است', () => setYearStart(startOfDay(Date.now()) + 86400000 + 1000))
+
+      // سایزی که موجودی ندارد ولی خریدش «در راه» است: حذفش ارزش خرید را بعد از رسیدن غیب می‌کرد
+      const pid = (await db.products.add({ name: 'کوهستان', createdAt: Date.now() })) as number
+      const v = await addVariant({ productId: pid, size: '40', color: 'سیاه', purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, stockQty: 0, lowStock: 2 }, 'کوهستان')
+      const purchaseId = await addPurchase({ ...buy(supId, v, 10, 500, { paid: 0 }), received: false })
+      const assets = (await netWorth()).assets
+      await throws('سایزِ دارای خریدِ «در راه» حذف نمی‌شود', () => deleteVariants([v]))
+      await throws('بوتِ دارای خریدِ «در راه» حذف نمی‌شود', () => deleteProduct(pid))
+      await receivePurchase(purchaseId)
+      eq('بعد از رسیدن، ارزش جنس در دارایی ماند', (await netWorth()).assets, assets)
+      eq('موجودی ۱۰ رسید', (await db.variants.get(v))!.stockQty, 10)
+
+      // تبدیل قرضِ قرض‌دهنده به سرمایه در میان سال: سال از نو شروع نمی‌شود و برداشت‌ها نمی‌افتند
+      await new Promise((r) => setTimeout(r, 20))
+      await addPartnerWithdrawal('مالک', 1000, 'برداشت')
+      const before = await yearProfit()
+      const lender = (await db.suppliers.add({ name: 'گل لالا', kind: 'lender', balance: 0 })) as number
+      await addLoan(lender, 'گل لالا', 2000)
+      await new Promise((r) => setTimeout(r, 20))
+      await convertLoanToCapital(lender, 10)
+      eq('مفاد سال بعد از تبدیل همان است (نه زیان ساختگی)', await yearProfit(), before)
+      eq('تاریخ شروع سال دست نخورد', Number((await db.settings.get('partnershipStart'))!.value), started)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {

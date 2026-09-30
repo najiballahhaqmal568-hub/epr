@@ -18,7 +18,7 @@
 import { db, type Supplier } from '../db'
 import { afn, allocate, addPartnerWithdrawal, recordCapitalCash } from './ops'
 import { netWorth } from './networth'
-import { fmtMoney } from './format'
+import { fmtMoney, startOfDay } from './format'
 
 export const PARTNERSHIP_START = 'partnershipStart'
 
@@ -147,7 +147,8 @@ export async function startYear(ownerName: string): Promise<{ capital: number; s
  */
 export async function setYearStart(date: number): Promise<void> {
   if (!Number.isFinite(date) || date < 0) throw new Error('تاریخ شروع سال درست نیست')
-  if (date > Date.now()) throw new Error('تاریخ شروع سال نمی‌تواند بعد از امروز باشد')
+  // تاریخ‌گزین ظهرِ همان روز را می‌دهد؛ «امروز» هر ساعتش باشد آینده نیست، فقط روزهای بعد
+  if (startOfDay(date) > startOfDay(Date.now())) throw new Error('تاریخ شروع سال نمی‌تواند بعد از امروز باشد')
   const current = Number((await db.settings.get(PARTNERSHIP_START))?.value ?? 0)
   if (date === current) return
   const from = Math.min(current, date)

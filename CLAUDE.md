@@ -138,13 +138,15 @@ on direct-trade or goods-receipt documents, which compare their exact content.
 - A **cash** refund on a customer return is capped by the cash that really came in for that sale (`saleCashPaid`) minus
   cash already refunded from it; the rest must reduce debt. An exchange's own return is exempt (its value pays for the new
   item inside the same document, so the till only sees the top-up).
-- A product or size that still holds stock is **never deleted** (`ops.deleteProduct` / `ops.deleteVariants`): the deleted row
+- A product or size that still holds stock, or has a purchase still «در راه», is **never deleted** (`ops.deleteProduct` /
+  `ops.deleteVariants`; goods received onto a deleted size vanish the same way): the deleted row
   drops out of net worth and out of «کنترل حساب‌ها», so its value would vanish from the assets with no document. Stock is
   first set to 0 with «تنظیم موجودی» (an adjustment keeps the reason), then the row can go. A form must never write
   `deleted: true` on a variant itself.
 - The partnership start date moves only through `partnership.setYearStart()`. The year's profit is `assets + draws since the
   start − capitals` and the capitals were fixed on the start day, so moving the date across a withdrawal or a home/personal
-  expense (or into the future) shows a profit or loss that never happened — and «بستن سال» takes that number.
+  expense (or into a later day) shows a profit or loss that never happened — and «بستن سال» takes that number. For the
+  same reason nothing else restarts a running year: converting a lender's loan to capital keeps the start date.
 - A purchase has one registered sarraf: a second sarraf on it is refused, and a landing-cost correction can only return to
   the till the cash that really went out (`landingCashPart`).
 
@@ -166,7 +168,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1525 checks in 151 scenarios
+npm test          # tests/checks.ts — currently 1533 checks in 152 scenarios
 ```
 
 ```bash
