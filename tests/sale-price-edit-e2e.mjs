@@ -20,7 +20,7 @@ try {
     }
     window.result = async () => {
       const sales = (await db.sales.toArray()).filter((s) => !s.deleted)
-      return { sales: sales.map((s) => [s.total, s.paid, s.lines[0].unitPrice]), cash: (await db.cashMovements.toArray()).filter((x) => !x.deleted).reduce((sum, x) => sum + x.amount, 0) }
+      return { sales: sales.map((s) => [s.total, s.paid, s.lines[0].unitPrice, s.saleType]), cash: (await db.cashMovements.toArray()).filter((x) => !x.deleted).reduce((sum, x) => sum + x.amount, 0) }
     }
   })
   await page.getByRole('navigation').getByRole('button', { name: 'فروش', exact: true }).click()
@@ -30,8 +30,19 @@ try {
   // the owner's case: on the payment screen, change 200 to 170 by finger
   const price = page.getByLabel('قیمت فی جوړه سودا 40', { exact: true })
   assert.equal(await price.isVisible(), true, 'the price is on the payment screen')
+  // retail/wholesale is here too, above the price: switching re-reads the price of that kind
+  const kind = page.locator('.sale-payment-summary')
+  await page.getByRole('button', { name: 'عمده', exact: true }).click()
+  assert.equal(await price.inputValue(), '180', 'wholesale price')
+  assert.match(await kind.innerText(), /عمده/)
+  await page.getByRole('button', { name: 'پرچون', exact: true }).click()
+  assert.equal(await price.inputValue(), '200', 'back to the retail price')
+  assert.match(await kind.innerText(), /پرچون/)
+  const typeBox = await page.getByRole('group', { name: 'نوع فروش' }).boundingBox()
+  assert.ok(typeBox.y + typeBox.height < 844 - 90, `retail/wholesale is on the first screen (y=${typeBox.y})`)
   const box = await price.boundingBox()
   assert.ok(box.y + box.height < 844 - 90, `price box is on the first screen, above the nav (y=${box.y})`)
+  await page.locator('.sale-payment-summary').click() // leave the field so the next tap selects again
   await price.click()
   await price.pressSequentially('170')
   assert.equal(await price.inputValue(), '170', 'tap selects the old price, typing replaces it')
@@ -51,9 +62,17 @@ try {
 
   await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
   await page.getByText(/فروش ثبت شد/).first().waitFor()
-  assert.deepEqual(await page.evaluate(() => window.result()), { sales: [[170, 170, 170]], cash: 170 })
+  assert.deepEqual(await page.evaluate(() => window.result()), { sales: [[170, 170, 170, 'retail']], cash: 170 })
+
+  // a wholesale sale decided on the payment screen is recorded as wholesale, at the wholesale price
+  await page.getByRole('button', { name: /سودا 40 سیاه/ }).click()
+  await page.getByRole('button', { name: 'ادامه به پرداخت', exact: true }).click()
+  await page.getByRole('button', { name: 'عمده', exact: true }).click()
+  await page.getByRole('button', { name: 'ثبت فروش', exact: true }).click()
+  await page.waitForFunction(async () => (await window.result()).sales.length === 2)
+  assert.deepEqual(await page.evaluate(() => window.result()), { sales: [[170, 170, 170, 'retail'], [180, 180, 180, 'wholesale']], cash: 350 })
   assert.deepEqual(errors, [])
-  console.log('PASS sale price edit: 200 → 170 on the payment screen, cash follows, loss warning, cart agrees, books say 170')
+  console.log('PASS sale price edit: 200 → 170 on the payment screen, cash follows, loss warning, cart agrees, books say 170; retail/wholesale on the payment screen, wholesale recorded as wholesale')
 } finally {
   await app.close()
 }
