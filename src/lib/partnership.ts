@@ -18,6 +18,7 @@
 import { db, type Supplier } from '../db'
 import { afn, allocate, addPartnerWithdrawal, recordCapitalCash } from './ops'
 import { netWorth } from './networth'
+import { fmtMoney } from './format'
 
 export const PARTNERSHIP_START = 'partnershipStart'
 
@@ -133,6 +134,36 @@ export async function startYear(ownerName: string): Promise<{ capital: number; s
   })
 
   return { capital, share }
+}
+
+/**
+ * تاریخ شروع سال شراکت را جابه‌جا می‌کند — فقط وقتی عدد سال دروغ نمی‌شود.
+ *
+ * مفاد سال = دارایی + برداشت‌های سال − سرمایه‌ها؛ سرمایه‌ها در روز شروع ثابت شده‌اند. اگر تاریخ را
+ * از روی یک برداشت رد کنیم، آن برداشت از مجموع می‌افتد (یا اضافه می‌شود) و سرمایه همان می‌ماند:
+ * سال یک زیان یا مفادِ ساختگی نشان می‌دهد، و «بستن سال» همان عدد را از سرمایهٔ شرکا کم می‌کند.
+ * پس اگر بین تاریخ قبلی و تاریخ نو برداشتی یا مصرف خانه/شخصی هست، رد می‌شود. «برداشت» همان
+ * تعریفی است که کارت شرکا برای مجموع سال می‌خواند (حرکت صندوقِ برداشت، یا سند مصرف با drawAmount).
+ */
+export async function setYearStart(date: number): Promise<void> {
+  if (!Number.isFinite(date) || date < 0) throw new Error('تاریخ شروع سال درست نیست')
+  if (date > Date.now()) throw new Error('تاریخ شروع سال نمی‌تواند بعد از امروز باشد')
+  const current = Number((await db.settings.get(PARTNERSHIP_START))?.value ?? 0)
+  if (date === current) return
+  const from = Math.min(current, date)
+  const to = Math.max(current, date)
+  const [movements, expenses] = await Promise.all([db.cashMovements.toArray(), db.expenses.toArray()])
+  const inRange = (d: number) => d >= from && d < to
+  const draws = [
+    ...movements
+      .filter((m) => !m.deleted && inRange(m.date) && (m.type === 'withdrawal' || ((m.type === 'homeExpense' || m.type === 'personalExpense') && !m.drawAccountedByExpense)))
+      .map((m) => Math.abs(m.amount)),
+    ...expenses.filter((e) => !e.deleted && inRange(e.date) && typeof e.drawAmount === 'number').map((e) => e.drawAmount as number)
+  ]
+  if (draws.length) {
+    throw new Error(`بین این دو تاریخ ${draws.length} برداشت یا مصرف خانه/شخصی (جمعاً ${fmtMoney(draws.reduce((x, y) => x + y, 0))}) ثبت شده؛ با جابه‌جا کردن تاریخ، مفاد سال به‌غلط عوض می‌شود. برای سالِ نو از «بستن سال» یا «شروع سال مالی» استفاده کنید.`)
+  }
+  await db.settings.put({ key: PARTNERSHIP_START, value: date })
 }
 
 export type SettleChoice = 'take' | 'reinvest' | 'exit'

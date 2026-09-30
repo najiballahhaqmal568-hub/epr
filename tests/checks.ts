@@ -48,6 +48,8 @@ import {
   addOpeningDebt,
   addAdjustment,
   addVariant,
+  deleteVariants,
+  deleteProduct,
   setOpeningStock,
   setPurchaseCost,
   addCapital,
@@ -118,7 +120,7 @@ import { saleDraftTotal } from '../src/lib/saleDrafts'
 import { kindFigures, per100, salesBuckets, waterfall } from '../src/lib/reportFigures'
 import { ErrorBoundary } from '../src/components/ErrorBoundary'
 import { rebuildCosts } from '../src/lib/costing'
-import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare } from '../src/lib/partnership'
+import { addPartner, startYear, settleYear, listPartners, totalCapital, remainingCapital, setPartnerCapital, setPartnerShare, setYearStart } from '../src/lib/partnership'
 import { getServerConfig, isPasswordRecoveryUrl, passwordRecoveryRedirectUrl } from '../src/lib/supa'
 import { dailyExpenseItems, dailyReminderItems, setShopClosed } from '../src/lib/dailyExpenses'
 import { productReorderInfo } from '../src/lib/reorder'
@@ -5208,6 +5210,49 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'شراکت — تاریخ شروع سال را نمی‌شود از روی برداشت رد کرد؛ عدد سال دروغ نمی‌شود',
+    run: async () => {
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(100000)
+      await addPurchase(buy(supId, vId, 100, 500, { paid: 50000 }))
+      // برداشتی که پیش از شروع سال بود؛ سرمایهٔ روز شروع آن را در خود دارد
+      const before = Date.now() - 5000
+      await db.cashMovements.add({ date: before, type: 'withdrawal', amount: -700, partnerName: 'مالک', note: 'برداشت سال پیش' })
+      await startYear('مالک')
+      const started = Number((await db.settings.get('partnershipStart'))!.value)
+      // عدد سال همان که کارت شرکا می‌خواند: دارایی + برداشت‌های از شروع − سرمایه‌ها
+      const yearProfit = async (start: number) => {
+        const draws = (await db.cashMovements.toArray()).filter((m) => !m.deleted && m.date >= start && m.type === 'withdrawal').reduce((s, m) => s - m.amount, 0)
+        return (await netWorth()).assets + draws - (await totalCapital())
+      }
+      eq('روز اول مفاد صفر', await yearProfit(started), 0)
+
+      // یک برداشت بعد از شروع: مفاد سال هنوز صفر است (دارایی کم شد و برداشت هم شمرده شد)
+      await db.cashMovements.add({ date: started + 5000, type: 'withdrawal', amount: -1000, partnerName: 'مالک', note: 'برداشت' })
+      eq('برداشت مفاد را عوض نمی‌کند', await yearProfit(started), 0)
+
+      // تاریخ را از روی برداشت رد کردن رد می‌شود؛ تاریخ شروع همان می‌ماند و عدد سال هم
+      await throws('جابه‌جایی به بعد از برداشت رد می‌شود', () => setYearStart(started + 10000))
+      eq('تاریخ شروع دست‌نخورده', Number((await db.settings.get('partnershipStart'))!.value), started)
+      eq('عدد سال دست‌نخورده', await yearProfit(started), 0)
+      await throws('تاریخ آینده رد می‌شود', () => setYearStart(Date.now() + 86400000))
+
+      // به عقب بردنِ تاریخ از روی برداشتِ پیش از شروع، آن را داخل سال می‌آورد و مفاد را ۷۰۰ بالا می‌برد
+      eq('برداشت پیش از شروع، عدد سال را عوض نمی‌کند', await yearProfit(started), 0)
+      eq('اگر تاریخ از روی آن رد می‌شد، مفاد ساختگی می‌شد', await yearProfit(before - 1), 700)
+      await throws('پاک کردن تاریخ (۰) آن برداشت را به مفاد اضافه می‌کرد و رد می‌شود', () => setYearStart(0))
+      await throws('به عقب بردن از روی آن برداشت رد می‌شود', () => setYearStart(before - 1))
+      eq('تاریخ باز هم دست‌نخورده', Number((await db.settings.get('partnershipStart'))!.value), started)
+
+      // جابه‌جایی‌ای که از روی هیچ برداشتی رد نمی‌شود (گذشتهٔ نزدیک) درست است و عدد را نمی‌شکند
+      await setYearStart(started - 2000)
+      eq('تاریخ بدون برداشت در میانه جابه‌جا شد', Number((await db.settings.get('partnershipStart'))!.value), started - 2000)
+      eq('عدد سال باز هم صفر', await yearProfit(started - 2000), 0)
+      await setYearStart(started - 2000) // بدون تغییر: خطا نمی‌دهد
+    }
+  },
+  {
     name: 'شراکت — بستن سال اتمی است و سهم درست تقسیم می‌شود',
     run: async () => {
       const supId = await newSupplier()
@@ -5282,6 +5327,44 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await db.variants.update(vId, { stockQty: 0 })
       for (const a of adjustments) await applyDocEffects('adjustments', a as unknown as Record<string, unknown>, false)
       eq('موبایل نو همان ۲۰ را می‌سازد', (await db.variants.get(vId))!.stockQty, 20)
+    }
+  },
+  {
+    name: 'حذف بوت و سایز — فقط وقتی موجودی ندارد؛ وگرنه ارزش گدام بی‌سند غیب می‌شود',
+    run: async () => {
+      const pid = (await db.products.add({ name: 'کوهستان', createdAt: Date.now() })) as number
+      const mk = (size: string, qty: number) =>
+        addVariant({ productId: pid, size, color: 'سیاه', purchasePrice: 500, retailPrice: 900, wholesalePrice: 800, stockQty: qty, lowStock: 2 }, 'کوهستان')
+      const held = await mk('40', 10)
+      const empty = await mk('41', 0)
+      eq('ارزش گدام: ۱۰ جوړه × ۵۰۰', (await netWorth()).stock, 5000)
+
+      // بوتی که هنوز موجودی دارد حذف نمی‌شود، و پیام می‌گوید چقدر مانده و چه باید کرد
+      let said = ''
+      try { await deleteProduct(pid) } catch (e) { said = e instanceof Error ? e.message : String(e) }
+      is('حذف بوتِ دارای موجودی رد شد', said.includes('۱۰') || said.includes('10'), true)
+      is('پیام راه را می‌گوید: تنظیم موجودی', said.includes('تنظیم موجودی'), true)
+      is('بوت سر جایش ماند', Boolean((await db.products.get(pid))!.deleted), false)
+      eq('ارزش گدام همان ۵٬۰۰۰', (await netWorth()).stock, 5000)
+
+      // حذف سایزِ دارای موجودی هم رد می‌شود — حتی وقتی سایز خالی هم همراهش است، هیچ‌کدام حذف نمی‌شود
+      await throws('حذف سایزِ دارای موجودی رد می‌شود', () => deleteVariants([empty, held]))
+      is('سایز خالی هم حذف نشد (همه‌یا‌هیچ)', Boolean((await db.variants.get(empty))!.deleted), false)
+      is('سایز دارای موجودی سر جایش', Boolean((await db.variants.get(held))!.deleted), false)
+
+      // سایز بدون موجودی راحت حذف می‌شود
+      await deleteVariants([empty])
+      is('سایز خالی حذف شد', Boolean((await db.variants.get(empty))!.deleted), true)
+      eq('ارزش گدام تغییر نکرد', (await netWorth()).stock, 5000)
+
+      // راه درست: اول موجودی با سند صفر شود، بعد حذف
+      await setOpeningStock(held, 0, 'کوهستان')
+      eq('سند صفر کردن نوشته شد (رد پا می‌ماند)', (await db.adjustments.filter((a) => a.variantId === held).toArray()).length, 2)
+      await deleteProduct(pid)
+      is('حالا بوت حذف شد', Boolean((await db.products.get(pid))!.deleted), true)
+      is('سایز هم حذف شد', Boolean((await db.variants.get(held))!.deleted), true)
+      eq('ارزش گدام صفر — و این بار با سند', (await netWorth()).stock, 0)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {

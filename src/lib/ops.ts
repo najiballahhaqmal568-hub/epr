@@ -2857,6 +2857,39 @@ export async function addVariant(
 }
 
 /**
+ * حذف سایزها — فقط سایزی که موجودی ندارد.
+ * حذف یک سایزِ دارای موجودی، ارزشش را بی‌سند از گدام، دارایی و مفاد کم می‌کند و «کنترل حساب‌ها»
+ * هم آن را نمی‌بیند (ردیف حذف‌شده را نمی‌شمارد). پس اول موجودی با «تنظیم موجودی» صفر می‌شود؛ آن
+ * سند دلیلش را نگه می‌دارد. سایز حذف‌شده با فروش‌های قدیمی‌اش می‌ماند و فقط از فهرست می‌رود.
+ */
+export async function deleteVariants(variantIds: number[]): Promise<void> {
+  if (!variantIds.length) return
+  return db.transaction('rw', [db.variants, db.products], async () => {
+    const rows = (await db.variants.bulkGet(variantIds)).filter((v): v is Variant => Boolean(v) && !v!.deleted)
+    const held = rows.filter((v) => v.stockQty !== 0)
+    if (held.length) {
+      const pairs = held.reduce((s, v) => s + v.stockQty, 0)
+      throw new Error(`سایز ${held.map((v) => v.size).join('، ')} هنوز ${pairs} جوړه در گدام دارد — اول موجودی را با «تنظیم موجودی» صفر کنید (دلیلش ثبت می‌شود)، بعد حذف کنید`)
+    }
+    for (const v of rows) await db.variants.update(v.id!, { deleted: true })
+  })
+}
+
+/** حذف یک بوت با همهٔ سایزهایش — همان قاعدهٔ deleteVariants: اگر جایی موجودی مانده، رد می‌شود. */
+export async function deleteProduct(productId: number): Promise<void> {
+  return db.transaction('rw', [db.variants, db.products], async () => {
+    const variants = (await db.variants.where('productId').equals(productId).toArray()).filter((v) => !v.deleted)
+    const held = variants.filter((v) => v.stockQty !== 0)
+    if (held.length) {
+      const pairs = held.reduce((s, v) => s + v.stockQty, 0)
+      throw new Error(`این بوت هنوز ${pairs} جوړه در گدام دارد (سایز ${held.map((v) => v.size).join('، ')}) — اول موجودی را با «تنظیم موجودی» صفر کنید (دلیلش ثبت می‌شود)، بعد حذف کنید`)
+    }
+    for (const v of variants) await db.variants.update(v.id!, { deleted: true })
+    await db.products.update(productId, { deleted: true })
+  })
+}
+
+/**
  * اصلاح قیمت خرید یک سایز — با سند، نه با نوشتنِ مستقیمِ عدد.
  * قیمت از روی اسناد بازسازی می‌شود، پس تغییری که سند ندارد دفعهٔ بعد پاک می‌شود.
  */

@@ -5,7 +5,7 @@ import { fmtNum, fmtMoney, fmtDate, fmtDateShort, toDateInput, fromDateInput } f
 import { Modal, Field, inputCls, PrimaryBtn, Card } from '../../components/ui'
 import { addCapital, addPartnerWithdrawal, afn } from '../../lib/ops'
 import { netWorth } from '../../lib/networth'
-import { addPartner, setPartnerCapital, setPartnerShare, settleYear, type SettleChoice } from '../../lib/partnership'
+import { addPartner, setPartnerCapital, setPartnerShare, setYearStart, settleYear, type SettleChoice } from '../../lib/partnership'
 import { parseNum } from '../../lib/format'
 import Row from './Row'
 
@@ -27,6 +27,7 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
+  const [dateError, setDateError] = useState('')
   // فیصدی نو برای اصلاح سهم شریک
   const [shareStr, setShareStr] = useState('')
 
@@ -204,9 +205,13 @@ export function PartnersCard({ netProfit }: { netProfit: number }) {
           type="date"
           className="rounded-lg border border-slate-300 px-2 py-1"
           value={start ? toDateInput(start) : ''}
-          onChange={(e) => void db.settings.put({ key: 'partnershipStart', value: e.target.value ? fromDateInput(e.target.value) : 0 })}
+          onChange={(e) => {
+            setDateError('')
+            setYearStart(e.target.value ? fromDateInput(e.target.value) : 0).catch((err) => setDateError(err instanceof Error ? err.message : String(err)))
+          }}
         />
       </label>
+      {dateError && <p role="alert" className="mt-1 text-xs font-bold text-red-600">{dateError}</p>}
 
       {showAdd && (
         <Modal title="شریک جدید در میان سال" onClose={() => setShowAdd(false)}>
