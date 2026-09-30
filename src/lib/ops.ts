@@ -2593,7 +2593,11 @@ export async function addAdjustment(adj: Adjustment): Promise<number> {
 }
 
 /** مرجوعی مشتری: برگشت به گدام یا داغمه + تصفیه (نقد/کاهش قرض) */
-export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
+/**
+ * @param opts.exchange تبادله: ارزش جنسِ برگشتی همان لحظه بابت جنس نو پرداخت می‌شود (فروش نو «paid» را با آن می‌گیرد
+ *   و صندوق فقط تفاوت را می‌بیند). پس «بازپرداخت نقدی»اش پولِ بیرون‌رفته نیست و سقفِ نقدِ رسیده اینجا نمی‌آید.
+ */
+export async function addCustomerReturn(ret: ReturnDoc, opts: { exchange?: boolean } = {}): Promise<number> {
   ret.amount = afn(ret.amount)
   ret.lines.forEach((l) => (l.unitPrice = afn(l.unitPrice)))
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
@@ -2609,6 +2613,15 @@ export async function addCustomerReturn(ret: ReturnDoc): Promise<number> {
         if (ret.amount < 0) throw new Error('پول مرجوعی منفی نمی‌شود')
         if (ret.amount > checked.refund.amount) {
           throw new Error(`پول مرجوعی از پولی که مشتری برای این جوړه‌ها داده بیشتر است — حداکثر ${fmtMoney(checked.refund.amount)} (قیمت منهای سهم تخفیف فاکتور).`)
+        }
+        // نقد فقط تا اندازهٔ پولی که واقعاً آمده و هنوز پس داده نشده؛ باقی از قرض مشتری کم می‌شود.
+        // وگرنه فروش قرضی بدون هیچ نقدی، با «بازپرداخت نقدی» از صندوق پول می‌برد و قرض هم می‌ماند.
+        if (!opts.exchange && ret.settlement === 'cashRefund' && ret.amount > 0) {
+          const refundedCash = prior.filter((r) => r.settlement === 'cashRefund').reduce((sum, r) => sum + r.amount, 0)
+          const room = Math.max(0, saleCashPaid(sale) - refundedCash)
+          if (ret.amount > room) {
+            throw new Error(`نقد بیشتر از پولی که مشتری واقعاً داده پس داده نمی‌شود — حداکثر ${fmtMoney(room)}. باقی را با «کم کردن از قرض» ثبت کنید.`)
+          }
         }
         // هرچه از قیمت جوړه‌ها پس داده نشد (سهم تخفیف و هرچه دکان نگه داشت) روی سند می‌ماند،
         // تا مفاد مرجوعی همان پولی باشد که واقعاً برگشت
@@ -2775,7 +2788,7 @@ export async function addExchange(ret: ReturnDoc, sale: Sale): Promise<void> {
   return db.transaction('rw', [db.returns, db.sales, db.variants, db.customers, db.adjustments, db.cashMovements], async () => {
     // اول فروش (پول وارد صندوق)، بعد مرجوعی — تا در تبادله صندوق به اشتباه «کم» حساب نشود
     await addSale(sale)
-    await addCustomerReturn(ret)
+    await addCustomerReturn(ret, { exchange: true })
   })
 }
 

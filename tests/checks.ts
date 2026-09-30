@@ -5595,6 +5595,70 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('طلب صراف ۵۰', (await db.suppliers.get(X.id))!.balance, 50)
       is('کنترل حساب‌ها هنوز سالم', (await runIntegrityCheck()).mismatches.length, 0)
     }
+  },
+  {
+    name: 'بستن سال — بدون ثبت پرداخت، سهمِ نقد یا خروج رد می‌شود؛ با پرداخت، سال نو با مفاد صفر شروع می‌شود',
+    run: async () => {
+      const cId = await newCustomer()
+      const supId = await newSupplier()
+      const vId = await makeVariant()
+      await seedCash(100000)
+      await addPurchase(buy(supId, vId, 100, 500, { paid: 50000 }))
+      await addPartner({ name: 'شریک', capital: 20000, share: 40 })
+      await startYear('مالک')
+      await addSale(sell(vId, 10, 900, { customerId: cId, customerName: 'مشتری' })) // مفاد ۴٬۰۰۰
+      const profit = (await netWorth()).assets - (await totalCapital())
+      eq('مفاد سال', profit, 4000)
+      const partners = await listPartners()
+      const owner = partners.find((p) => p.name === 'مالک')!
+      const mate = partners.find((p) => p.name === 'شریک')!
+      const capBefore = await totalCapital()
+      const startBefore = (await db.settings.get('partnershipStart'))?.value
+
+      // بدون ثبت پرداخت، سهمی که «گرفته می‌شود» هیچ‌جا نمی‌نشست و سال بعد دوباره مفاد نشان می‌داد
+      await throws('گرفتن سهم بدون ثبت پرداخت رد می‌شود', () => settleYear({ choices: { [owner.id!]: 'take', [mate.id!]: 'take' }, payCash: false, yearProfit: profit, withdrawnBy: () => 0 }))
+      await throws('خروج بدون ثبت پرداخت رد می‌شود', () => settleYear({ choices: { [owner.id!]: 'reinvest', [mate.id!]: 'exit' }, payCash: false, yearProfit: profit, withdrawnBy: () => 0 }))
+      eq('سرمایه‌ها دست نخورد', await totalCapital(), capBefore)
+      is('سال باز ماند', (await db.settings.get('partnershipStart'))?.value, startBefore)
+      is('شریک نماند حذف شود', (await listPartners()).length, 2)
+
+      // با ثبت پرداخت: مالک ۶۰٪ = ۲٬۴۰۰ و شریک ۴۰٪ = ۱٬۶۰۰ از صندوق می‌رود؛ سال نو با مفاد صفر
+      const cashBefore = await cashBalance()
+      await settleYear({ choices: { [owner.id!]: 'take', [mate.id!]: 'take' }, payCash: true, yearProfit: profit, withdrawnBy: () => 0 })
+      eq('صندوق ۴٬۰۰۰ کم شد', cashBefore - (await cashBalance()), 4000)
+      eq('سرمایه‌ها همان ماند', await totalCapital(), capBefore)
+      eq('روز اول سال نو: مفاد دقیقاً صفر', (await netWorth()).assets - (await totalCapital()), 0)
+    }
+  },
+  {
+    name: 'مرجوعی — نقد فقط تا اندازهٔ پولی که واقعاً آمده؛ باقی از قرض کم می‌شود',
+    run: async () => {
+      const vId = await makeVariant({ purchasePrice: 500 })
+      await setOpeningStock(vId, 20)
+      await seedCash(5000)
+      const cId = await newCustomer('احمد')
+      // ۲ جوړه ۱٬۰۰۰: مشتری ۳۰۰ نقد داد و ۱٬۷۰۰ قرضدار شد
+      const saleId = await addSale(sell(vId, 2, 1000, { customerId: cId, customerName: 'احمد', saleType: 'retail', total: 2000, paid: 300 }))
+      const sale = (await db.sales.get(saleId))!
+      const back = (qty: number, amount: number, settlement: 'cashRefund' | 'reduceDebt') => addCustomerReturn({ date: Date.now(), kind: 'customer', partyId: cId, partyName: 'احمد', refId: saleId, saleType: 'retail', lines: [{ ...sale.lines[0], qty, restock: true }], reason: 'سایز', settlement, amount })
+      const debt = async () => (await db.customers.get(cId))!.balance
+      const cash0 = await cashBalance()
+      eq('قرض احمد ۱٬۷۰۰', await debt(), 1700)
+
+      // یک جوړه ۱٬۰۰۰ برگشت: ۱٬۰۰۰ نقد پس دادن یعنی ۷۰۰ که هیچ‌وقت نیامده از صندوق می‌رود
+      await throws('نقد بیشتر از ۳۰۰ نقدِ رسیده رد می‌شود', () => back(1, 1000, 'cashRefund'))
+      eq('رد شدن صندوق را تغییر نداد', await cashBalance(), cash0)
+      eq('و قرض را', await debt(), 1700)
+      // راه درست: از قرض کم شود
+      await back(1, 1000, 'reduceDebt')
+      eq('قرض ۷۰۰ شد', await debt(), 700)
+      eq('صندوق دست نخورد', await cashBalance(), cash0)
+      // جوړهٔ دوم: ۳۰۰ نقد رسیده و هنوز پس داده نشده — همان مقدار مجاز است، نه بیشتر
+      await throws('باز هم بیشتر از ۳۰۰ رد می‌شود', () => back(1, 1000, 'cashRefund'))
+      await back(1, 300, 'cashRefund').catch(() => undefined)
+      is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+      is('صندوق هیچ‌وقت بیشتر از پولِ آمده بیرون نرفت', cash0 - (await cashBalance()) <= 300, true)
+    }
   }
 ]
 
