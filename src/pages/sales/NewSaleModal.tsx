@@ -216,6 +216,15 @@ export function NewSaleModal({
   const lineCost = (l: SaleLine) => variants?.find((v) => v.id === l.variantId)?.purchasePrice ?? 0
   /** Loss per pair when the price is under cost; 0 when cost is unknown. */
   const lineLoss = (l: SaleLine) => (lineCost(l) > 0 ? lossPerPair(l.unitPrice, lineCost(l)) : 0)
+  const setLinePrice = (i: number, text: string) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(text) } : x)))
+  /** هشدار فروش زیر قیمت خرید — کارگر قیمت خرید را نمی‌بیند، فقط هشدار را */
+  const lossWarning = (l: SaleLine) => {
+    const loss = lineLoss(l)
+    if (!loss) return null
+    return <p role="alert" className="sale-loss-warning">
+      {isStaff ? 'این قیمت از قیمت خرید کمتر است — پیش از فروش با مالک مشوره کنید.' : `زیر قیمت خرید (${fmtMoney(lineCost(l))}) — زیان ${fmtMoney(loss * l.qty)}`}
+    </p>
+  }
   useEffect(() => {
     if (lines.length && startedAt.current === null) { startedAt.current = Date.now(); taps.current = 1 }
     if (!lines.length) startedAt.current = null
@@ -538,18 +547,10 @@ export function NewSaleModal({
               aria-label={`قیمت ${l.productName} ${l.size}`}
               aria-invalid={lineLoss(l) > 0}
               value={l.unitPrice}
-              onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitPrice: parseNum(e.target.value) } : x)))}
+              onChange={(e) => setLinePrice(i, e.target.value)}
             />
             <span className="mr-1 text-xs text-slate-500">قیمت فی جوړه</span>
-            {(() => {
-              // هشدار فروش زیر قیمت خرید — کارگر قیمت خرید را نمی‌بیند، فقط هشدار را
-              const cost = lineCost(l)
-              const loss = lineLoss(l)
-              if (!loss) return null
-              return <p role="alert" className="sale-loss-warning">
-                {isStaff ? 'این قیمت از قیمت خرید کمتر است — پیش از فروش با مالک مشوره کنید.' : `زیر قیمت خرید (${fmtMoney(cost)}) — زیان ${fmtMoney(loss * l.qty)}`}
-              </p>
-            })()}
+            {lossWarning(l)}
           </div>
           <div className="sale-quantity-actions">
             <button aria-label={`کاهش تعداد ${l.productName}`} disabled={l.qty <= 1} className="quantity-step" onClick={() => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))}>
@@ -576,6 +577,29 @@ export function NewSaleModal({
 
       <div hidden={stage !== 'payment'}>
       <div className="sale-payment-summary"><div><span>{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه · {saleType === 'retail' ? 'پرچون' : 'عمده'}</span><p className="mt-1 font-bold text-slate-800">{selectedCustomer?.name ?? (remainder > 0 ? 'مشتری را انتخاب کنید' : 'مشتری نقدی')}</p></div><div><span className="block text-xs">قابل پرداخت</span><strong>{fmtMoney(total)}</strong></div></div>
+      {/* قیمت هر جوړه همین‌جا هم عوض می‌شود — در تیلفون سبد زیر همهٔ جنس‌ها است و از نوار «نقد/قرض» مستقیم به اینجا می‌آییم */}
+      <div className="sale-payment-lines mb-3">
+        {lines.map((l, i) => (
+          <div key={l.variantId} className="border-b border-slate-100 py-2 last:border-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1 text-sm font-bold">{l.productName} {l.size} {l.color} <span className="font-normal text-slate-500">× {fmtNum(l.qty)}</span></span>
+              <label className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
+                فی جوړه
+                <input
+                  className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-2 text-base text-slate-900"
+                  inputMode="numeric"
+                  aria-label={`قیمت فی جوړه ${l.productName} ${l.size}`}
+                  aria-invalid={lineLoss(l) > 0}
+                  value={l.unitPrice}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onChange={(e) => setLinePrice(i, e.target.value)}
+                />
+              </label>
+            </div>
+            {lossWarning(l)}
+          </div>
+        ))}
+      </div>
       {stockInvalid && <p role="alert" className="mb-3 text-sm text-red-700">موجودی یا تعداد سبد درست نیست؛ به انتخاب برگردید و سبد را اصلاح کنید.</p>}
       <div className="sale-payment-fields">
       <div className="sale-payment-customer">
