@@ -31,8 +31,8 @@ const PERIODS: { id: Period; label: string }[] = [
   { id: 'custom', label: 'دلخواه' }
 ]
 
-export default function Reports({ onBack }: { onBack: () => void }) {
-  const [period, setPeriod] = useState<Period>('month')
+export default function Reports({ onBack, initialPeriod = 'month' }: { onBack: () => void; initialPeriod?: 'month' | 'year' }) {
+  const [period, setPeriod] = useState<Period>(initialPeriod)
   const [showDetails, setShowDetails] = useState(false)
   const [kind, setKind] = useState<SaleKind>('all')
   const [fromStr, setFromStr] = useState(toDateInput(startOfMonth()))

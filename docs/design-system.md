@@ -87,9 +87,12 @@ columns line up. The money amount is the largest thing on its card. Font size is
 The owner opens the app standing at the counter, so the page answers three questions in this order:
 *how is the month*, *what do I do now*, *where is my money*.
 
-- **`HomeHero`** — the dark lapis card. Always the month («▲ مفاد» / «▼ زیان») with two bars (sales profit vs
-  expenses on one scale) and the same `expenseAlert` text the reports use. Staff see only today's sales. It
-  never disappears at any hour: a hidden number is worse than an extra one.
+- **`HomeHero`** — the dark lapis card. The headline is the **year** (1 Hamal → today, `startOfYear()`, the same
+  `profitSummary` and bound as «امسال» in the reports; a tap opens the report on «امسال») with two bars (sales
+  profit vs expenses on one scale). One heavy-expense month can read as a loss while the year is in profit, so
+  the owner sees the year first. Below it, the month («▲ مفاد» / «▼ زیان»), the same `expenseAlert` text the
+  reports use, the change against last month and the month target; a tap explains the month. Staff see only
+  today's sales. It never disappears at any hour: a hidden number is worse than an extra one.
 - **`TimePrompt`** — a separate light card with a gold border, only in the morning («صندوق را بشمارید» with the
   till figure the app expects; «بعداً» is remembered for the day in the `homeMorningSkip` setting) and in the
   evening («روز را ببندید»). It states one fact and offers one button.
@@ -147,4 +150,5 @@ The top of «راپورها» answers, in order: «مفاد کردم؟» (hero),
 | `tests/documents-e2e.mjs` | who saved it, sale/expense history, branded receipt |
 | `tests/first-day-e2e.mjs` | guide ticks from data, empty screens act |
 | `tests/backup-reminder-e2e.mjs` | reminder rule on the real screen, real download is a valid backup, snooze, last backup in Settings, staff excluded, AA contrast |
+| `tests/home-year-e2e.mjs` | year headline in profit while the month is a loss, last year excluded, report «امسال» agrees, contrast |
 | `tests/home-e2e.mjs` | month card and bars, morning/evening card, money map on one scale, recent sale opens, 5-tab nav, receive money, staff view |

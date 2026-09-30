@@ -94,6 +94,8 @@ export default function App() {
     setTab('purchases')
   }
 
+  // راپور از خانه (مفاد امسال) با «امسال» باز می‌شود و «بازگشت» به خانه برمی‌گردد
+  const [reportsFrom, setReportsFrom] = useState<'more' | 'dashboard'>('more')
   const goTo = (target: string) => {
     if (target.startsWith('sale:')) {
       const id = Number(target.slice('sale:'.length))
@@ -127,6 +129,11 @@ export default function App() {
     }
     if (target === 'purchases') {
       openPurchases('history', 'inventory')
+      return
+    }
+    if (target === 'reports-year') {
+      setReportsFrom('dashboard')
+      setTab('reports')
       return
     }
     if (target === 'expenses') {
@@ -457,6 +464,7 @@ export default function App() {
               return
             }
             if (target === 'reports') {
+              setReportsFrom('more')
               setTab('reports')
               return
             }
@@ -480,7 +488,7 @@ export default function App() {
       {tab === 'expenses' && <Expenses openNew={openNewExpense} start={expensesStart} onBack={() => setTab(expensesBack)} />}
       {tab === 'customers' && <Customers onBack={() => setTab('accounts')} />}
       {tab === 'settings' && <Settings section={settingsSection} onBack={() => setTab('more')} isStaff={isStaff || readOnly} onLogout={() => { try { sessionStorage.removeItem('epr_sale_working_v1') } catch { /* storage unavailable */ } setAuth('anon') }} />}
-      {tab === 'reports' && !isStaff && <Reports onBack={() => setTab('more')} />}
+      {tab === 'reports' && !isStaff && <Reports initialPeriod={reportsFrom === 'dashboard' ? 'year' : 'month'} onBack={() => setTab(reportsFrom)} />}
       </div>
       </main>
       <UndoToast />
