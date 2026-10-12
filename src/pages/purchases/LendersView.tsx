@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../../lib/networth'
 import { accessFlags, db, type Payment, type Supplier, type LenderAction } from '../../db'
@@ -129,6 +129,11 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const [editPhone, setEditPhone] = useState(lender.phone ?? '')
   const [editNote, setEditNote] = useState(lender.note ?? '')
   const [error, setError] = useState('')
+  // پیام خطا بالای فورم است؛ وقتی دکمه پایین صفحه زده می‌شود، صفحه را تا پیام بالا ببر تا مالک دلیل را ببیند
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [error])
   // سند پولی که مالک می‌خواهد اصلاح کند — بدون پاک کردن
   const [editingLenderDoc, setEditingLenderDoc] = useState<Payment | null>(null)
   // تأیید دومرحله‌ای شراکت: نام دقیق باید تایپ شود
@@ -183,6 +188,9 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const ledger = buildLenderLedger(payments ?? [], l.id!, lenderSales ?? [])
   const summary = summarizeLenderAccount(payments ?? [], l.id!)
   const goodsTotal = goodsLines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)
+  // همان قاعدهٔ ops.giveGoodsToLender: کفش بابت تسویه فقط تا اندازهٔ قرض فعلی ما به او
+  const settlementRoom = Math.max(0, owed)
+  const settlementTooBig = goodsMode === 'goodsSettlement' && goodsLines.length > 0 && goodsTotal > settlementRoom
   const openingCount = parseNum(qty)
   const openingPrice = parseNum(agreedPrice)
   const openingDraftStarted = manualOpeningGoods
@@ -236,7 +244,11 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
 
   return (
     <Modal title={l.name} onClose={onClose}>
-      {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
+      {error && (
+        <p ref={errorRef} className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">
+          ⚠️ {error}
+        </p>
+      )}
 
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
         <p className="text-sm text-slate-500">{owed > 0 ? 'قرض ما به او' : owed < 0 ? 'طلب ما از او' : 'حساب تصفیه است'}</p>
@@ -533,7 +545,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           </Field>
           <p className="mb-2 rounded-lg bg-orange-50 p-2 text-xs text-orange-800">
             {goodsMode === 'goodsSettlement'
-              ? 'قیمت توافقی از قرض ما کم می‌شود؛ ارزش کل نمی‌تواند بیشتر از قرض فعلی باشد.'
+              ? `قیمت توافقی از قرض ما کم می‌شود؛ ارزش کل نمی‌تواند بیشتر از قرض فعلی ما به او (${fmtMoney(settlementRoom)}) باشد.`
               : 'قیمت توافقی طلب دکان از او است و در حساب خالص کم می‌شود.'}
           </p>
           <Field label="مدل، سایز و رنگ *">
@@ -631,8 +643,17 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           <Field label="یادداشت و جزئیات">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً بابت قسط ماه" />
           </Field>
+          {settlementTooBig && (
+            <p className="mb-2 rounded-lg bg-red-50 p-2 text-sm font-bold text-red-700">
+              {owed > 0
+                ? `قرض ما به او فقط ${fmtMoney(owed)} است ولی ارزش کفش ${fmtMoney(goodsTotal)} است. کفش را کم کنید، یا برای بیشتر از قرض «کفش قرضی برای خودش» را انتخاب کنید.`
+                : owed < 0
+                  ? `ما به او قرض نداریم؛ برعکس او ${fmtMoney(-owed)} به ما بدهکار است. پس کفش بابت تسویه ثبت نمی‌شود — «کفش قرضی برای خودش» را انتخاب کنید.`
+                  : 'ما به او قرض نداریم، پس کفش بابت تسویه ثبت نمی‌شود — «کفش قرضی برای خودش» را انتخاب کنید.'}
+            </p>
+          )}
           <PrimaryBtn
-            disabled={goodsLines.length === 0}
+            disabled={goodsLines.length === 0 || settlementTooBig}
             onClick={async () => {
               try {
                 const currentLines = goodsLines.filter((line): line is LenderGoodsLine => typeof line.variantId === 'number')
