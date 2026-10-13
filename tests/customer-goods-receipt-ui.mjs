@@ -114,6 +114,10 @@ try {
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: warehouseUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
   await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
+  // «فعال» is still on screen from the owner render above; the role is read by a live query that refreshes a moment
+  // later. Wait for that refresh (the cost disappears), then check it stays hidden.
+  await page.waitForFunction(() => !document.body.innerText.includes('قیمت توافقی'), null, { timeout: 8000 })
+  await page.waitForTimeout(300)
   assert.equal(await page.getByText(/قیمت توافقی/).count(), 0, 'staff receipt detail hides acquisition cost')
   assert.equal(await page.getByRole('button', { name: 'اصلاح سند' }).count(), 0, 'staff receipt detail has no mutation controls')
   await page.evaluate(async () => {
