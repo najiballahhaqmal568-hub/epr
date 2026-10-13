@@ -16,7 +16,7 @@ try {
   await page.getByRole('button', { name: 'تأمین‌کنندگان', exact: true }).click()
   await page.getByRole('group', { name: 'نوع حساب خرید' }).getByRole('button', { name: 'قرض‌دهنده‌ها' }).click()
   await page.getByRole('region', { name: 'فهرست قرض‌دهندگان' }).getByRole('button', { name: /اجمل/ }).click()
-  await page.getByRole('button', { name: 'کفش به او', exact: true }).click()
+  await page.getByRole('button', { name: 'کفش دادیم', exact: true }).click()
   const picker = page.locator('select').filter({ hasText: 'انتخاب کنید...' })
   await picker.selectOption(await picker.locator('option', { hasText: 'Go pu' }).getAttribute('value'))
   await page.getByPlaceholder('قیمت توافق‌شده').fill('1500')
