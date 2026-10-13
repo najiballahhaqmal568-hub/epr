@@ -18,6 +18,7 @@ import PurchaseCancelModal from './purchases/PurchaseCancelModal'
 import DirectTradeDetail from './sales/direct/DirectTradeDetail'
 import { commercialPurchaseLines } from '../lib/commercialLines'
 import { useDirectTradeReview } from '../components/DirectTradeWarning'
+import { SIDE_LABEL, SIDE_TONE, netOfCreditor, sideOf } from '../lib/accountWords'
 
 export type PurchaseView = 'history' | 'suppliers' | 'sarrafs' | 'lenders' | 'candidates'
 type PurchaseFilter = 'all' | 'debt' | 'transit'
@@ -276,11 +277,11 @@ export default function Purchases({
                   <small className="purchase-link">جزئیات ←</small>
                 </button>
                 <span className="customer-row-amount">
-                  <strong className={`inventory-money ${s.balance > 0 ? 'text-red-700' : s.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(s.balance))}</strong>
-                  <small>{s.balance > 0 ? 'قرض ما' : s.balance < 0 ? 'طلب ما' : 'تصفیه'}</small>
+                  <strong className={`inventory-money ${SIDE_TONE[sideOf(netOfCreditor(s.balance))]}`}>{fmtMoney(Math.abs(s.balance))}</strong>
+                  <small>{SIDE_LABEL[sideOf(netOfCreditor(s.balance))]}</small>
                 </span>
                 <div className="purchase-row-actions w-full">
-                  <button onClick={() => setPayingSupplier(s.id!)}>{s.balance > 0 ? 'پرداخت قرض' : 'پیشکی'}</button>
+                  <button onClick={() => setPayingSupplier(s.id!)}>پول دادیم</button>
                   <button className="text-amber-800" onClick={() => setReturningTo(s)}>مرجوعی جنس</button>
                 </div>
               </div>
@@ -302,11 +303,11 @@ export default function Purchases({
                   <small className="purchase-link">جزئیات ←</small>
                 </button>
                 <span className="customer-row-amount">
-                  <strong className={`inventory-money ${s.balance > 0 ? 'text-red-700' : s.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(s.balance))}</strong>
-                  <small>{s.balance > 0 ? 'قرض ما به صراف' : s.balance < 0 ? 'طلب ما از صراف' : 'تصفیه'}</small>
+                  <strong className={`inventory-money ${SIDE_TONE[sideOf(netOfCreditor(s.balance))]}`}>{fmtMoney(Math.abs(s.balance))}</strong>
+                  <small>{SIDE_LABEL[sideOf(netOfCreditor(s.balance))]}</small>
                 </span>
                 <div className="purchase-row-actions w-full">
-                  <button onClick={() => setPayingSupplier(s.id!)}>{s.balance > 0 ? 'پرداخت به صراف' : 'پیشکی به صراف'}</button>
+                  <button onClick={() => setPayingSupplier(s.id!)}>پول دادیم</button>
                 </div>
               </div>
             ))}

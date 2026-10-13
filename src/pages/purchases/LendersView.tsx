@@ -24,6 +24,7 @@ import {
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
+import { SIDE_LABEL, SIDE_TONE, afterThis, headline, netOfCreditor, sideOf } from '../../lib/accountWords'
 import CorrectLenderPaymentModal from './CorrectLenderPaymentModal'
 
 type StockOption = LenderGoodsLine & { variantId: number; stockQty: number; retailPrice: number; wholesalePrice: number }
@@ -40,7 +41,7 @@ function LendersView() {
     <>
       <button onClick={() => setShowNew(true)} className="primary-button mb-3">＋ قرض‌دهندهٔ جدید</button>
       <div className="surface party-balance mb-3">
-        <p className="text-sm text-slate-500">مجموع قرض ما از اشخاص</p>
+        <p className="text-sm text-slate-500">جمع آنچه به قرض‌دهنده‌ها باید بدهیم</p>
         <p className="party-balance-amount inventory-money text-red-700">{fmtMoney(total)}</p>
         <p className="mt-1 text-xs text-slate-500">
           تا وقتی شریک نشده، پولش قرض است — از دارایی کم می‌شود و از مفاد سهم نمی‌برد.
@@ -57,8 +58,8 @@ function LendersView() {
               <small className="purchase-link">جزئیات و قسط‌ها ←</small>
             </span>
             <span className="customer-row-amount">
-              <strong className={`inventory-money ${l.balance > 0 ? 'text-red-700' : l.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(l.balance))}</strong>
-              <small>{l.balance > 0 ? 'قرض ما به او' : l.balance < 0 ? 'طلب ما از او' : 'تصفیه'}</small>
+              <strong className={`inventory-money ${SIDE_TONE[sideOf(netOfCreditor(l.balance))]}`}>{fmtMoney(Math.abs(l.balance))}</strong>
+              <small>{SIDE_LABEL[sideOf(netOfCreditor(l.balance))]}</small>
             </span>
           </button>
         ))}
@@ -179,7 +180,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const totalAfter = (assets ?? 0) + owed
   const fairShare = totalAfter > 0 ? Math.round((owed / totalAfter) * 100) : 0
 
-  // دفتر: هر قسط و هر پرداخت با «قرض ما شد: …»
+  // دفتر: هر قسط و هر پرداخت با «بعد از این: باید … بدهیم/بگیریم»
   const ledger = buildLenderLedger(payments ?? [], l.id!, lenderSales ?? [])
   const summary = summarizeLenderAccount(payments ?? [], l.id!)
   const goodsTotal = goodsLines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)
@@ -239,10 +240,10 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
       {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
 
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
-        <p className="text-sm text-slate-500">{owed > 0 ? 'قرض ما به او' : owed < 0 ? 'طلب ما از او' : 'حساب تصفیه است'}</p>
-        <p className={`text-2xl font-bold ${owed > 0 ? 'text-red-600' : owed < 0 ? 'text-teal-700' : 'text-slate-600'}`}>
-          {fmtMoney(Math.abs(owed))}
-        </p>
+        {(() => {
+          const h = headline(netOfCreditor(owed))
+          return <><p className="text-sm text-slate-500">{h.label}</p><p className={`text-2xl font-bold ${h.tone}`}>{h.amount}</p></>
+        })()}
       </div>
 
       <details className="mb-3 rounded-xl border border-slate-200 bg-white p-3 text-sm">
@@ -285,7 +286,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
             reset()
           }}
         >
-          ＋ دریافت از او
+          پول گرفتیم
         </button>
         <button
           className="party-action"
@@ -295,7 +296,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
             reset()
           }}
         >
-          پول به او
+          پول دادیم
         </button>
         <button
           className="party-action"
@@ -305,7 +306,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
             reset()
           }}
         >
-          کفش به او
+          کفش دادیم
         </button>
         <button
           className="party-action"
@@ -328,6 +329,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           سند قبلی — قبل از استفاده از اپ
         </button>
       </div>
+      <p className="mb-3 text-xs text-slate-500">پول گرفتیم: او به ما پول داد · پول دادیم: ما به او پول دادیم · کفش دادیم: ما به او کفش دادیم.</p>
 
       {mode === 'edit' && (
         <div className="mb-3 rounded-xl border border-slate-300 p-3">
@@ -983,13 +985,8 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               {r.note && <p className="mt-1 text-xs text-slate-500">{r.note}</p>}
             </div>
             <div className="shrink-0 text-left">
-              <p className={`font-bold ${r.delta > 0 ? 'text-red-600' : 'text-teal-700'}`}>
-                {r.delta > 0 ? '+' : '−'}
-                {fmtMoney(Math.abs(r.delta))}
-              </p>
-              <p className="text-xs text-slate-500">
-                {r.balance > 0 ? 'قرض ما شد' : r.balance < 0 ? 'طلب ما شد' : 'حساب شد'}: {fmtMoney(Math.abs(r.balance))}
-              </p>
+              <p className="font-bold text-slate-800">{fmtMoney(Math.abs(r.delta))}</p>
+              <p className={`text-xs font-bold ${SIDE_TONE[sideOf(netOfCreditor(r.balance))]}`}>{afterThis(netOfCreditor(r.balance))}</p>
             </div>
           </div>
           {r.source?.table === 'payments' && !accessFlags.readOnly && (

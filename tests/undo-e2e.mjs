@@ -39,7 +39,7 @@ try {
   await nav('حساب‌ها')
   await page.getByRole('button', { name: /مشتری آزمایشی/ }).click()
   const account = page.getByRole('dialog', { name: 'حساب مشتری آزمایشی' })
-  await account.getByRole('button', { name: 'دریافت پول', exact: true }).click()
+  await account.getByRole('button', { name: 'پول گرفتیم', exact: true }).click()
   await account.locator('label', { hasText: 'مبلغ دریافتی' }).locator('input').fill('2000')
   await account.getByRole('button', { name: 'ثبت دریافت', exact: true }).click()
   await toast.getByText('دریافت ۲٬۰۰۰ ؋ از مشتری آزمایشی ثبت شد').waitFor()
@@ -55,7 +55,7 @@ try {
   assert.deepEqual(tombstone, [true], 'undone receipt stays as an audit record')
 
   // 2) After 10 s the offer is gone and the receipt stays.
-  await account.getByRole('button', { name: 'دریافت پول', exact: true }).click()
+  await account.getByRole('button', { name: 'پول گرفتیم', exact: true }).click()
   await account.locator('label', { hasText: 'مبلغ دریافتی' }).locator('input').fill('1000')
   await account.getByRole('button', { name: 'ثبت دریافت', exact: true }).click()
   await toast.getByRole('button', { name: /^برگرداندن/ }).waitFor()
@@ -68,7 +68,7 @@ try {
   // 3) Supplier payment → undo.
   await page.locator('summary', { hasText: 'افزودن و مدیریت حساب‌ها' }).click()
   await page.getByRole('button', { name: 'تأمین‌کنندگان', exact: true }).click()
-  await page.getByRole('region', { name: 'فهرست تأمین‌کنندگان' }).getByRole('button', { name: 'پرداخت قرض', exact: true }).click()
+  await page.getByRole('region', { name: 'فهرست تأمین‌کنندگان' }).getByRole('button', { name: 'پول دادیم', exact: true }).click()
   const pay = page.locator('dialog[open]').last()
   await pay.locator('label', { hasText: 'مبلغ' }).first().locator('input').fill('1500')
   await pay.getByRole('button', { name: 'ثبت پرداخت', exact: true }).click()
@@ -96,7 +96,7 @@ try {
   // 5) The bar stays readable and inside the screen on the smallest phone with large text.
   await nav('حساب‌ها')
   await page.getByRole('button', { name: /مشتری آزمایشی/ }).click()
-  await account.getByRole('button', { name: 'دریافت پول', exact: true }).click()
+  await account.getByRole('button', { name: 'پول گرفتیم', exact: true }).click()
   await account.locator('label', { hasText: 'مبلغ دریافتی' }).locator('input').fill('100')
   await account.getByRole('button', { name: 'ثبت دریافت', exact: true }).click()
   await page.setViewportSize({ width: 320, height: 700 })

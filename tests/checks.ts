@@ -96,6 +96,8 @@ import { allocate, afn } from '../src/lib/ops'
 import { calculateShipping } from '../src/lib/shipping'
 import * as shippingOps from '../src/lib/ops'
 import { buildCashLedger, buildCustomerLedger, buildLenderLedger, summarizeLenderAccount, pageTotals } from '../src/lib/ledger'
+import { SIDE_LABEL, SIDE_TONE, afterThis, changeWord, headline, netOfCreditor, netOfCustomer, sideOf, standing, totals, withAfter } from '../src/lib/accountWords'
+import { fmtMoney } from '../src/lib/format'
 import { runIntegrityCheck, fixMismatch, computeCustomerBalances } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
 import { applyDocEffects, applyRemoteRow, encodeRefs, decodeRefs, shouldResetForGeneration } from '../src/lib/sync'
@@ -407,8 +409,8 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await addOpeningDebt('customer', cId, 'احمد', 2000, 'قرض قبلی')
       const customer = (await db.customers.get(cId))!
       await inside(createElement(CustomerDetail, { customer, onClose: () => undefined }), async () => {
-        await waitUntil(() => Boolean(button('دریافت پول')))
-        button('دریافت پول')!.click()
+        await waitUntil(() => Boolean(button('پول گرفتیم')))
+        button('پول گرفتیم')!.click()
         await waitUntil(() => Boolean(button('ثبت دریافت')))
         const amount = Array.from(document.querySelectorAll('label')).find((l) => l.textContent?.includes('مبلغ دریافتی'))!.querySelector('input')!
         fillInput(amount, '500')
@@ -2458,9 +2460,10 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
         await waitUntil(() => creditorHost.textContent?.includes('احمد کرایه‌دار') === true)
         const creditorButton = Array.from(creditorHost.querySelectorAll('button')).find((button) => button.textContent?.includes('احمد کرایه‌دار'))
         creditorButton?.click()
-        await waitUntil(() => creditorHost.textContent?.includes('پرداخت با کفش') === true)
-        is('دفتر طلبکار پرداخت نقدی دارد', creditorHost.textContent?.includes('پرداخت نقدی'), true)
-        is('دفتر طلبکار پرداخت با کفش دارد', creditorHost.textContent?.includes('پرداخت با کفش'), true)
+        await waitUntil(() => creditorHost.textContent?.includes('کفش دادیم') === true)
+        is('حساب طلبکار دکمهٔ «پول دادیم» دارد', creditorHost.textContent?.includes('پول دادیم'), true)
+        is('حساب طلبکار دکمهٔ «کفش دادیم» دارد', creditorHost.textContent?.includes('کفش دادیم'), true)
+        is('جملهٔ سر حساب همان زبان مشترک است', creditorHost.textContent?.includes('باید بدهیم'), true)
       } finally {
         creditorRoot.unmount()
         creditorHost.remove()
@@ -5292,6 +5295,63 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('مفاد سال بعد از تبدیل همان است (نه زیان ساختگی)', await yearProfit(), before)
       eq('تاریخ شروع سال دست نخورد', Number((await db.settings.get('partnershipStart'))!.value), started)
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
+    }
+  },
+  {
+    name: 'حساب‌ها — یک زبان: مشتری، تأمین‌کننده، قرض‌دهنده و طلبکار؛ «باید بگیریم» سبز و «باید بدهیم» سرخ',
+    run: async () => {
+      // ریشهٔ گیجی: balance مثبت در مشتری یعنی «او به ما بدهکار است» و در بقیه «ما به او» — اینجا یکی می‌شود
+      is('مشتری ۵۰۰۰ بدهکار: باید بگیریم', sideOf(netOfCustomer(5000)), 'receive')
+      is('قرض‌دهنده‌ای که ما ۵۰۰۰ به او بدهکاریم: باید بدهیم', sideOf(netOfCreditor(5000)), 'pay')
+      is('نبی ۳۰۰۰ به ما بدهکار است (balance منفی): باید بگیریم', sideOf(netOfCreditor(-3000)), 'receive')
+      is('مشتری با پیش‌پرداخت (balance منفی): باید بدهیم', sideOf(netOfCustomer(-2000)), 'pay')
+      is('صفر: تصفیه', sideOf(netOfCustomer(0)), 'settled')
+      is('گرد نشدهٔ ناچیز هم تصفیه است', sideOf(0.3), 'settled')
+      is('هر دو سمتِ «باید بگیریم» یک رنگ دارند', SIDE_TONE[sideOf(netOfCustomer(5000))], SIDE_TONE[sideOf(netOfCreditor(-3000))])
+      is('سبز = باید بگیریم', SIDE_TONE.receive, 'text-teal-700')
+      is('سرخ = باید بدهیم', SIDE_TONE.pay, 'text-red-700')
+      is('جملهٔ بگیریم', standing(5000), `باید ${fmtMoney(5000)} بگیریم`)
+      is('جملهٔ بدهیم', standing(-12200), `باید ${fmtMoney(12200)} بدهیم`)
+      is('جملهٔ تصفیه', standing(0), 'حساب تصفیه است')
+      is('بعد از سند', afterThis(-12200), `بعد از این: باید ${fmtMoney(12200)} بدهیم`)
+      is('پیش‌پرداخت مشتری فقط سمت «بدهیم» را توضیح می‌دهد', headline(netOfCustomer(-2000), { pay: 'پیش‌پرداخت مشتری' }).label, `${SIDE_LABEL.pay} — پیش‌پرداخت مشتری`)
+      is('سمت «بگیریم» توضیح نمی‌گیرد', headline(netOfCustomer(2000), { pay: 'پیش‌پرداخت مشتری' }).label, SIDE_LABEL.receive)
+      // جمع: دو سمت جدا می‌ماند و با هم خنثی نمی‌شود (۸۰۰۰ گرفتنی و ۳۹۷۰۰ دادنی، نه ۳۱۷۰۰ خالص)
+      const t = totals([5000, 3000, -15000, -12200, -10000, -2500, 0])
+      eq('جمع گرفتنی', t.receive, 8000)
+      eq('جمع دادنی', t.pay, 39700)
+
+      // دفتر بدون علامت: عدد بعد از هر سند فقط وقتی می‌آید که جمع دفتر با عدد حساب برابر شود
+      const rows = [{ date: 3, change: 700 }, { date: 1, change: -1000 }, { date: 2, change: -200 }]
+      const good = withAfter(rows, -500)
+      is('ترتیب با تاریخ', good.map((r) => r.date).join(','), '1,2,3')
+      is('عدد بعد از هر سند', good.map((r) => r.after).join(','), '-1000,-1200,-500')
+      is('جمع با عدد حساب نمی‌خواند: هیچ عددی ساخته نمی‌شود', withAfter(rows, 0).every((r) => r.after === undefined), true)
+      is('فقط جهت تغییر', changeWord(300) + '|' + changeWord(-300) + '|' + changeWord(0), 'باید بگیریم بیشتر شد|باید بگیریم کمتر شد|')
+
+      // با حساب‌های واقعی: همان قرض، در هر دفتر، همان سمت
+      const cId = await newCustomer()
+      const vId = await makeVariant({ stockQty: 50, purchasePrice: 1000 })
+      await seedCash(100000)
+      await addSale(sell(vId, 4, 1500, { customerId: cId, customerName: 'احمد', paid: 1000 }))
+      const customer = (await db.customers.get(cId))!
+      eq('مشتری ۵٬۰۰۰ بدهکار', customer.balance, 5000)
+      eq('جمع دفتر مشتری = حساب', await customerLedgerEnd(cId), customer.balance)
+      is('مشتری: باید بگیریم', sideOf(netOfCustomer(customer.balance)), 'receive')
+
+      const lenderId = (await db.suppliers.add({ name: 'گل لالا', kind: 'lender', balance: 0 })) as number
+      await addLoan(lenderId, 'گل لالا', 15000)
+      await giveGoodsToLender(lenderId, 'گل لالا', [{ variantId: vId, productName: 'اسپرتکس', size: '42', color: 'سیاه', qty: 2, unitPrice: 1400 }])
+      const lender = (await db.suppliers.get(lenderId))!
+      const lenderRows = buildLenderLedger(await db.payments.filter((p) => !p.deleted).toArray(), lenderId, await db.sales.filter((x) => !x.deleted).toArray())
+      eq('جمع دفتر قرض‌دهنده = حساب', lenderRows[lenderRows.length - 1].balance, lender.balance)
+      eq('ما ۱۲٬۲۰۰ به او بدهکاریم', lender.balance, 12200)
+      is('قرض‌دهنده: باید بدهیم', sideOf(netOfCreditor(lender.balance)), 'pay')
+      is('آخرین سطر دفتر همان جمله‌ای را می‌گوید که سرِ صفحه', afterThis(netOfCreditor(lenderRows[lenderRows.length - 1].balance)), `بعد از این: ${standing(netOfCreditor(lender.balance))}`)
+
+      const nabi = (await db.suppliers.add({ name: 'نبی', kind: 'lender', balance: 0 })) as number
+      await giveCashToLender(nabi, 'نبی', 3000, Date.now(), undefined, 'cashLoan')
+      is('نبی به ما بدهکار است: باید بگیریم — همان سمتِ احمد', sideOf(netOfCreditor((await db.suppliers.get(nabi))!.balance)), sideOf(netOfCustomer(customer.balance)))
     }
   },
   {
