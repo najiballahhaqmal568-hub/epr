@@ -22,14 +22,19 @@ try {
   await page.getByPlaceholder('قیمت توافق‌شده').fill('1500')
   await page.getByRole('button', { name: '＋ افزودن به سند' }).click()
 
-  const submit = page.getByRole('button', { name: 'ثبت کفش بابت تسویه' })
+  // ما به او بدهکار نیستیم، پس «بابت چه؟» خودش «کفش قرضی برای خودش» است
+  const kind = page.locator('select').filter({ hasText: 'به جای قرضش' })
+  assert.equal(await kind.inputValue(), 'goodsCredit', 'default follows the balance')
+  await kind.selectOption('goodsSettlement')
+  const submit = page.getByRole('button', { name: 'ثبت کفش به جای قرضش' })
   assert.equal(await submit.isDisabled(), true, 'settlement over debt is disabled')
-  const reason = page.getByText('ما به او قرض نداریم؛ برعکس او')
+  const reason = page.getByText('ما به او بدهکار نیستیم؛ برعکس باید ۱٬۰۰۰ ؋ بگیریم')
   await reason.waitFor()
   assert.ok(await reason.isVisible(), 'reason shown next to the button')
 
   // با «کفش قرضی» همان سند ثبت می‌شود
-  await page.locator('select').filter({ hasText: 'کفش بابت تسویهٔ قرض ما' }).selectOption('goodsCredit')
+  await kind.selectOption('goodsCredit')
+  await page.getByText('بعد از ثبت: باید ۲٬۵۰۰ ؋ بگیریم').waitFor()
   await page.getByRole('button', { name: 'ثبت کفش قرضی' }).click()
   const balance = await page.evaluate(async () => {
     const { db } = await import('/src/db.ts')
