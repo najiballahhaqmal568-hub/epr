@@ -9,6 +9,7 @@ import {
   type LenderGoodsLine
 } from '../../lib/ops'
 import { fmtDate, fmtMoney, fmtNum, parseNum } from '../../lib/format'
+import { SIDE_LABEL, SIDE_TONE, afterThis, changeWord, headline, netOfCreditor, sideOf, withAfter } from '../../lib/accountWords'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
 
 export default function ExpenseCreditors() {
@@ -25,7 +26,7 @@ export default function ExpenseCreditors() {
       <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
         <div className="mb-2 flex items-center justify-between">
           <div>
-            <p className="font-bold text-amber-900">قرض مصارف</p>
+            <p className="font-bold text-amber-900">طلبکاران مصارف — باید بدهیم</p>
             <p className="text-xs text-amber-700">پرداخت بعدی با پول یا کفش</p>
           </div>
           <p className="font-bold text-red-600">{fmtMoney(total)}</p>
@@ -37,8 +38,8 @@ export default function ExpenseCreditors() {
             onClick={() => setDetail(creditor)}
           >
             <span className="font-bold text-slate-700">{creditor.name}</span>
-            <span className={creditor.balance > 0 ? 'font-bold text-red-600' : creditor.balance < 0 ? 'font-bold text-teal-700' : 'text-slate-500'}>
-              {creditor.balance > 0 ? 'قرض ما: ' + fmtMoney(creditor.balance) : creditor.balance < 0 ? 'طلب ما: ' + fmtMoney(-creditor.balance) : 'تصفیه'}
+            <span className={'font-bold ' + SIDE_TONE[sideOf(netOfCreditor(creditor.balance))]}>
+              {SIDE_LABEL[sideOf(netOfCreditor(creditor.balance))]}{creditor.balance !== 0 ? ': ' + fmtMoney(Math.abs(creditor.balance)) : ''}
             </span>
           </button>
         ))}
@@ -100,20 +101,22 @@ export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onCl
   }
 
   return (
-    <Modal title={'قرض مصرف — ' + current.name} onClose={onClose}>
+    <Modal title={'طلبکار مصارف — ' + current.name} onClose={onClose}>
       {error && <p className="mb-3 rounded-lg bg-red-50 p-2 text-sm font-bold text-red-600">{error}</p>}
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
-        <p className="text-xs text-slate-500">{current.balance > 0 ? 'قرض ما به او' : current.balance < 0 ? 'طلب دکان از او' : 'حساب تصفیه است'}</p>
-        <p className={'text-2xl font-bold ' + (current.balance > 0 ? 'text-red-600' : 'text-teal-700')}>{fmtMoney(Math.abs(current.balance))}</p>
+        {(() => {
+          const h = headline(netOfCreditor(current.balance))
+          return <><p className="text-xs text-slate-500">{h.label}</p><p className={'text-2xl font-bold ' + h.tone}>{h.amount}</p></>
+        })()}
       </div>
 
       {debt > 0 && (
         <div className="mb-3 grid grid-cols-2 gap-2">
           <button className="rounded-xl bg-[var(--action)] py-2 font-bold text-white" onClick={() => { setMode(mode === 'cash' ? 'none' : 'cash'); reset() }}>
-            پرداخت نقدی
+            پول دادیم
           </button>
           <button className="rounded-xl bg-amber-600 py-2 font-bold text-white" onClick={() => { setMode(mode === 'goods' ? 'none' : 'goods'); reset() }}>
-            پرداخت با کفش
+            کفش دادیم
           </button>
         </div>
       )}
@@ -234,9 +237,9 @@ export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onCl
       )}
 
       <p className="mb-2 font-bold text-slate-700">دفتر حساب مصرف</p>
-      {[...(expenses ?? []).map((e) => ({ date: e.date, label: e.categoryName, amount: e.creditAmount ?? 0, kind: 'expense' as const, id: e.id!, note: e.note })),
-        ...(payments ?? []).map((p) => ({ date: p.date, label: p.expenseCreditorSettlement === 'goods' ? 'پرداخت با کفش' : 'پرداخت نقدی', amount: -p.amount, kind: 'payment' as const, id: p.id!, note: p.note }))]
-        .sort((a, b) => b.date - a.date)
+      {withAfter([...(expenses ?? []).map((e) => ({ date: e.date, label: e.categoryName, change: -(e.creditAmount ?? 0), kind: 'expense' as const, id: e.id!, note: e.note })),
+        ...(payments ?? []).map((p) => ({ date: p.date, label: p.expenseCreditorSettlement === 'goods' ? 'پرداخت با کفش' : 'پرداخت نقدی', change: p.amount, kind: 'payment' as const, id: p.id!, note: p.note }))], netOfCreditor(current.balance))
+        .reverse()
         .map((row) => (
           <div key={row.kind + '-' + row.id} className="mb-2 rounded-lg bg-slate-50 p-2 text-sm">
             <div className="flex justify-between">
@@ -245,9 +248,12 @@ export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onCl
                 <p className="text-xs text-slate-500">{fmtDate(row.date)}</p>
                 {row.note && <p className="text-xs text-slate-500">{row.note}</p>}
               </div>
-              <p className={row.amount > 0 ? 'font-bold text-red-600' : 'font-bold text-teal-700'}>
-                {row.amount > 0 ? '+' : '−'}{fmtMoney(Math.abs(row.amount))}
-              </p>
+              <div className="shrink-0 text-left">
+                <p className="font-bold text-slate-800">{fmtMoney(Math.abs(row.change))}</p>
+                {row.after !== undefined
+                  ? <p className={'text-xs font-bold ' + SIDE_TONE[sideOf(row.after)]}>{afterThis(row.after)}</p>
+                  : <p className="text-xs text-slate-500">{changeWord(row.change)}</p>}
+              </div>
             </div>
             {row.kind === 'payment' && !accessFlags.readOnly && (
               <button

@@ -6,6 +6,7 @@ import { fmtMoney, fmtDate, fmtDateShort, parseNum } from '../../lib/format'
 import { offerUndo } from '../../lib/undo'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
 import { buildCustomerLedger, pageTotals } from '../../lib/ledger'
+import { SIDE_TONE, afterThis, headline, netOfCustomer, sideOf } from '../../lib/accountWords'
 import CustomerModal from './CustomerModal'
 import CorrectCustomerPaymentModal from './CorrectCustomerPaymentModal'
 import { HistoryToggle } from '../../components/HistoryToggle'
@@ -69,8 +70,10 @@ export function CustomerDetail({ customer, onClose, startPay = false }: { custom
       <div className="surface party-balance mb-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm text-slate-500">{c.balance > 0 ? 'قرض مشتری به دکان' : c.balance < 0 ? 'طلب مشتری از دکان' : 'حساب تصفیه است'}</p>
-            <p className={`party-balance-amount inventory-money ${c.balance > 0 ? 'text-red-700' : c.balance < 0 ? 'text-teal-700' : ''}`}>{fmtMoney(Math.abs(c.balance))}</p>
+            {(() => {
+              const h = headline(netOfCustomer(c.balance), { pay: 'پیش‌پرداخت مشتری' })
+              return <><p className="text-sm text-slate-500">{h.label}</p><p className={`party-balance-amount inventory-money ${h.tone}`}>{h.amount}</p></>
+            })()}
           </div>
           {c.promiseDate && c.balance > 0 && (
             <div className={`party-promise ${c.promiseDate < Date.now() ? 'is-overdue' : ''}`}>
@@ -106,7 +109,7 @@ export function CustomerDetail({ customer, onClose, startPay = false }: { custom
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <button className="primary-button text-sm" onClick={() => setShowPay(true)}>
-          دریافت پول
+          پول گرفتیم
         </button>
         <button className="party-action" onClick={() => setShowDebt(true)}>
           قرض قبلی
@@ -114,9 +117,9 @@ export function CustomerDetail({ customer, onClose, startPay = false }: { custom
         <button className="party-action" onClick={() => setShowEdit(true)}>
           ویرایش حساب
         </button>
-        {!accessFlags.readOnly && role === 'owner' && <button className="party-action" disabled={c.balance <= 0} aria-describedby={c.balance <= 0 ? 'goods-receipt-disabled-reason' : undefined} onClick={() => receiptEnabled ? setReceiptEntry(true) : setReceiptEnable(true)}>دریافت جنس بابت طلب</button>}
+        {!accessFlags.readOnly && role === 'owner' && <button className="party-action" disabled={c.balance <= 0} aria-describedby={c.balance <= 0 ? 'goods-receipt-disabled-reason' : undefined} onClick={() => receiptEnabled ? setReceiptEntry(true) : setReceiptEnable(true)}>کفش گرفتیم</button>}
       </div>
-      {!accessFlags.readOnly && role === 'owner' && c.balance <= 0 && <p id="goods-receipt-disabled-reason" className="mb-3 text-xs text-slate-500">برای دریافت جنس، طلب فعلی مشتری باید مثبت باشد.</p>}
+      {!accessFlags.readOnly && role === 'owner' && c.balance <= 0 && <p id="goods-receipt-disabled-reason" className="mb-3 text-xs text-slate-500">برای گرفتن کفش بابت طلب، مشتری باید به ما بدهکار باشد (باید بگیریم).</p>}
 
       {showDebt && (
         <div className="mb-4 rounded-xl border border-amber-200 p-3">
@@ -216,11 +219,8 @@ export function CustomerDetail({ customer, onClose, startPay = false }: { custom
               </p>
             </div>
             <div className="shrink-0 text-left">
-              <p className={`font-bold ${r.delta > 0 ? 'text-red-600' : 'text-teal-700'}`}>
-                {r.delta > 0 ? '+' : '−'}
-                {fmtMoney(Math.abs(r.delta))}
-              </p>
-              <p className="text-xs text-slate-500">مانده: {fmtMoney(r.balance)}</p>
+              <p className="font-bold text-slate-800">{fmtMoney(Math.abs(r.delta))}</p>
+              <p className={`text-xs font-bold ${SIDE_TONE[sideOf(netOfCustomer(r.balance))]}`}>{afterThis(netOfCustomer(r.balance))}</p>
               {r.source?.table === 'sales' && sales?.find(s => s.id === r.source?.id)?.directTrade && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setDirectUuid(sales.find(s => s.id === r.source?.id)!.directTrade!.uuid)}>جزئیات فروش مستقیم</button>}
               {r.source?.table === 'sales' && sales?.find(s => s.id === r.source?.id)?.goodsReceiptChild && <button className="mt-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800" onClick={() => setReceiptUuid(sales.find(s => s.id === r.source?.id)!.goodsReceiptChild!.receiptUuid)}>جزئیات فروش دریافت جنس</button>}
               {r.source?.table === 'sales' && !sales?.find(s => s.id === r.source?.id)?.directTrade && !sales?.find(s => s.id === r.source?.id)?.goodsReceiptChild && !accessFlags.readOnly && <button

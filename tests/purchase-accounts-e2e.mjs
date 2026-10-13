@@ -36,13 +36,13 @@ try {
   const add = page.getByRole('button', { name: '＋ تأمین‌کنندهٔ جدید' })
   assert.ok((await add.boundingBox()).y < (await list.boundingBox()).y, 'create button sits above the list')
   const debtor = list.locator('.customer-row').filter({ hasText: 'قرضدار' })
-  assert.match(await debtor.innerText(), /قرض ما/)
-  assert.match(await list.locator('.customer-row').filter({ hasText: 'پیشکی' }).first().innerText(), /طلب ما/)
+  assert.match(await debtor.innerText(), /باید بدهیم/)
+  assert.match(await list.locator('.customer-row').filter({ hasText: 'پیشکی' }).first().innerText(), /باید بگیریم/)
 
   const before = await snapshot()
   for (const [label, open] of [
     ['new-supplier', () => add.click()],
-    ['pay', () => debtor.getByRole('button', { name: 'پرداخت قرض', exact: true }).click()],
+    ['pay', () => debtor.getByRole('button', { name: 'پول دادیم', exact: true }).click()],
     ['return', () => debtor.getByRole('button', { name: 'مرجوعی جنس', exact: true }).click()],
     ['detail', () => debtor.getByRole('button', { name: /تأمین‌کنندهٔ قرضدار/ }).click()]
   ]) {
@@ -56,8 +56,8 @@ try {
   await page.getByRole('group', { name: 'نوع حساب خرید' }).getByRole('button', { name: 'صراف‌ها' }).click()
   const sarrafs = page.getByRole('region', { name: 'فهرست صراف‌ها' })
   await sarrafs.waitFor()
-  assert.match(await sarrafs.innerText(), /صراف آزمایشی[\s\S]*قرض ما به صراف/)
-  await sarrafs.getByRole('button', { name: 'پرداخت به صراف', exact: true }).click()
+  assert.match(await sarrafs.innerText(), /صراف آزمایشی[\s\S]*باید بدهیم/)
+  await sarrafs.getByRole('button', { name: 'پول دادیم', exact: true }).click()
   await page.locator('dialog[open]').last().waitFor()
   await closeAll()
   assert.equal(await page.getByRole('button', { name: '＋ صراف جدید' }).count(), 1)
@@ -70,7 +70,7 @@ try {
   await lenders.getByRole('button', { name: /حاجی قرض‌دهنده/ }).click()
   const lender = page.locator('dialog[open]').last()
   await lender.waitFor()
-  for (const name of ['＋ دریافت از او', 'پول به او', 'کفش به او', 'پرداخت مستقیم به فروشنده', 'سند قبلی — قبل از استفاده از اپ', 'شریک شدن — تبدیل قرض به سرمایه']) {
+  for (const name of ['پول گرفتیم', 'پول دادیم', 'کفش دادیم', 'پرداخت مستقیم به فروشنده', 'سند قبلی — قبل از استفاده از اپ', 'شریک شدن — تبدیل قرض به سرمایه']) {
     const button = lender.getByRole('button', { name, exact: true })
     await button.click()
     assert.equal(await button.getAttribute('aria-pressed'), 'true', `${name} shows as selected`)
