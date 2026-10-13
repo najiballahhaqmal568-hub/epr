@@ -50,11 +50,11 @@ try {
     const zeroId = await db.customers.add({ uuid: crypto.randomUUID(), name: 'مشتری بدون طلب', type: 'wholesale', balance: 0 })
     window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(zeroId), onClose() {} }))
   })
-  assert.equal(await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).isDisabled(), true, 'zero-debt receipt action is disabled')
-  await page.getByText('برای دریافت جنس، طلب فعلی مشتری باید مثبت باشد.').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'کفش گرفتیم' }).isDisabled(), true, 'zero-debt receipt action is disabled')
+  await page.getByText('برای گرفتن کفش بابت طلب، مشتری باید به ما بدهکار باشد (باید بگیریم).').waitFor()
   await page.evaluate(() => window.renderCustomer(window.testApp.sourceId))
 
-  await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).click()
+  await page.getByRole('button', { name: 'کفش گرفتیم' }).click()
   assert.match(await page.getByRole('dialog').last().innerText(), /همهٔ دستگاه‌ها/)
   await page.getByLabel('همهٔ دستگاه‌های فعال را به‌روز کردم').check()
   await page.getByRole('button', { name: 'فعال‌سازی در این دستگاه' }).click()
@@ -114,6 +114,10 @@ try {
     window.root.render(React.createElement(CustomerGoodsReceiptDetail, { receiptUuid: warehouseUuid, onClose() {}, syncBeforeMutation: async () => {} }))
   })
   await page.getByRole('dialog').last().getByText('فعال', { exact: true }).waitFor()
+  // «فعال» is still on screen from the owner render above; the role is read by a live query that refreshes a moment
+  // later. Wait for that refresh (the cost disappears), then check it stays hidden.
+  await page.waitForFunction(() => !document.body.innerText.includes('قیمت توافقی'), null, { timeout: 8000 })
+  await page.waitForTimeout(300)
   assert.equal(await page.getByText(/قیمت توافقی/).count(), 0, 'staff receipt detail hides acquisition cost')
   assert.equal(await page.getByRole('button', { name: 'اصلاح سند' }).count(), 0, 'staff receipt detail has no mutation controls')
   await page.evaluate(async () => {
@@ -184,7 +188,7 @@ try {
     window.testApp.onwardSource = onwardSource
     window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(onwardSource), onClose() {} }))
   })
-  await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).click()
+  await page.getByRole('button', { name: 'کفش گرفتیم' }).click()
   await page.getByLabel('مقصد جنس').selectOption('onward')
   await page.getByLabel('نام جنس 1').fill('اسکچرز مستقیم')
   await page.getByLabel('سایز 1').fill('42')
@@ -272,7 +276,7 @@ try {
     window.testApp.authSource = authSource
     window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(authSource), onClose() {} }))
   })
-  await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).click()
+  await page.getByRole('button', { name: 'کفش گرفتیم' }).click()
   await page.getByLabel('نام جنس 1').fill('جنس صلاحیت')
   await page.getByLabel('سایز 1').fill('40')
   await page.getByLabel('رنگ 1').fill('سفید')
@@ -299,7 +303,7 @@ try {
     await db.settings.put({ key: 'cachedProfile', value: { role: 'owner' } })
     window.root.render(React.createElement(CustomerDetail, { customer: await db.customers.get(authSource), onClose() {} }))
   })
-  await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).click()
+  await page.getByRole('button', { name: 'کفش گرفتیم' }).click()
   await page.getByLabel('نام جنس 1').fill('جنس صلاحیت دوم')
   await page.getByLabel('سایز 1').fill('41')
   await page.getByLabel('رنگ 1').fill('آبی')
@@ -359,7 +363,7 @@ try {
     accessFlags.readOnly = true
     await window.renderCustomer(window.testApp.sourceId)
   })
-  assert.equal(await page.getByRole('button', { name: 'دریافت جنس بابت طلب' }).count(), 0, 'read-only account has no receipt write action')
+  assert.equal(await page.getByRole('button', { name: 'کفش گرفتیم' }).count(), 0, 'read-only account has no receipt write action')
   assert.deepEqual(errors, [], `browser errors: ${errors.join('; ')}`)
   console.log('PASS 41 checks: compatibility, strict field validation, destination ledger, photo, warehouse/onward correction net effects, audit navigation, staff privacy, stale-preview rejection, authorization loss, cancellation audit, history printing, double-submit, backup replay, conflict, responsive and read-only UI')
 } finally {

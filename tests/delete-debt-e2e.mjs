@@ -41,7 +41,7 @@ await page.waitForTimeout(700)
 await page.click('text=نصیر')
 await page.waitForTimeout(500)
 
-if (!(await page.locator('text=قرض مشتری').count())) fail('حساب مشتری باز نشد')
+if (!(await page.locator('text=باید بگیریم').count())) fail('حساب مشتری باز نشد')
 if (!(await page.locator('text=۳٬۰۰۰').count())) fail('قرض ۳٬۰۰۰ نشان داده نشد')
 
 const del = page.locator('button:has-text("اشتباه بود — پاک کن")')

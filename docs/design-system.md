@@ -124,6 +124,13 @@ Busy-shop rule: a normal cash sale is **two touches** — a size, then «نقد�
 - «نقد» goes through the same `save()` guards as the payment page (stock, shipping needs a customer, `paid = min(…, total)`).
 - Wholesale cartons: the card has a «کارتن» button that opens the carton / half-carton window.
 
+## Accounts (`pages/Accounts.tsx` + `lib/accountWords.ts`)
+
+One sentence and one colour per side for every kind of account: green «باید بگیریم», red «باید بدهیم», grey «تصفیه».
+The list is two groups (biggest first, settled last) with the type as a small grey label; the strip on top keeps the two
+totals apart. Detail screens open with the same headline, ledger rows carry no +/− and end with «بعد از این: …», and the
+actions are the same four words everywhere: «پول گرفتیم / پول دادیم / کفش گرفتیم / کفش دادیم». Test: `tests/accounts-language-e2e.mjs`.
+
 ## Reports (`pages/reports/ReportStory.tsx` + `lib/reportFigures.ts`)
 
 The top of «راپورها» answers, in order: «مفاد کردم؟» (hero), «از کجا آمد؟» (steps), «پرچون یا عمده؟», «فروش کی بود؟».

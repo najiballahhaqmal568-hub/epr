@@ -124,6 +124,18 @@ A customer who hands over 1,000 for a 900 sale gets 100 back — the till gains 
 records `paid = min(tendered, total)` and `ops.addSale` refuses `paid > total`. (Before this rule the whole
 note was stored as cash; «کنترل حساب‌ها» lists those old sales read-only.)
 
+### Accounts speak one language (`src/lib/accountWords.ts`)
+
+`customer.balance` > 0 means «he owes us»; for every supplier / sarraf / lender / expense creditor `balance` > 0 means
+«we owe him». Screens used to print each in its own words and signs («قرض مشتری به دکان», «قرض ما به او», «+ سرخ» for one and
+«− سبز» for the other). Now every account goes through `netOfCustomer()` / `netOfCreditor()` and one reader: **green =
+«باید بگیریم», red = «باید بدهیم»**, no +/− on ledger rows, each row ends with «بعد از این: …». The list shows the two sides
+apart and never nets them. A ledger that only knows the change of each document (`withAfter`) shows the balance after a row
+only when the sum equals the account's real number — otherwise it shows the direction and no guessed figure. The four buttons
+are «پول گرفتیم / پول دادیم / کفش گرفتیم / کفش دادیم», each opening the same form as before and shown only where it means something
+(customer: گرفتیم، supplier/sarraf: پول دادیم، lender: three, creditor: two). New account-like screens must import this module
+instead of writing `balance > 0 ? '…' : '…'` again. `tests/accounts-language-e2e.mjs` and the scenario in `checks.ts` hold it.
+
 ### Design system
 
 Tokens, display modes, motion rules and the UI checks are in `docs/design-system.md`. Two rules matter for
@@ -168,7 +180,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1533 checks in 152 scenarios
+npm test          # tests/checks.ts — currently 1563 checks in 153 scenarios
 ```
 
 ```bash

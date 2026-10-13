@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { accessFlags, db, type Payment, type ReturnDoc, type Supplier } from '../../db'
 import { addOpeningDebt, deletePayment, deletePaymentImpact, cancelSupplierReturn } from '../../lib/ops'
 import { fmtMoney, fmtDate, parseNum } from '../../lib/format'
+import { SIDE_TONE, afterThis, changeWord, headline, netOfCreditor, sideOf, withAfter } from '../../lib/accountWords'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { CorrectSupplierPaymentModal, PaySupplierModal } from './SupplierModals'
 import CorrectOpeningDebtModal from './CorrectOpeningDebtModal'
@@ -143,15 +144,18 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
       })
     }
   })
-  events.sort((a, b) => b.date - a.date)
-
   const bal = live?.balance ?? supplier.balance
+  // تغییرِ هر سند از نگاه ما (مثبت = باید بگیریم بیشتر شد)؛ «بعد از این» فقط وقتی می‌آید که جمع دفتر با عدد حساب بخواند
+  const shown = withAfter(events.map((e) => ({ ...e, change: e.plus ? -e.amount : e.amount })), netOfCreditor(bal)).reverse()
+
   return (
     <Modal title={supplier.name} onClose={onClose}>
-      {!accessFlags.readOnly && <button className="mb-4 w-full rounded-xl bg-[var(--action)] p-3 font-bold text-white" onClick={() => setShowPay(true)}>ثبت پرداخت</button>}
+      {!accessFlags.readOnly && <button className="mb-4 w-full rounded-xl bg-[var(--action)] p-3 font-bold text-white" onClick={() => setShowPay(true)}>پول دادیم</button>}
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
-        <p className="text-sm text-slate-500">{bal > 0 ? 'قرض ما' : bal < 0 ? 'طلب ما (پیشکی)' : 'حساب تصفیه است'}</p>
-        <p className={`text-2xl font-bold ${bal > 0 ? 'text-red-600' : 'text-teal-700'}`}>{fmtMoney(Math.abs(bal))}</p>
+        {(() => {
+          const h = headline(netOfCreditor(bal), { receive: 'پیشکی داده‌ایم' })
+          return <><p className="text-sm text-slate-500">{h.label}</p><p className={`text-2xl font-bold ${h.tone}`}>{h.amount}</p></>
+        })()}
       </div>
       {!showDebt ? (
         <button className="mb-3 w-full rounded-xl bg-amber-100 py-2 text-sm font-bold text-amber-800" onClick={() => setShowDebt(true)}>
@@ -182,7 +186,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
       <p className="mb-2 text-sm font-bold text-slate-700">تاریخچهٔ حساب</p>
       {events.length === 0 && <Empty text="هنوز سندی ثبت نشده." />}
       <div className="max-h-96 overflow-y-auto">
-        {events.map((e, i) => (
+        {shown.map((e, i) => (
           <div key={e.payment?.uuid ?? i} className="border-b border-slate-100 py-2 text-sm last:border-0">
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -190,10 +194,12 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
                 {e.sub && <p className="text-xs text-slate-400">{e.sub}</p>}
                 <p className="text-xs text-slate-400">{fmtDate(e.date)}</p>
               </div>
-              <span className={`shrink-0 font-bold ${e.plus ? 'text-red-600' : 'text-teal-700'}`}>
-                {e.plus ? '+' : '−'}
-                {fmtMoney(Math.abs(e.amount))}
-              </span>
+              <div className="shrink-0 text-left">
+                <p className="font-bold text-slate-800">{fmtMoney(Math.abs(e.amount))}</p>
+                {e.after !== undefined
+                  ? <p className={`text-xs font-bold ${SIDE_TONE[sideOf(e.after)]}`}>{afterThis(e.after)}</p>
+                  : <p className="text-xs text-slate-500">{changeWord(e.change)}</p>}
+              </div>
             </div>
             {!accessFlags.readOnly && e.ret && !e.ret.deleted && (
               <button
@@ -242,11 +248,11 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
           </p>
           <div className="mb-3 rounded-xl bg-slate-50 p-3 text-sm">
             <p className="flex justify-between">
-              <span className="text-slate-500">قرض حالا</span>
+              <span className="text-slate-500">باید بدهیم، حالا</span>
               <span className="font-bold">{fmtMoney(toDelete.before)}</span>
             </p>
             <p className="flex justify-between">
-              <span className="text-slate-500">قرض بعد از پاک کردن</span>
+              <span className="text-slate-500">باید بدهیم، بعد از پاک کردن</span>
               <span className="font-bold text-teal-700">{fmtMoney(toDelete.after)}</span>
             </p>
           </div>
@@ -277,7 +283,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
             </p>
             {cancellingRet.settlement === 'reduceDebt' && (
               <p className="mt-1 flex justify-between border-t border-slate-200 pt-1">
-                <span className="text-slate-500">قرض ما به او برمی‌گردد</span>
+                <span className="text-slate-500">آنچه باید به او بدهیم برمی‌گردد</span>
                 <span className="font-bold text-red-600">+{fmtMoney(cancellingRet.amount)}</span>
               </p>
             )}
@@ -303,7 +309,7 @@ export function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier;
           </PrimaryBtn>
         </Modal>
       )}
-      <p className="mt-2 text-center text-xs text-slate-400">قرمز = قرض ما زیاد شد · سبز = پرداخت/کم شد</p>
+      <p className="mt-2 text-center text-xs text-slate-400">سبز = باید بگیریم · سرخ = باید بدهیم</p>
     </Modal>
   )
 }
