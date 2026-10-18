@@ -71,13 +71,11 @@ try {
   const persisted = await page.evaluate(async () => (await (await import('/src/db.ts')).db.syncState.get('lastSuccessfulSync'))?.value)
   check('successful sync time persists', typeof persisted, 'number')
   await page.evaluate(async () => {
-    const { db, syncFlags } = await import('/src/db.ts')
+    const { db, writeAsRemote } = await import('/src/db.ts')
     const { syncNow } = await import('/src/lib/sync.ts')
     window.advanceTestClock()
     await db.customers.update(1, { deleted: true })
-    syncFlags.applyingRemote = true
-    try { await db.customers.add({ name: 'Remote customer', type: 'retail', balance: 0, createdAt: 1 }) }
-    finally { syncFlags.applyingRemote = false }
+    await writeAsRemote(['customers'], () => db.customers.add({ name: 'Remote customer', type: 'retail', balance: 0, createdAt: 1 }))
     window.setTestFailure(true)
     await syncNow()
   })

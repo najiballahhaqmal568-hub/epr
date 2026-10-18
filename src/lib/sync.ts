@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { applyRebuiltCosts } from './costing'
 import { applyDocument, type DocTable } from './effects'
-import { db, syncFlags, newUuid, SYNC_TABLES, type SyncTable } from '../db'
+import { db, newUuid, writeAsRemote, SYNC_TABLES, type SyncTable } from '../db'
 import { getSupa, getProfile } from './supa'
 import { receiptReplayDecision } from './customerGoodsReceiptSync'
 import { RECEIPT_UUID } from './customerGoodsReceiptTypes'
@@ -399,6 +399,42 @@ async function pushTable(
   return payload.length
 }
 
+/**
+ * یک بار برای هر دستگاه: ثبت‌هایی که پرچم سراسری قدیمی «از سرور» شمرده بود و هرگز فرستاده نشدند.
+ * هر ردیفی با مُهر ۰ (یعنی «از سرور آمده») که سرور ندارد، از همین دستگاه است و حالا فرستاده می‌شود؛
+ * ردیفی که این‌جا حذف شده ولی در سرور هنوز زنده است، حذفش فرستاده می‌شود. نسخهٔ سرور هیچ ردیف دیگری
+ * دست نمی‌خورد — ردیف‌های واقعاً رسیده همان‌جا هستند و این‌جا فقط خوانده می‌شوند.
+ */
+async function pushUnsentRows(shopId: string, deviceId: string, generation: number): Promise<number> {
+  const key = `unsentRepair:${generation}`
+  if (await getState(key)) return 0
+  const supa = (await getSupa())!
+  let sent = 0
+  for (const table of SYNC_TABLES) {
+    const rows = (await db.table(table).where('localUpdatedAt').equals(0).toArray()).filter((r) => r.uuid)
+    for (let i = 0; i < rows.length; i += 150) {
+      const chunk = rows.slice(i, i + 150)
+      const { data, error } = await supa.from(REMOTE[table]).select('uuid,deleted').eq('generation', generation).in('uuid', chunk.map((r) => r.uuid))
+      if (error) throw new Error(`${table}: ${error.message}`)
+      const onServer = new Map((data ?? []).map((r: { uuid: string; deleted: boolean }) => [r.uuid, Boolean(r.deleted)]))
+      const missing = chunk.filter((r) => !onServer.has(r.uuid))
+      const deletedHere = chunk.filter((r) => r.deleted && onServer.get(r.uuid) === false)
+      for (const [batch, ignoreDuplicates] of [[missing, true], [deletedHere, false]] as const) {
+        if (!batch.length) continue
+        const payload = []
+        for (const r of batch) {
+          payload.push({ uuid: r.uuid, shop_id: shopId, generation, device_id: deviceId, deleted: Boolean(r.deleted), data: await encodeRefs(table, r) })
+        }
+        const { error: upError } = await supa.from(REMOTE[table]).upsert(payload, { onConflict: 'uuid', ignoreDuplicates })
+        if (upError) throw new Error(`${table}: ${upError.message}`)
+        sent += payload.length
+      }
+    }
+  }
+  await setState(key, true)
+  return sent
+}
+
 async function pullTable(table: SyncTable, deviceId: string, generation: number): Promise<number> {
   const supa = (await getSupa())!
   let cursor = ((await getState(`pull:${table}`)) as string | undefined) ?? '1970-01-01T00:00:00Z'
@@ -441,92 +477,87 @@ export async function applyRemoteRow(table: SyncTable, row: { uuid: string; dele
   const rec = await decodeRefs(table, row.data)
   rec.uuid = row.uuid
   rec.deleted = row.deleted
-  await db.transaction('rw', [...SYNC_TABLES.map((t) => db.table(t)), db.syncState], async () => {
-    syncFlags.applyingRemote = true
-    try {
-      const existing = await db.table(table).where('uuid').equals(row.uuid).first()
-      const oldMeta = existing?.directTrade as { uuid?: string; revision?: string; previousRevision?: string } | undefined
-      const newMeta = rec.directTrade as { uuid?: string; revision?: string; previousRevision?: string } | undefined
-      // A delayed predecessor must never roll a document back after its direct successor.
-      if (oldMeta?.revision && newMeta?.revision && oldMeta.previousRevision === newMeta.revision) return
-      if (oldMeta?.uuid && newMeta?.uuid && oldMeta.revision !== newMeta.revision &&
-          newMeta.previousRevision !== oldMeta.revision) {
-        const evidence = [oldMeta.revision, newMeta.revision].filter((value): value is string => Boolean(value)).sort()
-        await db.syncState.put({ key: `directConflict:${oldMeta.uuid}:${table}:${row.uuid}`, value: evidence })
-        // A deterministic local winner makes repeated/reversed replay converge,
-        // while the retained marker keeps the trade blocked for human review.
-        if ((oldMeta.revision ?? '') > (newMeta.revision ?? '')) return
-      }
-      const receiptDecision = receiptReplayDecision(table, existing as Record<string, unknown> | undefined, rec)
-      if (receiptDecision.conflict) {
-        await db.syncState.put({
-          key: `goodsReceiptConflict:${receiptDecision.conflict.receiptUuid}:${table}:${row.uuid}`,
-          value: receiptDecision.conflict.evidence
-        })
-      }
-      if (receiptDecision.keepExisting) return
-      if (MASTERS.includes(table)) {
-        if (existing) {
-          // فیلدهای مشتقی (موجودی/قرض) محلی را نگه می‌داریم — اسناد آن‌ها را اصلاح می‌کنند
-          if (table === 'variants') rec.stockQty = existing.stockQty
-          if (table === 'customers' || table === 'suppliers') rec.balance = existing.balance
-          await db.table(table).update(existing.id, { ...rec, id: existing.id })
-        } else {
-          delete rec.id
-          // مقادیر مشتقی همیشه از اسناد بازسازی می‌شوند
-          if (table === 'variants') rec.stockQty = 0
-          if (table === 'customers' || table === 'suppliers') rec.balance = 0
-          await db.table(table).add(rec)
-        }
+  await writeAsRemote([...SYNC_TABLES, 'syncState'], async () => {
+    const existing = await db.table(table).where('uuid').equals(row.uuid).first()
+    const oldMeta = existing?.directTrade as { uuid?: string; revision?: string; previousRevision?: string } | undefined
+    const newMeta = rec.directTrade as { uuid?: string; revision?: string; previousRevision?: string } | undefined
+    // A delayed predecessor must never roll a document back after its direct successor.
+    if (oldMeta?.revision && newMeta?.revision && oldMeta.previousRevision === newMeta.revision) return
+    if (oldMeta?.uuid && newMeta?.uuid && oldMeta.revision !== newMeta.revision &&
+        newMeta.previousRevision !== oldMeta.revision) {
+      const evidence = [oldMeta.revision, newMeta.revision].filter((value): value is string => Boolean(value)).sort()
+      await db.syncState.put({ key: `directConflict:${oldMeta.uuid}:${table}:${row.uuid}`, value: evidence })
+      // A deterministic local winner makes repeated/reversed replay converge,
+      // while the retained marker keeps the trade blocked for human review.
+      if ((oldMeta.revision ?? '') > (newMeta.revision ?? '')) return
+    }
+    const receiptDecision = receiptReplayDecision(table, existing as Record<string, unknown> | undefined, rec)
+    if (receiptDecision.conflict) {
+      await db.syncState.put({
+        key: `goodsReceiptConflict:${receiptDecision.conflict.receiptUuid}:${table}:${row.uuid}`,
+        value: receiptDecision.conflict.evidence
+      })
+    }
+    if (receiptDecision.keepExisting) return
+    if (MASTERS.includes(table)) {
+      if (existing) {
+        // فیلدهای مشتقی (موجودی/قرض) محلی را نگه می‌داریم — اسناد آن‌ها را اصلاح می‌کنند
+        if (table === 'variants') rec.stockQty = existing.stockQty
+        if (table === 'customers' || table === 'suppliers') rec.balance = existing.balance
+        await db.table(table).update(existing.id, { ...rec, id: existing.id })
       } else {
-        if (!existing) {
-          delete rec.id
-          const wasDeleted = Boolean(rec.deleted)
-          await db.table(table).add(rec)
-          if (!wasDeleted) await applyDocEffects(table, rec, false)
-          if (table === 'adjustments' && rec.goodsReceiptChild) {
-            await rebuildReceiptAdjustmentCosts((rec.goodsReceiptChild as { receiptUuid: string }).receiptUuid)
-          }
-          if (table === 'payments' && rec.goodsReceipt) {
-            await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
-          }
-        } else if (table === 'purchases') {
-          // خرید اکنون می‌تواند قیمت اصلاح‌شده داشته باشد. اثر سند قبلی را برمی‌گردانیم
-          // و اثر نسخهٔ تازه را اعمال می‌کنیم تا قرض تأمین‌کننده در موبایل دوم هم درست بماند.
-          await replaceDocument(table, existing, rec)
-          // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
-          await applyRebuiltCosts()
-        } else if (table === 'sales' || table === 'returns') {
-          // اصلاح قیمت خرید می‌تواند فقط unitCost فروش و مرجوعی وابسته را عوض کند.
-          // اثر گدام/قرض را برمی‌گردانیم و نسخهٔ تازه را اعمال می‌کنیم؛ چون در
-          // اصلاح قیمت این اثرها برابر اند، تعداد و حساب‌ها خالصاً صفر تغییر می‌کنند.
-          await replaceDocument(table, existing, rec)
-          await applyRebuiltCosts()
-        } else if (table === 'payments') {
-          // دو دستگاه ممکن است همان پرداخت را همزمان اصلاح کنند. سند جایگزین
-          // uuid ثابت دارد؛ نسخهٔ برنده باید اثر نسخهٔ محلی را برگرداند و اثر
-          // تازه را اعمال کند، نه اینکه هر دو پرداخت در حساب بمانند.
-          await replaceDocument(table, existing, rec)
-          if (rec.goodsReceipt) await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
-        } else if (table === 'adjustments' && (existing.goodsReceiptChild || rec.goodsReceiptChild)) {
-          await replaceDocument(table, existing, rec)
-          const child = (rec.goodsReceiptChild ?? existing.goodsReceiptChild) as { receiptUuid: string }
-          await rebuildReceiptAdjustmentCosts(child.receiptUuid)
-        } else if (table === 'expenses' && (existing.shippingPaymentUuid || rec.shippingPaymentUuid)) {
-          // Concurrent freight corrections share deterministic child UUIDs. The
-          // winning shop share must replace the old value, including a zero share.
-          await replaceDocument(table, existing, rec)
-        } else if (table === 'cashMovements') {
-          // حرکت‌های صندوقِ اصلاح نیز uuid ثابت دارند؛ آخرین نسخه جای قبلی می‌نشیند.
-          await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid })
-        } else if (row.deleted && !existing.deleted) {
-          // رد حذف/اصلاح (چه کسی، کی، کدام سند جایش را گرفت) هم با حذف می‌آید؛ اثر از نسخهٔ محلی برمی‌گردد
-          await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid, deleted: true })
-          await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
-        }
+        delete rec.id
+        // مقادیر مشتقی همیشه از اسناد بازسازی می‌شوند
+        if (table === 'variants') rec.stockQty = 0
+        if (table === 'customers' || table === 'suppliers') rec.balance = 0
+        await db.table(table).add(rec)
       }
-    } finally {
-      syncFlags.applyingRemote = false
+    } else {
+      if (!existing) {
+        delete rec.id
+        const wasDeleted = Boolean(rec.deleted)
+        await db.table(table).add(rec)
+        if (!wasDeleted) await applyDocEffects(table, rec, false)
+        if (table === 'adjustments' && rec.goodsReceiptChild) {
+          await rebuildReceiptAdjustmentCosts((rec.goodsReceiptChild as { receiptUuid: string }).receiptUuid)
+        }
+        if (table === 'payments' && rec.goodsReceipt) {
+          await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
+        }
+      } else if (table === 'purchases') {
+        // خرید اکنون می‌تواند قیمت اصلاح‌شده داشته باشد. اثر سند قبلی را برمی‌گردانیم
+        // و اثر نسخهٔ تازه را اعمال می‌کنیم تا قرض تأمین‌کننده در موبایل دوم هم درست بماند.
+        await replaceDocument(table, existing, rec)
+        // قیمت تمام‌شده از اسناد بازسازی می‌شود — نه با جمعِ تدریجی که با ops فرق داشت
+        await applyRebuiltCosts()
+      } else if (table === 'sales' || table === 'returns') {
+        // اصلاح قیمت خرید می‌تواند فقط unitCost فروش و مرجوعی وابسته را عوض کند.
+        // اثر گدام/قرض را برمی‌گردانیم و نسخهٔ تازه را اعمال می‌کنیم؛ چون در
+        // اصلاح قیمت این اثرها برابر اند، تعداد و حساب‌ها خالصاً صفر تغییر می‌کنند.
+        await replaceDocument(table, existing, rec)
+        await applyRebuiltCosts()
+      } else if (table === 'payments') {
+        // دو دستگاه ممکن است همان پرداخت را همزمان اصلاح کنند. سند جایگزین
+        // uuid ثابت دارد؛ نسخهٔ برنده باید اثر نسخهٔ محلی را برگرداند و اثر
+        // تازه را اعمال کند، نه اینکه هر دو پرداخت در حساب بمانند.
+        await replaceDocument(table, existing, rec)
+        if (rec.goodsReceipt) await rebuildReceiptAdjustmentCosts((rec.goodsReceipt as { receiptUuid: string }).receiptUuid)
+      } else if (table === 'adjustments' && (existing.goodsReceiptChild || rec.goodsReceiptChild)) {
+        await replaceDocument(table, existing, rec)
+        const child = (rec.goodsReceiptChild ?? existing.goodsReceiptChild) as { receiptUuid: string }
+        await rebuildReceiptAdjustmentCosts(child.receiptUuid)
+      } else if (table === 'expenses' && (existing.shippingPaymentUuid || rec.shippingPaymentUuid)) {
+        // Concurrent freight corrections share deterministic child UUIDs. The
+        // winning shop share must replace the old value, including a zero share.
+        await replaceDocument(table, existing, rec)
+      } else if (table === 'cashMovements') {
+        // حرکت‌های صندوقِ اصلاح نیز uuid ثابت دارند؛ آخرین نسخه جای قبلی می‌نشیند.
+        await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid })
+      } else if (row.deleted && !existing.deleted) {
+        // رد حذف/اصلاح (چه کسی، کی، کدام سند جایش را گرفت) هم با حذف می‌آید؛ اثر از نسخهٔ محلی برمی‌گردد
+        await db.table(table).update(existing.id, { ...existing, ...rec, id: existing.id, uuid: existing.uuid, deleted: true })
+        await applyDocEffects(table, existing as unknown as Record<string, unknown>, true)
+      }
     }
   })
 }
@@ -751,6 +782,7 @@ export async function syncNow(throwOnError = false): Promise<void> {
     const mergeOnly = (await getState('restorePushMode')) === 'merge'
     for (const t of SYNC_TABLES) await pushTable(t, profile.shop_id, deviceId, generation, mergeOnly)
     await db.syncState.delete('restorePushMode')
+    await pushUnsentRows(profile.shop_id, deviceId, generation)
     for (const t of SYNC_TABLES) await pullTable(t, deviceId, generation)
     const lastSync = Date.now()
     await setState('lastSuccessfulSync', lastSync)
