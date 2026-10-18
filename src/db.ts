@@ -472,6 +472,13 @@ export interface ReturnDoc extends Synced {
 }
 
 /** جنس کاندید برای خرید آینده — با منبع (تلگرام/واتساپ) و مشخصات فروشگاه */
+/** نشانی عکس یک بوت (embedding) — فقط در همین گوشی، برای «جستجو با عکس» */
+export interface PhotoIndexRow {
+  productId: number
+  photoHash: string
+  vector: Float32Array
+}
+
 export interface Candidate {
   id?: number
   name: string
@@ -545,6 +552,7 @@ export const db = new Dexie('shoeErp') as Dexie & {
   adjustments: EntityTable<Adjustment, 'id'>
   returns: EntityTable<ReturnDoc, 'id'>
   candidates: EntityTable<Candidate, 'id'>
+  photoIndex: EntityTable<PhotoIndexRow, 'productId'>
   settings: Dexie.Table<Setting, string>
   outbox: EntityTable<OutboxRow, 'id'>
   syncState: Dexie.Table<SyncStateRow, string>
@@ -722,6 +730,14 @@ db.version(6).upgrade(async (tx) => {
   for (const [variantId, date] of last) {
     await tx.table('variants').update(variantId, { lastPurchaseAt: date })
   }
+})
+
+/**
+ * نسخهٔ ۷: نشانی عکس هر بوت برای «جستجو با عکس» در میز فروش. فقط در همین گوشی — نه همگام می‌شود
+ * نه در بکاپ می‌رود؛ هر وقت لازم باشد دوباره از روی عکس ساخته می‌شود (photoHash عوض شود، دوباره).
+ */
+db.version(7).stores({
+  photoIndex: 'productId'
 })
 
 db.on('populate', async (tx) => {

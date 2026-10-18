@@ -583,6 +583,15 @@ input[type='number'] {
 .sale-model-carton { min-height: 2rem; padding: 0 0.75rem; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--surface); font-size: 0.8125rem; font-weight: 700; color: var(--action); }
 .sale-model-color-name { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 0.8125rem; font-weight: 700; color: var(--text-secondary); }
 .sale-size-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(3.5rem, 1fr)); gap: 6px; }
+/* 📷 پیدا کردن بوت با عکس — سه شبیه‌ترین، لمس فروشنده انتخاب آخر است */
+.sale-photo-button { width: 100%; min-height: 48px; border: 1px dashed var(--border-control); border-radius: var(--radius-control); background: var(--surface); color: var(--action); font-weight: 700; }
+.sale-photo-button:disabled { color: var(--text-secondary); }
+.sale-photo-results { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-surface); background: var(--surface); }
+.sale-photo-results-head { display: flex; align-items: center; gap: 10px; }
+.sale-photo-shot { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 10px; object-fit: cover; }
+.sale-photo-match { display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); text-align: right; }
+.sale-photo-match:active { border-color: var(--action); }
+.sale-photo-thumb { width: 64px; height: 64px; flex: 0 0 64px; border-radius: 10px; object-fit: cover; background: var(--surface-grouped); }
 .sale-size-tile { min-height: 3.5rem; padding: 0.25rem; }
 .sale-size-tile .size-tile-size { font-size: 1.25rem; }
 .sale-size-tile[data-low="true"] .size-tile-stock { color: var(--warning-text); }

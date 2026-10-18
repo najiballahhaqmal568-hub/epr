@@ -126,6 +126,15 @@ refused and what the Sale document says are `readPayment`, `checkoutRefusal` and
 collects the form. `ops.addSale` stays the authority that writes. A new way to sell (a button, a barcode) calls
 these; it must not re-derive `paid` / `remainder` in a component. A discount is never negative.
 
+### Finding a boot by photo (`src/lib/photoMatch.ts`)
+
+«📷 پیدا کردن بوت با عکس» on the sale desk compares the shot with each product's photo on the phone itself
+(MediaPipe Image Embedder, MobileNet v3 small). There's no internet and no cost; the wasm is copied by `visionAssets()` in
+`vite.config.ts` and the model is `public/vision/`. It only **suggests** the three closest boots. Nothing enters the cart
+until the seller taps one: two similar boots with different prices are sometimes confused. If the tapped boot has exactly
+one size in stock, that size goes in. Otherwise its size card opens. Vectors live in the local `photoIndex` table (not synced,
+not backed up) and are rebuilt when a photo's hash changes. `tests/photo-search-e2e.mjs` holds it.
+
 ### Change is never kept in the till
 
 A customer who hands over 1,000 for a 900 sale gets 100 back — the till gains 900. The sale screen
