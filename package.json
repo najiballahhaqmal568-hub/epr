@@ -11,6 +11,7 @@
     "fuzz": "node tests/fuzz.mjs"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.21",
     "@supabase/supabase-js": "^2.110.1",
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",

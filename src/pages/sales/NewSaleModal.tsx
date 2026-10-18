@@ -17,6 +17,9 @@ import { Modal, Field, inputCls, PrimaryBtn, Skeleton } from '../../components/u
 import { Icon } from '../../components/Icon'
 import StockSelectionSummary from './StockSelectionSummary'
 import BulkSalePrice from './BulkSalePrice'
+import PhotoSearch from './PhotoSearch'
+
+type ModelEntry = { p: Product; vs: Variant[]; sold: number; stock: number }
 
 function EmbeddedSale({ children }: { children: ReactNode; title: string; onClose: () => void }) {
   return <div className="sale-embedded">{children}</div>
@@ -87,6 +90,8 @@ export function NewSaleModal({
   const [bookPage, setBookPage] = useState(draft?.bookPage ?? '')
   const [pageTouched, setPageTouched] = useState(false)
   const [search, setSearch] = useState('')
+  // بوتی که با عکس پیدا و لمس شد و بیش از یک سایز موجود دارد — کارتش باز می‌ماند تا سایز انتخاب شود
+  const [photoPick, setPhotoPick] = useState<number | null>(null)
   const [error, setError] = useState('')
   const errorRef = useRef<HTMLParagraphElement>(null)
   useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'center' }) }, [error])
@@ -119,7 +124,7 @@ export function NewSaleModal({
   // پرفروش‌ترین مدل‌های ۳۰ روز اخیر — هر مدل یک کاشی؛ سایز/رنگ بعد از ضربه انتخاب می‌شود
   const soldCount = new Map<number, number>()
   recentSales?.forEach((s) => s.lines.forEach((l) => soldCount.set(l.variantId, (soldCount.get(l.variantId) ?? 0) + l.qty)))
-  const byProd = new Map<number, { p: Product; vs: Variant[]; sold: number; stock: number }>()
+  const byProd = new Map<number, ModelEntry>()
   variants?.forEach((v) => {
     const p = productMap.get(v.productId)
     if (!p) return
@@ -285,6 +290,16 @@ export function NewSaleModal({
     setSearch('')
   }
 
+  /** با لمس فروشنده: اگر فقط یک سایز موجود دارد همان به سبد می‌رود، وگرنه کارت سایزهایش باز می‌شود */
+  function pickPhotoMatch(e: ModelEntry, el: HTMLElement) {
+    const open = e.vs.filter((v) => remainingQty(v) > 0)
+    if (open.length === 1) {
+      flyToCart(el, open[0].size)
+      addLine(open[0])
+      setPhotoPick(null)
+    } else setPhotoPick(e.p.id!)
+  }
+
   function hold() {
     if (pendingRef.current) return
     if (!lines.length) return setError('برای معطل‌کردن، حداقل یک جنس انتخاب کنید')
@@ -356,6 +371,63 @@ export function NewSaleModal({
     else onClose()
   }
 
+  /** کارت یک مدل با کاشی‌های سایز — هم در «اجناس موجود» و هم برای بوتی که با عکس پیدا شد */
+  const modelCard = (e: ModelEntry) => {
+    const vs = [...e.vs].sort((x, y) => x.color.localeCompare(y.color) || parseNum(x.size) - parseNum(y.size))
+    const byColor = new Map<string, Variant[]>()
+    for (const v of vs) byColor.set(v.color, [...(byColor.get(v.color) ?? []), v])
+    const inStock = vs.filter((v) => v.stockQty > 0)
+    const priceOf = (v: Variant) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)
+    const minPrice = Math.min(...(inStock.length ? inStock : vs).map(priceOf))
+    const inCart = vs.reduce((n, v) => n + selectedQty(v.id!), 0)
+    const hasCartons = saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0
+    return (
+      <section key={e.p.id} className="sale-product-card sale-model-card" data-in-cart={inCart > 0} aria-label={e.p.name}>
+        <div className="sale-model-head">
+          <div className="min-w-0">
+            <p className="sale-product-name">{e.p.name}</p>
+            <p className="sale-model-meta">{fmtNum(e.stock)} جوړه{inCart > 0 ? ` · ${fmtNum(inCart)} در سبد` : ''}</p>
+          </div>
+          <div className="sale-model-side">
+            <p className="sale-product-price">{fmtMoney(minPrice)}</p>
+            {hasCartons && <button type="button" className="sale-model-carton" onClick={() => { setPickerFor(e.p.id!); setPickerMode('choice'); setHalfQtys({}) }}>کارتن</button>}
+          </div>
+        </div>
+        {[...byColor].map(([color, list]) => {
+          const prices = new Set(list.map(priceOf))
+          return (
+            <div key={color} className="sale-model-color" role="group" aria-label={`رنگ ${color || 'بی‌رنگ'}`}>
+              <p className="sale-model-color-name">{color || 'بی‌رنگ'}{prices.size === 1 && list.length > 0 && priceOf(list[0]) !== minPrice ? <span>{fmtMoney(priceOf(list[0]))}</span> : null}</p>
+              <div className="sale-size-row">
+                {list.map((v) => {
+                  const left = remainingQty(v)
+                  const mine = selectedQty(v.id!)
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      disabled={left <= 0}
+                      data-low={left > 0 && left <= 2}
+                      data-in-cart={mine > 0}
+                      aria-label={`${e.p.name} ${v.size} ${v.color} — ${left > 0 ? `${fmtNum(left)} جوړه باقی` : 'ختم شده'} — ${fmtMoney(priceOf(v))}${mine ? ` — ${fmtNum(mine)} در سبد` : ''}`}
+                      onClick={(ev) => { flyToCart(ev.currentTarget, v.size); addLine(v) }}
+                      className="size-tile sale-size-tile"
+                    >
+                      {mine > 0 && <span className="size-tile-in-cart">{fmtNum(mine)}</span>}
+                      <b className="size-tile-size">{v.size}</b>
+                      <span className="size-tile-stock">{left > 0 ? fmtNum(left) : 'ختم'}</span>
+                      {prices.size > 1 && <span className="size-tile-price">{fmtNum(priceOf(v))}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </section>
+    )
+  }
+
   return (
     <Shell title="فروش جدید" onClose={() => { if (!pendingRef.current) onClose() }}>
       <div onPointerDownCapture={() => { if (startedAt.current !== null) taps.current++ }}>
@@ -383,66 +455,19 @@ export function NewSaleModal({
           placeholder="نام، سایز، رنگ یا کود..."
         /></div>
       </Field>
+      <PhotoSearch entries={[...byProd.values()]} saleType={saleType} onPick={pickPhotoMatch} />
+      {photoPick !== null && byProd.has(photoPick) && (
+        <div className="sale-model-list sale-photo-pick mb-3" aria-label="بوتی که با عکس پیدا شد">
+          {modelCard(byProd.get(photoPick)!)}
+          <button type="button" className="sale-secondary-action justify-self-start" onClick={() => setPhotoPick(null)}>بستن</button>
+        </div>
+      )}
       {products === undefined && <Skeleton rows={4} label="در حال بارگذاری اجناس…" />}
       {products?.length === 0 && <p className="py-8 text-center text-slate-500">هنوز جنسی در گدام نیست. نخست جنس اضافه کنید.</p>}
       {search.trim() && products && matches.length === 0 && <p className="py-8 text-center text-slate-500">جنسی با این جستجو پیدا نشد.</p>}
       {quickProducts.length > 0 && !search.trim() && (
         <div className="sale-model-list mb-3" aria-label="اجناس موجود">
-          {quickProducts.map((e) => {
-            const vs = [...e.vs].sort((x, y) => x.color.localeCompare(y.color) || parseNum(x.size) - parseNum(y.size))
-            const byColor = new Map<string, Variant[]>()
-            for (const v of vs) byColor.set(v.color, [...(byColor.get(v.color) ?? []), v])
-            const inStock = vs.filter((v) => v.stockQty > 0)
-            const priceOf = (v: Variant) => (saleType === 'retail' ? v.retailPrice : v.wholesalePrice)
-            const minPrice = Math.min(...inStock.map(priceOf))
-            const inCart = vs.reduce((n, v) => n + selectedQty(v.id!), 0)
-            const hasCartons = saleType === 'wholesale' && (e.p.carton?.items.length ?? 0) > 0
-            return (
-              <section key={e.p.id} className="sale-product-card sale-model-card" data-in-cart={inCart > 0} aria-label={e.p.name}>
-                <div className="sale-model-head">
-                  <div className="min-w-0">
-                    <p className="sale-product-name">{e.p.name}</p>
-                    <p className="sale-model-meta">{fmtNum(e.stock)} جوړه{inCart > 0 ? ` · ${fmtNum(inCart)} در سبد` : ''}</p>
-                  </div>
-                  <div className="sale-model-side">
-                    <p className="sale-product-price">{fmtMoney(minPrice)}</p>
-                    {hasCartons && <button type="button" className="sale-model-carton" onClick={() => { setPickerFor(e.p.id!); setPickerMode('choice'); setHalfQtys({}) }}>کارتن</button>}
-                  </div>
-                </div>
-                {[...byColor].map(([color, list]) => {
-                  const prices = new Set(list.map(priceOf))
-                  return (
-                    <div key={color} className="sale-model-color" role="group" aria-label={`رنگ ${color || 'بی‌رنگ'}`}>
-                      <p className="sale-model-color-name">{color || 'بی‌رنگ'}{prices.size === 1 && list.length > 0 && priceOf(list[0]) !== minPrice ? <span>{fmtMoney(priceOf(list[0]))}</span> : null}</p>
-                      <div className="sale-size-row">
-                        {list.map((v) => {
-                          const left = remainingQty(v)
-                          const mine = selectedQty(v.id!)
-                          return (
-                            <button
-                              key={v.id}
-                              type="button"
-                              disabled={left <= 0}
-                              data-low={left > 0 && left <= 2}
-                              data-in-cart={mine > 0}
-                              aria-label={`${e.p.name} ${v.size} ${v.color} — ${left > 0 ? `${fmtNum(left)} جوړه باقی` : 'ختم شده'} — ${fmtMoney(priceOf(v))}${mine ? ` — ${fmtNum(mine)} در سبد` : ''}`}
-                              onClick={(ev) => { flyToCart(ev.currentTarget, v.size); addLine(v) }}
-                              className="size-tile sale-size-tile"
-                            >
-                              {mine > 0 && <span className="size-tile-in-cart">{fmtNum(mine)}</span>}
-                              <b className="size-tile-size">{v.size}</b>
-                              <span className="size-tile-stock">{left > 0 ? fmtNum(left) : 'ختم'}</span>
-                              {prices.size > 1 && <span className="size-tile-price">{fmtNum(priceOf(v))}</span>}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </section>
-            )
-          })}
+          {quickProducts.map(modelCard)}
         </div>
       )}
 
