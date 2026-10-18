@@ -1,4 +1,4 @@
-import Dexie, { type EntityTable } from 'dexie'
+import Dexie, { type EntityTable, type Transaction } from 'dexie'
 import type { CustomerGoodsReceiptMeta, CustomerGoodsReceiptChild, CustomerGoodsReceiptSaleLine } from './lib/customerGoodsReceiptTypes'
 import type { DirectLine, DirectPaymentRef, DirectTradeMeta } from './lib/directTradeTypes'
 
@@ -734,8 +734,26 @@ export function makeSku(id: number, size: string): string {
   return `B${String(id).padStart(4, '0')}-${size.replace(/\s/g, '')}`
 }
 
-/** هنگام اعمال تغییرات دریافتی از سرور true می‌شود تا دوباره به صف ارسال نروند */
-export const syncFlags = { applyingRemote: false }
+/**
+ * تراکنش‌هایی که نسخهٔ رسیده از سرور را می‌نویسند؛ ردیف‌هایشان دوباره به صف ارسال نمی‌روند.
+ * مُهر به خود تراکنش بسته است، نه به یک پرچم سراسری: پرچم سراسری در تمام مدت دریافت روشن می‌ماند و
+ * هر سندی که کاربر در همان لحظه در این موبایل ثبت می‌کرد هم «از سرور» شمرده می‌شد و هرگز فرستاده نمی‌شد
+ * (موجودی اولیهٔ Go pu بهاری در یک موبایل ۸۳ بود و در موبایل دیگر ۳-).
+ */
+const remoteTransactions = new WeakSet<Transaction>()
+
+export function writeAsRemote<T>(tables: string[], scope: () => Promise<T>): Promise<T> {
+  // async لازم است: Dexie فقط برای تابع async ناحیهٔ تراکنش را در طول await ها نگه می‌دارد
+  return db.transaction('rw', tables, async (tx) => {
+    remoteTransactions.add(tx)
+    return await scope()
+  })
+}
+
+function fromRemote(tx: Transaction | undefined): boolean {
+  for (let t = tx; t; t = t.parent) if (remoteTransactions.has(t)) return true
+  return false
+}
 
 /** حالت «فقط مشاهده» (شریک): هیچ تغییری در ارقام ثبت نمی‌شود. actor = نام کاربر واردشده برای تاریخچهٔ سند. */
 export const accessFlags = { readOnly: false, actor: '' }
@@ -747,23 +765,25 @@ function authored(table: string, obj: object): boolean {
   return AUTHORED_TABLES.has(table) && !Object.keys(obj).some((k) => /direct|goodsReceipt/i.test(k))
 }
 
-function guardReadOnly() {
+function guardReadOnly(remote: boolean) {
   // تغییرات دریافتی از سرور (همگام‌سازی) باید ثبت شوند؛ فقط تغییرات محلی کاربر بسته می‌شوند
-  if (accessFlags.readOnly && !syncFlags.applyingRemote) {
+  if (accessFlags.readOnly && !remote) {
     throw new Error('حالت فقط مشاهده: شما اجازهٔ تغییر ندارید.')
   }
 }
 
 for (const t of SYNC_TABLES) {
-  db.table(t).hook('creating', (_pk, obj: Record<string, unknown>) => {
-    guardReadOnly()
+  db.table(t).hook('creating', (_pk, obj: Record<string, unknown>, tx) => {
+    const remote = fromRemote(tx)
+    guardReadOnly(remote)
     if (!obj.uuid) obj.uuid = newUuid()
-    obj.localUpdatedAt = syncFlags.applyingRemote ? 0 : Date.now()
-    if (!syncFlags.applyingRemote && accessFlags.actor && obj.by === undefined && authored(t, obj)) obj.by = accessFlags.actor
+    obj.localUpdatedAt = remote ? 0 : Date.now()
+    if (!remote && accessFlags.actor && obj.by === undefined && authored(t, obj)) obj.by = accessFlags.actor
   })
-  db.table(t).hook('updating', (mods, _pk, obj: Record<string, unknown>) => {
-    guardReadOnly()
-    if (syncFlags.applyingRemote) return { ...(mods as object), localUpdatedAt: 0 }
+  db.table(t).hook('updating', (mods, _pk, obj: Record<string, unknown>, tx) => {
+    const remote = fromRemote(tx)
+    guardReadOnly(remote)
+    if (remote) return { ...(mods as object), localUpdatedAt: 0 }
     const deleting = (mods as Record<string, unknown>).deleted === true && !obj.deleted && accessFlags.actor && authored(t, obj)
     return { ...(mods as object), localUpdatedAt: Date.now(), ...(deleting ? { deletedBy: accessFlags.actor, deletedAt: Date.now() } : {}) }
   })

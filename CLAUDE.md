@@ -89,6 +89,14 @@ A purchase bumps stock **only when `received === undefined`**. Creating a
 purchase already marked `received: true` is refused, because such a row's stock
 would come from neither the purchase nor a receive adjustment.
 
+### "Came from the server" belongs to the transaction
+
+A row written while applying a remote document gets `localUpdatedAt: 0`, so it is never pushed back. That mark is set
+by `writeAsRemote()` (`src/db.ts`) on the Dexie transaction itself and read by the hooks. It used to be a global flag,
+on for the whole download, so anything the shop typed on that phone at the same moment was also stamped «from the
+server» and never left the phone (Go pu بهاری: 83 pairs on one phone, −3 on the other). Never bring back a global
+flag. `pushUnsentRows()` in `sync.ts` sends, once per device, the rows that old flag stranded.
+
 ### Creating stock
 
 `ops.addVariant()` and `ops.setOpeningStock()` are the only ways a component may
@@ -180,7 +188,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1563 checks in 153 scenarios
+npm test          # tests/checks.ts — currently 1567 checks in 154 scenarios
 ```
 
 ```bash

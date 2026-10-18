@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { netWorth } from '../../lib/networth'
 import { accessFlags, db, type Payment, type Supplier, type LenderAction } from '../../db'
@@ -15,7 +15,6 @@ import {
   addOpeningLenderCash,
   addOpeningLenderGoods,
   updateLender,
-  type LoanReceiptMode,
   type LenderCashOutMode,
   type LenderGoodsLine,
   type OpeningLenderGoodsLine,
@@ -24,8 +23,12 @@ import {
 import { fmtNum, fmtMoney, fmtDate, fmtDateShort, parseNum, toDateInput, fromDateInput } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn, Empty } from '../../components/ui'
 import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
-import { SIDE_LABEL, SIDE_TONE, afterThis, headline, netOfCreditor, sideOf } from '../../lib/accountWords'
+import { SIDE_LABEL, SIDE_TONE, afterThis, headline, netOfCreditor, sideOf, standing } from '../../lib/accountWords'
+import { afn } from '../../lib/financialPosting'
 import CorrectLenderPaymentModal from './CorrectLenderPaymentModal'
+
+/** «سند قبلی»: همهٔ کارهای پیش از اپ در یک جا — اولش «او قبلاً به ما پول قرض داد» (addLoan با 'opening'). */
+type OpeningChoice = 'loanOpening' | LenderAction
 
 type StockOption = LenderGoodsLine & { variantId: number; stockQty: number; retailPrice: number; wholesalePrice: number }
 
@@ -112,10 +115,9 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const [amount, setAmount] = useState('')
   const [dateStr, setDateStr] = useState(toDateInput(Date.now()))
   const [note, setNote] = useState('')
-  const [loanReceipt, setLoanReceipt] = useState<LoanReceiptMode>('cash')
   const [cashMode, setCashMode] = useState<LenderCashOutMode>('cashRepayment')
   const [goodsMode, setGoodsMode] = useState<LenderGoodsMode>('goodsSettlement')
-  const [openingAction, setOpeningAction] = useState<LenderAction>('cashRepayment')
+  const [openingAction, setOpeningAction] = useState<OpeningChoice>('loanOpening')
   const [variantId, setVariantId] = useState<number | ''>('')
   const [qty, setQty] = useState('1')
   const [agreedPrice, setAgreedPrice] = useState('')
@@ -130,6 +132,13 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const [editPhone, setEditPhone] = useState(lender.phone ?? '')
   const [editNote, setEditNote] = useState(lender.note ?? '')
   const [error, setError] = useState('')
+  // وقتی سند حساب را برعکس می‌کند (باید بدهیم ↔ باید بگیریم)، مالک باید جداگانه تأیید کند
+  const [flipOk, setFlipOk] = useState(false)
+  // پیام خطا بالای فورم است؛ وقتی دکمه پایین صفحه زده می‌شود، صفحه را تا پیام بالا ببر تا مالک دلیل را ببیند
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [error])
   // سند پولی که مالک می‌خواهد اصلاح کند — بدون پاک کردن
   const [editingLenderDoc, setEditingLenderDoc] = useState<Payment | null>(null)
   // تأیید دومرحله‌ای شراکت: نام دقیق باید تایپ شود
@@ -184,6 +193,10 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const ledger = buildLenderLedger(payments ?? [], l.id!, lenderSales ?? [])
   const summary = summarizeLenderAccount(payments ?? [], l.id!)
   const goodsTotal = goodsLines.reduce((sum, line) => sum + line.qty * line.unitPrice, 0)
+  // همان قاعدهٔ ops.giveCashToLender / giveGoodsToLender: «قرضش را پس دادیم» فقط تا اندازهٔ آنچه باید به او بدهیم
+  const settlementRoom = Math.max(0, afn(owed))
+  const settlementTooBig = goodsMode === 'goodsSettlement' && goodsLines.length > 0 && afn(goodsTotal) > settlementRoom
+  const repayTooBig = cashMode === 'cashRepayment' && afn(parseNum(amount)) > settlementRoom
   const openingCount = parseNum(qty)
   const openingPrice = parseNum(agreedPrice)
   const openingDraftStarted = manualOpeningGoods
@@ -215,14 +228,69 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
   const openingGoodsCanSubmit =
     goodsLines.length > 0 ? !openingDraftStarted || openingDraftLine !== null : openingDraftLine !== null
 
+  // پیش‌نمایش «بعد از ثبت»: این سند عدد حساب را چقدر عوض می‌کند (balance مثبت = ما باید به او بدهیم).
+  // فقط برای نشان دادن است — ops همان سند را می‌نویسد و tests/lender-account-design-e2e.mjs برابری هر دو را می‌سنجد.
+  const lineTotal = (lines: { qty: number; unitPrice: number }[]) => afn(lines.reduce((sum, line) => sum + line.qty * afn(line.unitPrice), 0))
+  const draftDelta = (() => {
+    const money = afn(parseNum(amount))
+    if (mode === 'loan' || mode === 'direct') return money
+    if (mode === 'repay') return -money
+    if (mode === 'goods') return -lineTotal(goodsLines)
+    if (mode === 'opening') {
+      if (openingAction === 'loanOpening') return money
+      if (openingAction === 'cashRepayment' || openingAction === 'cashLoan') return -money
+      return -lineTotal(openingDraftLine ? [...goodsLines, openingDraftLine] : goodsLines)
+    }
+    return 0
+  })()
+  const balanceAfter = owed + draftDelta
+  const sideBefore = sideOf(netOfCreditor(owed))
+  const sideAfter = sideOf(netOfCreditor(balanceAfter))
+  // سندی که «قرضش را پس دادیم» می‌گوید ولی بعدش او بدهکار ما می‌شود — همان اشتباه حساب صدیق
+  const openingPaysBack = mode === 'opening' && (openingAction === 'cashRepayment' || openingAction === 'goodsSettlement')
+  const flips =
+    draftDelta !== 0 &&
+    ((sideBefore === 'pay' && sideAfter === 'receive') ||
+      (sideBefore === 'receive' && sideAfter === 'pay') ||
+      (openingPaysBack && sideAfter === 'receive'))
+  const flipBlocked = flips && !flipOk
+  const preview =
+    draftDelta !== 0 ? (
+      <div className="mb-2 rounded-lg border border-slate-200 bg-white p-2" aria-live="polite">
+        <p className={`text-sm font-bold ${SIDE_TONE[sideAfter]}`}>بعد از ثبت: {standing(netOfCreditor(balanceAfter))}</p>
+        {flips && (
+          <div className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+            <p className="font-bold">⚠️ توجه: با این سند حساب برعکس می‌شود.</p>
+            <p className="mt-1">
+              حالا: {standing(netOfCreditor(owed))}. بعد از ثبت: {standing(netOfCreditor(balanceAfter))}.
+            </p>
+            {openingPaysBack && (
+              <p className="mt-1">
+                اگر در اصل {l.name} به ما پول قرض داده بود، اول همین‌جا گزینهٔ «او قبلاً به ما پول قرض داد» را ثبت کنید.
+              </p>
+            )}
+            <label className="mt-2 flex items-center gap-2 text-sm font-bold">
+              <input type="checkbox" checked={flipOk} onChange={(e) => setFlipOk(e.target.checked)} />
+              بلی، درست است
+            </label>
+          </div>
+        )}
+      </div>
+    ) : null
+  const notOwedReason = (what: string) =>
+    owed < 0
+      ? `ما به او بدهکار نیستیم؛ برعکس ${standing(netOfCreditor(owed))}. «${what}» را انتخاب کنید.`
+      : `ما به او بدهکار نیستیم. «${what}» را انتخاب کنید.`
+
   const reset = () => {
     setAmount('')
     setNote('')
     setSupplierId('')
-    setLoanReceipt('cash')
-    setCashMode('cashRepayment')
-    setGoodsMode('goodsSettlement')
-    setOpeningAction('cashRepayment')
+    // «بابت چه؟» خودش درست انتخاب می‌شود: اگر ما به او بدهکاریم، پس دادن؛ وگرنه قرض برای خودش
+    setCashMode(owed > 0 ? 'cashRepayment' : 'cashLoan')
+    setGoodsMode(owed > 0 ? 'goodsSettlement' : 'goodsCredit')
+    setOpeningAction('loanOpening')
+    setFlipOk(false)
     setVariantId('')
     setQty('1')
     setAgreedPrice('')
@@ -237,7 +305,11 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
 
   return (
     <Modal title={l.name} onClose={onClose}>
-      {error && <p className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">⚠️ {error}</p>}
+      {error && (
+        <p ref={errorRef} className="mb-3 rounded-xl bg-red-50 p-2.5 text-sm font-bold text-red-700">
+          ⚠️ {error}
+        </p>
+      )}
 
       <div className="mb-3 rounded-xl bg-slate-50 p-3 text-center">
         {(() => {
@@ -277,9 +349,10 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
         ویرایش مشخصات قرض‌دهنده
       </button>
 
-      <div className="mb-3 grid grid-cols-2 gap-2">
+      {/* سه کار روزمره در یک ردیف — مثل صفحهٔ مشتری؛ فقط دکمهٔ زده‌شده آبی می‌شود */}
+      <div className="mb-2 grid grid-cols-3 gap-2">
         <button
-          className="primary-button text-sm"
+          className="party-action"
           aria-pressed={mode === 'loan'}
           onClick={() => {
             setMode(mode === 'loan' ? 'none' : 'loan')
@@ -308,8 +381,10 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
         >
           کفش دادیم
         </button>
+      </div>
+      <div className="mb-3 grid grid-cols-2 gap-2">
         <button
-          className="party-action"
+          className="party-action text-xs"
           aria-pressed={mode === 'direct'}
           onClick={() => {
             setMode(mode === 'direct' ? 'none' : 'direct')
@@ -319,7 +394,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           پرداخت مستقیم به فروشنده
         </button>
         <button
-          className="party-action col-span-2"
+          className="party-action text-xs"
           aria-pressed={mode === 'opening'}
           onClick={() => {
             setMode(mode === 'opening' ? 'none' : 'opening')
@@ -329,7 +404,6 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           سند قبلی — قبل از استفاده از اپ
         </button>
       </div>
-      <p className="mb-3 text-xs text-slate-500">پول گرفتیم: او به ما پول داد · پول دادیم: ما به او پول دادیم · کفش دادیم: ما به او کفش دادیم.</p>
 
       {mode === 'edit' && (
         <div className="mb-3 rounded-xl border border-slate-300 p-3">
@@ -376,24 +450,12 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
 
       {mode === 'loan' && (
         <div className="mb-3 rounded-xl border border-teal-200 p-3">
-          {owed < 0 && loanReceipt === 'cash' && (
-            <p className="mb-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800">
-              💰 حساب این شخص منفی است (طلب ما {fmtMoney(Math.abs(owed))}). این مبلغ طلبِ ما را کم می‌کند — یعنی برگشتِ پولِ خودش.
-            </p>
-          )}
-          <Field label="این قرض چگونه بوده؟">
-            <select className={inputCls} value={loanReceipt} onChange={(e) => setLoanReceipt(e.target.value as LoanReceiptMode)}>
-              <option value="cash">{owed < 0 ? 'پول را خودش برگرداند — حالا وارد صندوق شد' : 'پول اکنون وارد صندوق شد'}</option>
-              <option value="opening">قرض قبلی — پول قبلاً برای جنس مصرف شده</option>
-            </select>
-          </Field>
-          <p className="mb-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-600">
-            {loanReceipt === 'cash'
-              ? owed < 0
-                ? 'صندوق به این مبلغ زیاد و طلبِ ما از او کم می‌شود.'
-                : 'صندوق به همین مبلغ زیاد می‌شود و قرض ما به او بالا می‌رود.'
-              : 'برای جنس موجودی اولیه یا بکاپ: فقط قرض ثبت می‌شود و صندوق تغییر نمی‌کند.'}
+          <p className="mb-2 rounded-lg bg-teal-50 p-2 text-xs text-teal-800">
+            {owed < 0
+              ? `او ${fmtMoney(-owed)} به ما بدهکار است؛ این پول اول همان را کم می‌کند. پول وارد صندوق می‌شود.`
+              : 'او به ما پول قرض داد و پول همین حالا وارد صندوق می‌شود.'}
           </p>
+          <p className="mb-2 text-xs text-slate-500">پولی که پیش از اپ داده بود و در صندوق نیست؟ از «سند قبلی» ثبت کنید.</p>
           <Field label="مبلغ *">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </Field>
@@ -403,11 +465,12 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           <Field label="یادداشت">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
+          {preview}
           <PrimaryBtn
-            disabled={parseNum(amount) <= 0}
+            disabled={parseNum(amount) <= 0 || flipBlocked}
             onClick={async () => {
               try {
-                await addLoan(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note, loanReceipt)
+                await addLoan(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note, 'cash')
                 setMode('none')
                 reset()
               } catch (e) {
@@ -415,11 +478,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               }
             }}
           >
-            {loanReceipt === 'cash'
-              ? owed < 0
-                ? 'ثبت برگشت پول توسط او'
-                : 'ثبت دریافت نقدی قرض'
-              : 'ثبت قرض قبلی بدون تغییر صندوق'}
+            {owed < 0 ? 'ثبت برگشت پول توسط او' : 'ثبت دریافت نقدی قرض'}
           </PrimaryBtn>
         </div>
       )}
@@ -430,14 +489,14 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
             برای خرید آینده که این شخص مستقیماً فروشنده را پرداخت کرده است. صندوق تغییر نمی‌کند.
           </p>
           <p className="mb-2 text-xs font-bold text-amber-700">
-            برای جنس موجودی اولیه/بکاپ این گزینه را نزنید؛ همان «قرض قبلی» را ثبت کنید.
+            برای جنس موجودی اولیه/بکاپ این گزینه را نزنید؛ از «سند قبلی» گزینهٔ «او قبلاً به ما پول قرض داد» را ثبت کنید.
           </p>
           <Field label="فروشنده *">
             <select className={inputCls} value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : '')}>
               <option value="">انتخاب کنید...</option>
               {suppliers?.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} — قرض فعلی {fmtMoney(s.balance)}
+                  {s.name} — {standing(netOfCreditor(s.balance))}
                 </option>
               ))}
             </select>
@@ -451,8 +510,9 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           <Field label="یادداشت">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
+          {preview}
           <PrimaryBtn
-            disabled={!supplierId || parseNum(amount) <= 0}
+            disabled={!supplierId || parseNum(amount) <= 0 || flipBlocked}
             onClick={async () => {
               const supplier = suppliers?.find((s) => s.id === supplierId)
               if (!supplier) return
@@ -484,20 +544,19 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
         <div className="mb-3 rounded-xl border border-amber-200 p-3">
           {owed < 0 && (
             <p className="mb-2 rounded-lg bg-teal-50 p-2 text-xs font-bold text-teal-800">
-              💰 حساب این شخص منفی است (طلب ما {fmtMoney(Math.abs(owed))}). اگر او پول برگردانده، از بخش
-              «گرفتن قرض» ثبت کنید — همان‌جا دکمهٔ «برگشت پول توسط او» است.
+              💰 او {fmtMoney(-owed)} به ما بدهکار است. اگر او پول برگردانده، «پول گرفتیم» را بزنید.
             </p>
           )}
-          <Field label="این پول چگونه حساب شود؟">
+          <Field label="این پول بابت چه بود؟">
             <select className={inputCls} value={cashMode} onChange={(e) => setCashMode(e.target.value as LenderCashOutMode)}>
-              <option value="cashRepayment">پرداخت قرض ما به او</option>
-              <option value="cashLoan">قرض نقدی به خود قرض‌دهنده</option>
+              <option value="cashRepayment">قرضش را پس دادیم</option>
+              <option value="cashLoan">به او پول قرض دادیم</option>
             </select>
           </Field>
           <p className="mb-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
             {cashMode === 'cashRepayment'
-              ? 'از قرض ما کم می‌شود و بیشتر از قرض فعلی ثبت نمی‌شود.'
-              : 'این پول قرضِ او از دکان است؛ اگر حساب منفی شود، یعنی او به ما بدهکار است.'}
+              ? `آنچه باید به او بدهیم کم می‌شود؛ حداکثر ${fmtMoney(settlementRoom)}.`
+              : 'این پول را او از دکان قرض می‌گیرد و به ما بدهکار می‌شود.'}
           </p>
           <Field label="مبلغ *">
             <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
@@ -508,8 +567,16 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           <Field label="یادداشت">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً قسط ماه یا مصرف خانه" />
           </Field>
+          {repayTooBig && (
+            <p className="mb-2 rounded-lg bg-red-50 p-2 text-sm font-bold text-red-700">
+              {owed > 0
+                ? `ما فقط ${fmtMoney(owed)} باید به او بدهیم. مبلغ را کم کنید، یا برای اضافه «به او پول قرض دادیم» را انتخاب کنید.`
+                : notOwedReason('به او پول قرض دادیم')}
+            </p>
+          )}
+          {!repayTooBig && preview}
           <PrimaryBtn
-            disabled={parseNum(amount) <= 0}
+            disabled={parseNum(amount) <= 0 || repayTooBig || flipBlocked}
             onClick={async () => {
               try {
                 await giveCashToLender(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note, cashMode)
@@ -527,16 +594,16 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
 
       {mode === 'goods' && (
         <div className="mb-3 rounded-xl border border-orange-200 p-3">
-          <Field label="این کفش چگونه حساب شود؟">
+          <Field label="این کفش بابت چه بود؟">
             <select className={inputCls} value={goodsMode} onChange={(e) => setGoodsMode(e.target.value as LenderGoodsMode)}>
-              <option value="goodsSettlement">کفش بابت تسویهٔ قرض ما</option>
+              <option value="goodsSettlement">به جای قرضش</option>
               <option value="goodsCredit">کفش قرضی برای خودش</option>
             </select>
           </Field>
           <p className="mb-2 rounded-lg bg-orange-50 p-2 text-xs text-orange-800">
             {goodsMode === 'goodsSettlement'
-              ? 'قیمت توافقی از قرض ما کم می‌شود؛ ارزش کل نمی‌تواند بیشتر از قرض فعلی باشد.'
-              : 'قیمت توافقی طلب دکان از او است و در حساب خالص کم می‌شود.'}
+              ? `قیمت توافقی از آنچه باید به او بدهیم کم می‌شود؛ حداکثر ${fmtMoney(settlementRoom)}.`
+              : 'قیمت توافقی را او به ما بدهکار می‌شود.'}
           </p>
           <Field label="مدل، سایز و رنگ *">
             <select
@@ -633,8 +700,16 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           <Field label="یادداشت و جزئیات">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً بابت قسط ماه" />
           </Field>
+          {settlementTooBig && (
+            <p className="mb-2 rounded-lg bg-red-50 p-2 text-sm font-bold text-red-700">
+              {owed > 0
+                ? `ما فقط ${fmtMoney(owed)} باید به او بدهیم ولی ارزش کفش ${fmtMoney(goodsTotal)} است. کفش را کم کنید، یا برای اضافه «کفش قرضی برای خودش» را انتخاب کنید.`
+                : notOwedReason('کفش قرضی برای خودش')}
+            </p>
+          )}
+          {!settlementTooBig && preview}
           <PrimaryBtn
-            disabled={goodsLines.length === 0}
+            disabled={goodsLines.length === 0 || settlementTooBig || flipBlocked}
             onClick={async () => {
               try {
                 const currentLines = goodsLines.filter((line): line is LenderGoodsLine => typeof line.variantId === 'number')
@@ -647,7 +722,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               }
             }}
           >
-            {goodsMode === 'goodsSettlement' ? 'ثبت کفش بابت تسویه' : 'ثبت کفش قرضی'}
+            {goodsMode === 'goodsSettlement' ? 'ثبت کفش به جای قرضش' : 'ثبت کفش قرضی'}
           </PrimaryBtn>
         </div>
       )}
@@ -663,7 +738,8 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               className={inputCls}
               value={openingAction}
               onChange={(e) => {
-                setOpeningAction(e.target.value as LenderAction)
+                setOpeningAction(e.target.value as OpeningChoice)
+                setFlipOk(false)
                 setAmount('')
                 setGoodsLines([])
                 setVariantId('')
@@ -676,14 +752,15 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
                 setError('')
               }}
             >
-              <option value="cashRepayment">پرداخت نقدی قبلی قرض ما به او</option>
-              <option value="cashLoan">قرض نقدی قبلی او از دکان</option>
-              <option value="goodsSettlement">کفش قبلی بابت تسویهٔ قرض ما</option>
-              <option value="goodsCredit">کفش قرضی قبلی برای خودش</option>
+              <option value="loanOpening">او قبلاً به ما پول قرض داد</option>
+              <option value="cashRepayment">ما قبلاً قرضش را نقد پس دادیم</option>
+              <option value="cashLoan">ما قبلاً به او پول قرض دادیم</option>
+              <option value="goodsSettlement">ما قبلاً به جای قرضش کفش دادیم</option>
+              <option value="goodsCredit">ما قبلاً به او کفش قرضی دادیم</option>
             </select>
           </Field>
 
-          {(openingAction === 'cashRepayment' || openingAction === 'cashLoan') && (
+          {(openingAction === 'loanOpening' || openingAction === 'cashRepayment' || openingAction === 'cashLoan') && (
             <Field label="مبلغ قبلی *">
               <input className={inputCls} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </Field>
@@ -857,15 +934,19 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
           <Field label="یادداشت و جزئیات">
             <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="مثلاً قبل از بکاپ یا بابت قسط قدیمی" />
           </Field>
+          {preview}
           <PrimaryBtn
             disabled={
-              openingAction === 'cashRepayment' || openingAction === 'cashLoan'
+              flipBlocked ||
+              (openingAction === 'loanOpening' || openingAction === 'cashRepayment' || openingAction === 'cashLoan'
                 ? parseNum(amount) <= 0
-                : !openingGoodsCanSubmit
+                : !openingGoodsCanSubmit)
             }
             onClick={async () => {
               try {
-                if (openingAction === 'cashRepayment' || openingAction === 'cashLoan') {
+                if (openingAction === 'loanOpening') {
+                  await addLoan(l.id!, l.name, parseNum(amount), fromDateInput(dateStr), note, 'opening')
+                } else if (openingAction === 'cashRepayment' || openingAction === 'cashLoan') {
                   await addOpeningLenderCash(
                     l.id!,
                     l.name,
@@ -1006,7 +1087,7 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
                 اصلاح سند
               </button>
               <button
-                className="flex-1 rounded-lg bg-red-50 py-1.5 text-xs font-bold text-red-600"
+                className="flex-1 rounded-lg bg-red-50 py-1.5 text-xs font-bold text-red-700"
               onClick={async () => {
                 try {
                   const impact = await deletePaymentImpact(r.source!.id)

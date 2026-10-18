@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, accessFlags, syncFlags, saleCashPaid, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, writeAsRemote, saleCashPaid, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -815,6 +815,31 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
     }
   },
   {
+    name: 'همگام‌سازی — سندی که هم‌زمان با دریافت از موبایل دیگر ثبت شود، باز هم فرستاده می‌شود',
+    run: async () => {
+      // Go pu بهاری: موجودی اولیه در موبایل اول درست وقتی ثبت شد که همگام‌سازی فروش‌های موبایل دوم را
+      // می‌نوشت. مُهر «از سرور آمده» سراسری بود، سند این موبایل هم «از سرور» شمرده شد و هرگز فرستاده نشد.
+      const vId = await makeVariant({ purchasePrice: 500 })
+      const remote = (async () => {
+        for (let i = 0; i < 40; i++) {
+          await applyRemoteRow('customers', { uuid: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, deleted: false, data: { name: `مشتری ${i}`, type: 'retail', balance: 0, createdAt: 1 } })
+        }
+      })()
+      const local = (async () => {
+        for (let i = 0; i < 20; i++) {
+          await setOpeningStock(vId, 10 + i)
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+      })()
+      await Promise.all([remote, local])
+      const adjustments = await db.adjustments.toArray()
+      eq('همهٔ تعدیل‌های این موبایل ثبت شد', adjustments.length, 20)
+      eq('هیچ تعدیل این موبایل «از سرور» شمرده نشد', adjustments.filter((a) => !a.localUpdatedAt).length, 0)
+      eq('اندازهٔ این موبایل هم فرستادنی ماند', (await db.variants.get(vId))!.localUpdatedAt ? 1 : 0, 1)
+      eq('مشتری‌های رسیده «از سرور» ماندند', (await db.customers.toArray()).filter((c) => c.localUpdatedAt).length, 0)
+    }
+  },
+  {
     name: 'بازبینی کامل — موبایل دوم: مصرفِ اصلاح‌شده رد اصلاح را نگه می‌دارد',
     run: async () => {
       const catId = await db.expenseCategories.add({ name: 'نان', uuid: '00000000-0000-4000-8000-00000000e0c1' }) as number
@@ -843,9 +868,7 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       is('حذف: کی', typeof gone.deletedAt, 'number')
       eq('حذف اثر پول را برگرداند', await cashBalance(), 0)
       // سندی که از دستگاه دیگر می‌آید، همان‌طور که هست می‌ماند
-      syncFlags.applyingRemote = true
-      try { await db.sales.add({ date: 1, saleType: 'retail', lines: [], total: 0, paid: 0, uuid: '00000000-0000-4000-8000-000000000001' }) }
-      finally { syncFlags.applyingRemote = false }
+      await writeAsRemote(['sales'], () => db.sales.add({ date: 1, saleType: 'retail', lines: [], total: 0, paid: 0, uuid: '00000000-0000-4000-8000-000000000001' }))
       is('سند همگام‌شده مهر این دستگاه را نمی‌گیرد', (await db.sales.where('uuid').equals('00000000-0000-4000-8000-000000000001').first())!.by, undefined)
       is('کنترل حساب‌ها سالم', (await runIntegrityCheck()).mismatches.length, 0)
       // سند معاملهٔ مستقیم مقایسهٔ دقیق دارد — مهر نمی‌خورد
