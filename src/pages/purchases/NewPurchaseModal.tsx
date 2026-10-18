@@ -7,6 +7,7 @@ import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import QtyControl from '../../components/QtyControl'
 import CartonWizardModal from './CartonWizardModal'
 import { Modal, Field, inputCls } from '../../components/ui'
+import { bestMatches } from '../../lib/search'
 
 export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const [supplierId, setSupplierId] = useState<number | ''>('')
@@ -34,14 +35,10 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
 
   const matches =
     search.trim() && variants
-      ? variants
-          .filter((v) => {
-            const p = productMap.get(v.productId)
-            if (!p) return false
-            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`
-            return search.trim().split(/\s+/).every((w) => hay.includes(w))
-          })
-          .slice(0, 12)
+      ? bestMatches(variants, search, (v) => {
+          const p = productMap.get(v.productId)
+          return p ? `${p.name} ${p.brand ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}` : null
+        })
       : []
 
   // جنس‌های مطابق جستجو (یکتا) — برای دکمه‌های کارتن

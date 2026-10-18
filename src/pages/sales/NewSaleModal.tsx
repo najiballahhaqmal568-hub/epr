@@ -18,6 +18,7 @@ import { Icon } from '../../components/Icon'
 import StockSelectionSummary from './StockSelectionSummary'
 import BulkSalePrice from './BulkSalePrice'
 import PhotoSearch from './PhotoSearch'
+import { bestMatches } from '../../lib/search'
 
 type ModelEntry = { p: Product; vs: Variant[]; sold: number; stock: number }
 
@@ -141,17 +142,10 @@ export function NewSaleModal({
 
   const matches =
     search.trim() && variants && products
-      ? variants
-          .filter((v) => {
-            const p = productMap.get(v.productId)
-            if (!p) return false
-            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`
-            return search
-              .trim()
-              .split(/\s+/)
-              .every((w) => hay.includes(w))
-          })
-          .slice(0, 12)
+      ? bestMatches(variants, search, (v) => {
+          const p = productMap.get(v.productId)
+          return p ? `${p.name} ${p.brand ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}` : null
+        })
       : []
 
   // جنس‌های کارتن‌دارِ مطابق جستجو — برای فروش کارتنی

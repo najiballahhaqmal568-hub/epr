@@ -5,6 +5,7 @@ import { addExchange } from '../../lib/ops'
 import { priorReturnsOf, returnRefund, returnableQtys } from '../../lib/returns'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
+import { bestMatches } from '../../lib/search'
 
 /** تبادله: جنس برگشتی + جنس جدید؛ صندوق فقط تفاوت را می‌بیند */
 export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
@@ -25,14 +26,10 @@ export function ExchangeModal({ sale, onClose }: { sale: Sale; onClose: () => vo
 
   const matches =
     search.trim() && variants
-      ? variants
-          .filter((v) => {
-            const p = productMap.get(v.productId)
-            if (!p) return false
-            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color}`
-            return search.trim().split(/\s+/).every((w) => hay.includes(w))
-          })
-          .slice(0, 12)
+      ? bestMatches(variants, search, (v) => {
+          const p = productMap.get(v.productId)
+          return p ? `${p.name} ${p.brand ?? ''} ${v.size} ${v.color}` : null
+        })
       : []
 
   // همان قاعدهٔ صفحهٔ مرجوعی: جوړهٔ برگشت‌خورده دوباره برنمی‌گردد و سهم تخفیف پس داده نمی‌شود

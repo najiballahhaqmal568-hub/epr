@@ -126,6 +126,13 @@ refused and what the Sale document says are `readPayment`, `checkoutRefusal` and
 collects the form. `ops.addSale` stays the authority that writes. A new way to sell (a button, a barcode) calls
 these; it must not re-derive `paid` / `remainder` in a component. A discount is never negative.
 
+### Product search is one function (`src/lib/search.ts`)
+
+Every product search box (sale desk, stock, purchase, exchange, returns, price correction) goes through `bestMatches()`
+/ `searchScore()`. Case, spaces («gopu» = «Go pu»), ی/ي, ک/ك, half-spaces and Persian digits don't matter, and one wrong
+letter is forgiven in a word of four letters or more. Sizes and codes (any word with a digit) must match exactly. Results
+are ranked, exact matches first. Don't write `search.split(/\s+/).every(hay.includes)` again.
+
 ### Finding a boot by photo (`src/lib/photoMatch.ts`)
 
 «📷 پیدا کردن بوت با عکس» on the sale desk compares the shot with each product's photo on the phone itself
@@ -197,7 +204,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1567 checks in 154 scenarios
+npm test          # tests/checks.ts — currently 1580 checks in 155 scenarios
 ```
 
 ```bash

@@ -7,6 +7,7 @@ import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { fmtNum, fmtMoney, fmtDate, parseNum } from '../../lib/format'
 import QtyControl from '../../components/QtyControl'
 import { Modal, Field, inputCls, PrimaryBtn } from '../../components/ui'
+import { bestMatches } from '../../lib/search'
 
 /** مرجوعی مستقیم از روی یک خرید: اجناس همان فاکتور با قیمت خرید همان فاکتور */
 export function PurchaseReturnModal({ purchase, onClose }: { purchase: Purchase; onClose: () => void }) {
@@ -124,14 +125,10 @@ export function SupplierReturnModal({ supplier, onClose }: { supplier: Supplier;
 
   const matches =
     search.trim() && variants
-      ? variants
-          .filter((v) => {
-            const p = productMap.get(v.productId)
-            if (!p) return false
-            const hay = `${p.name} ${p.brand ?? ''} ${v.size} ${v.color}`
-            return search.trim().split(/\s+/).every((w) => hay.includes(w))
-          })
-          .slice(0, 12)
+      ? bestMatches(variants, search, (v) => {
+          const p = productMap.get(v.productId)
+          return p ? `${p.name} ${p.brand ?? ''} ${v.size} ${v.color}` : null
+        })
       : []
 
   const amount = lines.reduce((s, l) => s + l.qty * l.unitPrice, 0)
