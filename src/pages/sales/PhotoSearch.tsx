@@ -1,7 +1,7 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import type { Product, Variant } from '../../db'
 import { fmtMoney, fmtNum } from '../../lib/format'
-import { findByPhoto, type PhotoMatch, type PhotoMethod } from '../../lib/photoMatch'
+import { findByPhoto, type BasicReason, type PhotoMatch, type PhotoMethod } from '../../lib/photoMatch'
 import { downscalePhoto } from '../inventory/helpers'
 
 type Entry = { p: Product; vs: Variant[]; stock: number }
@@ -9,7 +9,7 @@ type Entry = { p: Product; vs: Variant[]; stock: number }
 type State =
   | { kind: 'idle' }
   | { kind: 'working'; done: number; total: number }
-  | { kind: 'results'; shot: string; matches: PhotoMatch[]; withoutPhoto: number; method: PhotoMethod }
+  | { kind: 'results'; shot: string; matches: PhotoMatch[]; withoutPhoto: number; method: PhotoMethod; basicReason?: BasicReason }
   | { kind: 'error'; message: string; detail?: string }
 
 /**
@@ -91,7 +91,11 @@ export default function PhotoSearch<E extends Entry>({ entries, saleType, onPick
         </button>
       })}
       <p className="mt-2 text-xs text-slate-600">اگر بوت درست این‌جا نیست، نامش را در جستجو بنویسید.</p>
-      {state.method === 'basic' && <p className="mt-1 text-xs text-slate-600">این گوشی ابزار کامل شناختن عکس را ندارد؛ بوت‌ها با رنگ و شکل مقایسه شدند. پیش از لمس، عکس را با دقت ببینید.</p>}
+      {state.method === 'basic' && <p className="mt-1 text-xs text-slate-600">
+        {state.basicReason === 'downloading'
+          ? 'ابزار کامل شناختن عکس (حدود ۱۴ MB) هنوز دانلود می‌شود؛ تا آن وقت بوت‌ها با رنگ و شکل مقایسه شدند. پیش از لمس، عکس را با دقت ببینید.'
+          : 'این گوشی ابزار کامل شناختن عکس را ندارد؛ بوت‌ها با رنگ و شکل مقایسه شدند. پیش از لمس، عکس را با دقت ببینید.'}
+      </p>}
       {state.withoutPhoto > 0 && <p className="mt-1 text-xs text-slate-600">{fmtNum(state.withoutPhoto)} بوت در گدام عکس ندارد و با عکس پیدا نمی‌شود.</p>}
     </section>}
   </div>

@@ -2359,6 +2359,58 @@ export async function payExpenseCreditorGoods(
   })
 }
 
+/**
+ * «مصرف دکان» در میز فروش: کفش بابت مزد یک کار (مثلاً نجاری که میز دکان را ساخت) داده می‌شود.
+ * همان دو سندی است که دکان‌دار با دست هم می‌ساخت، در یک تراکنش: مصرف دکان به قرض همان شخص (طلبکار
+ * مصرف)، و پرداخت همان قرض با کفش (payExpenseCreditorGoods). صندوق هیچ حرکتی ندارد؛ کفش از گدام می‌رود،
+ * مصرف در مصارف روز و فروش در فروش‌ها دیده می‌شود، حساب شخص صفر می‌ماند و رد کار در آن باقی است.
+ * شخص نو یک حساب «طلبکار مصرف» و نوع مصرف نو یک کتگوری می‌گیرد. اگر یکی از دو سند رد شود (مثلاً موجودی کم)، هیچ کدام ثبت نمی‌شود.
+ */
+export async function payExpenseWithGoods(input: {
+  lines: LenderGoodsLine[]
+  categoryId?: number
+  categoryName: string
+  personId?: number
+  personName?: string
+  note?: string
+  date?: number
+}): Promise<{ expenseId: number; saleId: number; paymentId: number; creditorId: number }> {
+  const date = input.date ?? Date.now()
+  const categoryName = input.categoryName.trim()
+  if (!categoryName) throw new Error('نوع مصرف را انتخاب کنید')
+  const note = input.note?.trim() || undefined
+  return db.transaction('rw', [db.sales, db.payments, db.variants, db.suppliers, db.cashMovements, db.expenses, db.expenseCategories], async () => {
+    let categoryId = input.categoryId
+    if (categoryId === undefined) {
+      const same = await db.expenseCategories.filter((c) => !c.deleted && c.name.trim() === categoryName).first()
+      categoryId = same?.id ?? ((await db.expenseCategories.add({ name: categoryName })) as number)
+    }
+    let creditorId = input.personId
+    if (creditorId === undefined) {
+      const name = input.personName?.trim()
+      if (!name) throw new Error('نام کسی که کفش را بابت کارش برد بنویسید')
+      const same = await db.suppliers.filter((x) => !x.deleted && x.kind === 'expenseCreditor' && x.name.trim() === name).first()
+      creditorId = same?.id ?? ((await db.suppliers.add({ name, balance: 0, kind: 'expenseCreditor' })) as number)
+    }
+    const creditor = await db.suppliers.get(creditorId)
+    if (!creditor || creditor.deleted || creditor.kind !== 'expenseCreditor') throw new Error('حساب طلبکار مصرف یافت نشد')
+    const amount = afn(input.lines.reduce((sum, line) => sum + line.qty * afn(line.unitPrice), 0))
+    const expenseId = await addExpense({
+      date,
+      categoryId,
+      categoryName,
+      amount,
+      cashPaid: 0,
+      creditAmount: amount,
+      creditorId,
+      type: 'business',
+      note: note ?? 'مزد کار، پرداخت با کفش'
+    })
+    const { saleId, paymentId } = await payExpenseCreditorGoods(creditorId, input.lines, date, note ?? `مزد کار (${categoryName})، پرداخت با کفش`, 'credit')
+    return { expenseId, saleId, paymentId, creditorId }
+  })
+}
+
 export async function deleteExpense(expenseId: number): Promise<void> {
   return db.transaction('rw', db.expenses, db.cashMovements, db.suppliers, async () => {
     const e = await db.expenses.get(expenseId)

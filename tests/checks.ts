@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, accessFlags, writeAsRemote, saleCashPaid, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, accessFlags, writeAsRemote, saleCashPaid, saleCreditAmount, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -44,6 +44,7 @@ import {
   addExpense,
   payExpenseCreditorCash,
   payExpenseCreditorGoods,
+  payExpenseWithGoods,
   addPayment,
   addOpeningDebt,
   addAdjustment,
@@ -2399,6 +2400,54 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       eq('صندوق دست‌نخورده ماند', await cashBalance(), 1000)
       await throws('برداشت بیشتر از موجودی رد شود', () => addPartnerWithdrawal('مالک', 1500))
       eq('صندوق باز هم دست‌نخورده', await cashBalance(), 1000)
+    }
+  },
+  {
+    name: 'مصرف دکان با کفش از میز فروش — مزد نجار، بی حرکت صندوق',
+    run: async () => {
+      const catId = (await db.expenseCategories.add({ name: 'دیکور دکان' })) as number
+      await seedCash(5000)
+      const variantId = await makeVariant({ purchasePrice: 1500 })
+      await setOpeningStock(variantId, 3, 'فضل سلطان')
+      const line = (qty: number) => [{ variantId, productName: 'فضل سلطان', size: '42', color: 'سیاه', qty, unitPrice: 1600 }]
+
+      const r = await payExpenseWithGoods({ lines: line(2), categoryId: catId, categoryName: 'دیکور دکان', personName: 'استاد کریم نجار', note: 'جور کردن میز دکان' })
+      eq('صندوق دست نخورد', await cashBalance(), 5000)
+      eq('دو جوړه از گدام رفت', await stockOf(variantId), 1)
+      const person = (await db.suppliers.get(r.creditorId))!
+      is('برای نجار حساب طلبکار مصرف ساخته شد', person.kind, 'expenseCreditor')
+      eq('حساب نجار صفر است — مزدش با کفش داده شد', person.balance, 0)
+      const expense = (await db.expenses.get(r.expenseId))!
+      eq('مصرف دکان به ارزش کفش ثبت شد', expense.amount, 3200)
+      eq('هیچ بخش مصرف نقدی نبود', expense.cashPaid ?? -1, 0)
+      is('نوع مصرف همان دیکور دکان است', expense.categoryName, 'دیکور دکان')
+      const sale = (await db.sales.get(r.saleId))!
+      eq('فروش کفش به ارزش کامل ثبت شد', sale.total, 3200)
+      eq('از فروش هیچ پولی به صندوق نیامد', saleCashPaid(sale), 0)
+      eq('هیچ کس به دکان قرض‌دار نشد', saleCreditAmount(sale), 0)
+      // مفاد: فایدهٔ کفش (۲ × ۱۰۰) منهای مصرف ۳٬۲۰۰ = قیمت خرید دو جوړه که از دکان رفت
+      eq('مفاد درست به اندازهٔ قیمت خرید کفش کم شد', await profitAndLoss(), -3000)
+      is('کنترل حساب‌ها سالم است', (await runIntegrityCheck()).mismatches.length, 0)
+
+      await payExpenseWithGoods({ lines: line(1), categoryName: 'دیکور دکان', personName: ' استاد کریم نجار ' })
+      eq('همان شخص دوباره حساب نو نگرفت', await db.suppliers.filter((x) => x.name === 'استاد کریم نجار').count(), 1)
+      eq('نوع مصرفی که با نام نوشته شد همان کتگوری قبلی است', await db.expenseCategories.filter((c) => c.name === 'دیکور دکان').count(), 1)
+      eq('موجودی صفر شد', await stockOf(variantId), 0)
+
+      const before = { expenses: await db.expenses.count(), sales: await db.sales.count(), payments: await db.payments.count() }
+      await throws('بیشتر از موجودی رد شد', () => payExpenseWithGoods({ lines: line(1), categoryName: 'دیکور دکان', personName: 'استاد کریم نجار' }))
+      await throws('بی نام شخص رد شد', () => payExpenseWithGoods({ lines: line(1), categoryName: 'دیکور دکان', personName: '  ' }))
+      eq('رد شدن هیچ مصرفی نساخت', await db.expenses.count(), before.expenses)
+      eq('رد شدن هیچ فروشی نساخت', await db.sales.count(), before.sales)
+      eq('رد شدن هیچ پرداختی نساخت', await db.payments.count(), before.payments)
+      eq('حساب نجار باز هم صفر است', (await db.suppliers.get(r.creditorId))!.balance, 0)
+
+      // فروش اشتباه حذف شد: کفش برمی‌گردد، مزد هنوز طلب نجار است
+      await deleteSale(r.saleId)
+      eq('حذف فروش کفش را برگرداند', await stockOf(variantId), 2)
+      eq('مزد نجار دوباره طلب او شد', (await db.suppliers.get(r.creditorId))!.balance, 3200)
+      eq('صندوق باز هم دست نخورد', await cashBalance(), 5000)
+      is('کنترل حساب‌ها بعد از حذف سالم است', (await runIntegrityCheck()).mismatches.length, 0)
     }
   },
   {

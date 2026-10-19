@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, type Sale, type SaleLine, type Variant, type Product } from '../../db'
-import { addSale, addSaleWithShipping, type SaleShippingInput } from '../../lib/ops'
+import { addSale, addSaleWithShipping, payExpenseWithGoods, type SaleShippingInput } from '../../lib/ops'
 import { ShippingEditor } from './SaleShipping'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import { lossPerPair } from '../../lib/profit'
 import { flyToCart, saleCheck } from '../../lib/motion'
 import { keypadPress, quickCashOptions } from '../../lib/quickCash'
-import { buildSale, checkoutRefusal, paymentFieldsFor, readPayment, saleSubtotal, stockProblem, type PaymentMode } from '../../lib/checkout'
+import { buildSale, checkoutRefusal, expenseCheckoutRefusal, paymentFieldsFor, readPayment, saleSubtotal, stockProblem, type PaymentMode } from '../../lib/checkout'
 import { MoneyKeypad } from '../../components/MoneyKeypad'
 import { RollingNumber } from '../../components/RollingNumber'
 import { useFlipList } from '../../lib/useFlipList'
@@ -80,6 +80,11 @@ export function NewSaleModal({
   const [showDiscount, setShowDiscount] = useState(Boolean(draft?.discountStr))
   const [promise, setPromise] = useState(draft?.promise ?? '')
   const [keypadOpen, setKeypadOpen] = useState(false)
+  /** «مصرف دکان»: کفش بابت مزد کار — نه پول به صندوق، نه قرض مشتری */
+  const [expenseMode, setExpenseMode] = useState(false)
+  const [expenseCategory, setExpenseCategory] = useState('')
+  const [expensePerson, setExpensePerson] = useState('')
+  const [expenseNote, setExpenseNote] = useState('')
   // true while the amount field still shows a suggestion: the first key replaces it
   const freshPaid = useRef(true)
   const cartRef = useRef<HTMLDivElement>(null)
@@ -108,6 +113,8 @@ export function NewSaleModal({
   const customers = useLiveQuery(() => db.customers.orderBy('name').filter((c) => !c.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
+  const expenseCategories = useLiveQuery(() => db.expenseCategories.filter((c) => !c.deleted).toArray(), [])
+  const expenseCreditors = useLiveQuery(() => db.suppliers.filter((x) => !x.deleted && x.kind === 'expenseCreditor').toArray(), [])
   const reserved = new Map<number, number>()
   for (const line of lines) reserved.set(line.variantId, (reserved.get(line.variantId) ?? 0) + line.qty)
   const selectedQty = (id: number) => reserved.get(id) ?? 0
@@ -365,6 +372,46 @@ export function NewSaleModal({
     else onClose()
   }
 
+  /** کفش بابت مزد کار: یک مصرف دکان و پرداخت همان با کفش — ops.payExpenseWithGoods */
+  async function saveExpense() {
+    if (pendingRef.current) return
+    const refusal = expenseCheckoutRefusal({ lines, variants, discount, shipping, categoryName: expenseCategory, personName: expensePerson })
+    if (refusal) return setError(refusal.message)
+    const category = expenseCategories?.find((c) => c.name.trim() === expenseCategory.trim())
+    const person = expenseCreditors?.find((x) => x.name.trim() === expensePerson.trim())
+    pendingRef.current = true
+    setPending(true)
+    setError('')
+    let saleId: number
+    try {
+      ;({ saleId } = await payExpenseWithGoods({
+        lines,
+        categoryId: category?.id,
+        categoryName: expenseCategory,
+        personId: person?.id,
+        personName: expensePerson,
+        note: expenseNote
+      }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      pendingRef.current = false
+      setPending(false)
+      return
+    }
+    completedRef.current = true
+    saleCheck()
+    const warnings: string[] = []
+    try { clearWorkingSale() } catch { warnings.push('پیش‌نویس پاک نشد؛ آن را دوباره ثبت نکنید.') }
+    if (draft && draft.id !== 'working') {
+      try { deleteSaleDraft(draft.id) }
+      catch { warnings.push('فروش معطل پاک نشد؛ آن را دوباره ثبت نکنید.') }
+    }
+    if (warnings.length) alert(`مصرف ثبت شد. ${warnings.join(' ')}`)
+    const sale = await db.sales.get(saleId).catch(() => undefined)
+    if (onSaved && sale) onSaved(sale)
+    else onClose()
+  }
+
   /** کارت یک مدل با کاشی‌های سایز — هم در «اجناس موجود» و هم برای بوتی که با عکس پیدا شد */
   const modelCard = (e: ModelEntry) => {
     const vs = [...e.vs].sort((x, y) => x.color.localeCompare(y.color) || parseNum(x.size) - parseNum(y.size))
@@ -595,7 +642,7 @@ export function NewSaleModal({
       </div>
 
       <div hidden={stage !== 'payment'}>
-      <div className="sale-payment-summary"><div><span>{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه · {saleType === 'retail' ? 'پرچون' : 'عمده'}</span><p className="mt-1 font-bold text-slate-800">{selectedCustomer?.name ?? (remainder > 0 ? 'مشتری را انتخاب کنید' : 'مشتری نقدی')}</p></div><div><span className="block text-xs">قابل پرداخت</span><strong>{fmtMoney(total)}</strong></div></div>
+      <div className="sale-payment-summary"><div><span>{fmtNum(lines.reduce((sum, line) => sum + line.qty, 0))} جوړه · {saleType === 'retail' ? 'پرچون' : 'عمده'}</span><p className="mt-1 font-bold text-slate-800">{expenseMode ? `مصرف دکان${expensePerson.trim() ? ` · ${expensePerson.trim()}` : ''}` : selectedCustomer?.name ?? (remainder > 0 ? 'مشتری را انتخاب کنید' : 'مشتری نقدی')}</p></div><div><span className="block text-xs">{expenseMode ? 'ارزش کفش' : 'قابل پرداخت'}</span><strong>{fmtMoney(total)}</strong></div></div>
       {/* قیمت هر جوړه همین‌جا هم عوض می‌شود — در تیلفون سبد زیر همهٔ جنس‌ها است و از نوار «نقد/قرض» مستقیم به اینجا می‌آییم */}
       {saleTypeToggle()}
       <div className="sale-payment-lines mb-3">
@@ -622,7 +669,8 @@ export function NewSaleModal({
       </div>
       {stockInvalid && <p role="alert" className="mb-3 text-sm text-red-700">موجودی یا تعداد سبد درست نیست؛ به انتخاب برگردید و سبد را اصلاح کنید.</p>}
       <div className="sale-payment-fields">
-      <div className="sale-payment-customer">
+      {/* مصرف دکان مشتری ندارد: شخصِ کار در خود فورم مصرف نوشته می‌شود */}
+      <div className="sale-payment-customer" style={expenseMode ? { display: 'none' } : undefined}>
       {selectedCustomer ? (
         <div className="mb-3 flex items-center justify-between rounded-xl bg-teal-50 p-2.5">
           <div>
@@ -713,13 +761,34 @@ export function NewSaleModal({
           </button>
         )}
         <div role="group" aria-label="روش پرداخت" className="segmented my-4">
-          {(['cash', 'credit', 'mixed'] as PaymentMode[]).map((mode) => <button key={mode} type="button" aria-pressed={paymentMode === mode} onClick={() => {
+          {(['cash', 'credit', 'mixed'] as PaymentMode[]).map((mode) => <button key={mode} type="button" aria-pressed={!expenseMode && paymentMode === mode} onClick={() => {
+            setExpenseMode(false)
             const fields = paymentFieldsFor(mode)
             setPaidTouched(fields.paidTouched)
             setPaidStr(fields.paidStr)
             if (mode !== 'cash') setShowCust(true)
           }}>{mode === 'cash' ? 'نقد' : mode === 'credit' ? 'قرض' : 'نقد و قرض'}</button>)}
+          <button type="button" aria-pressed={expenseMode} onClick={() => { setExpenseMode(true); setKeypadOpen(false) }}>مصرف دکان</button>
         </div>
+        {expenseMode ? (
+          <div className="sale-expense-pay" role="group" aria-label="کفش بابت مزد کار">
+            <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              این کفش بابت مزد یک کار داده می‌شود: {fmtMoney(subtotal)} در مصارف دکان ثبت می‌شود، کفش از گدام کم می‌شود و از صندوق هیچ پولی نمی‌رود.
+            </p>
+            <Field label="بابت چه مصرفی؟">
+              <input className={inputCls} list="sale-expense-categories" value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} placeholder="مثلاً دیکور دکان" />
+              <datalist id="sale-expense-categories">{expenseCategories?.map((c) => <option key={c.id} value={c.name} />)}</datalist>
+            </Field>
+            <Field label="کفش را چه کسی بابت کارش برد؟">
+              <input className={inputCls} list="sale-expense-people" value={expensePerson} onChange={(e) => setExpensePerson(e.target.value)} placeholder="مثلاً استاد کریم نجار" />
+              <datalist id="sale-expense-people">{expenseCreditors?.map((x) => <option key={x.id} value={x.name} />)}</datalist>
+            </Field>
+            <Field label="یادداشت (اختیاری)">
+              <input className={inputCls} value={expenseNote} onChange={(e) => setExpenseNote(e.target.value)} placeholder="مثلاً جور کردن میز دکان" />
+            </Field>
+            {discount > 0 && <p role="alert" className="text-sm font-bold text-red-700">برای مصرف تخفیف نمی‌شود؛ قیمت فی جوړه را به اندازهٔ مزد کار بنویسید و تخفیف را بردارید.</p>}
+          </div>
+        ) : <>
         <Field label="مبلغ دریافتی (نقد)">
           <input
             className={inputCls}
@@ -777,6 +846,7 @@ export function NewSaleModal({
           </Field>
         )}
         {remainder < 0 && <p className="sale-change" role="status"><span>بازگشت به مشتری</span><strong>{fmtMoney(-remainder)}</strong></p>}
+        </>}
       </div>
       </div>
 
@@ -796,7 +866,8 @@ export function NewSaleModal({
         <div className="flex-1">
           <p className="text-xs text-slate-500">{shipping ? 'مبلغ کفش (کرایه جدا)' : `${fmtNum(lines.reduce((n, l) => n + l.qty, 0))} جوړه · قابل پرداخت`}</p>
           <p className="text-2xl font-bold text-teal-700"><RollingNumber value={total} /></p>
-          {remainder > 0 && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
+          {remainder > 0 && !expenseMode && <p className="text-xs font-bold text-red-600">قرض: {fmtMoney(remainder)}</p>}
+          {expenseMode && stage === 'payment' && <p className="text-xs font-bold text-amber-700">مصرف دکان · بی پول صندوق</p>}
         </div>
         {stage === 'selection' ? (
           <div className="sale-quick-actions">
@@ -831,11 +902,11 @@ export function NewSaleModal({
               معطل
             </button>
             <button
-              onClick={() => void save()}
+              onClick={() => void (expenseMode ? saveExpense() : save())}
               disabled={!lines.length || pending || stockInvalid}
               className="rounded-xl bg-[var(--action)] px-5 py-3 text-lg font-bold text-white disabled:opacity-40"
             >
-              {pending ? 'در حال ثبت…' : 'ثبت فروش'}
+              {pending ? 'در حال ثبت…' : expenseMode ? 'ثبت مصرف با کفش' : 'ثبت فروش'}
             </button>
           </>
         )}

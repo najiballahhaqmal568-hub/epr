@@ -10,16 +10,38 @@ import { db, type Product } from '../db'
  */
 
 let embedder: Promise<ImageEmbedder> | null = null
+let embedderReady = false // دانلود پس‌زمینه در همین باز بودن اپ تمام شد
+
+// base './' — همان پوشهٔ اپ، هم در وب (/epr/) و هم در APK
+const visionBase = () => new URL('vision/', document.baseURI).href
+const VISION_FILES = ['vision_wasm_internal.js', 'vision_wasm_internal.wasm', 'mobilenet_v3_small.tflite']
+
+/**
+ * فایل‌های مدل (حدود ۱۴ MB) در این گوشی هستند؟ در وب، service worker آن‌ها را بعد از اولین دانلود در cache
+ * «vision» نگه می‌دارد. با انترنت ۱۲ KB/s دکان، دانلود اول بیست دقیقه طول می‌کشد و جستجو تا آن وقت در «در حال
+ * پیدا کردن بوت…» می‌ماند — پس تا فایل‌ها نرسیده‌اند منتظر نمی‌مانیم. بی service worker (APK) فایل‌ها در خود اپ اند.
+ */
+async function modelFilesHere(): Promise<boolean> {
+  if (!navigator.serviceWorker?.controller || typeof caches === 'undefined') return true
+  try {
+    const found = await Promise.all(VISION_FILES.map((name) => caches.match(visionBase() + name)))
+    return found.every(Boolean)
+  } catch {
+    return true
+  }
+}
 
 function loadEmbedder(): Promise<ImageEmbedder> {
   embedder ??= (async () => {
     const { ImageEmbedder } = await import('@mediapipe/tasks-vision')
-    // base './' — همان پوشهٔ اپ، هم در وب (/epr/) و هم در APK
-    const base = new URL('vision/', document.baseURI).href
+    const base = visionBase()
     return ImageEmbedder.createFromOptions(
       { wasmLoaderPath: `${base}vision_wasm_internal.js`, wasmBinaryPath: `${base}vision_wasm_internal.wasm` },
       { baseOptions: { modelAssetPath: `${base}mobilenet_v3_small.tflite`, delegate: 'CPU' }, runningMode: 'IMAGE', l2Normalize: true, quantize: false }
-    )
+    ).then((model) => {
+      embedderReady = true
+      return model
+    })
   })().catch((error) => {
     embedder = null // دفعهٔ بعد دوباره کوشش شود (مثلاً انترنت بار اول قطع بود)
     throw error
@@ -43,8 +65,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
  */
 export type PhotoMethod = 'model' | 'basic'
 
+/** چرا روش ساده: مدل هنوز دانلود می‌شود، یا این گوشی آن را به کار برده نمی‌تواند */
+export type BasicReason = 'downloading' | 'unsupported'
+
 interface Reader {
   method: PhotoMethod
+  reason?: BasicReason
   read: (img: HTMLImageElement | HTMLCanvasElement) => Float32Array
 }
 
@@ -120,7 +146,11 @@ export function basicVector(img: HTMLImageElement | HTMLCanvasElement): Float32A
   return normalize(out)
 }
 
-const basicReader: Reader = { method: 'basic', read: basicVector }
+const basicReader = (reason: BasicReason): Reader => ({ method: 'basic', reason, read: basicVector })
+
+function timeout(ms: number): Promise<never> {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error(`مدل در ${ms / 1000} ثانیه باز نشد`)), ms))
+}
 
 function modelReader(model: ImageEmbedder): Reader {
   return {
@@ -135,16 +165,26 @@ function modelReader(model: ImageEmbedder): Reader {
 
 let reader: Promise<Reader> | null = null
 
-/** مدل اگر باز شود و یک عکس آزمایشی را بخواند؛ ورنه روش ساده. */
+/**
+ * مدل اگر فایل‌هایش در گوشی باشد، باز شود و یک عکس آزمایشی را بخواند؛ ورنه روش ساده — هیچ‌وقت منتظر دانلود نیست.
+ * دانلود در پس‌زمینه ادامه دارد و جستجوی بعدی، وقتی رسید، مدل را به کار می‌برد.
+ */
 function loadReader(): Promise<Reader> {
   reader ??= (async () => {
+    const here = embedderReady || (await modelFilesHere())
+    const loading = loadEmbedder()
+    loading.catch(() => {}) // خطای دانلود پس‌زمینه این‌جا دیده می‌شود، نه در کنسول
+    if (!here) {
+      reader = null
+      return basicReader('downloading')
+    }
     let model: ImageEmbedder
     try {
-      model = await loadEmbedder()
+      model = await Promise.race([loading, timeout(20_000)])
     } catch (error) {
       console.warn('photo model did not load', error)
       reader = null // فایل‌ها شاید بار بعد برسند
-      return basicReader
+      return basicReader('downloading')
     }
     const probe = document.createElement('canvas')
     probe.width = 16
@@ -155,7 +195,7 @@ function loadReader(): Promise<Reader> {
       return modelReader(model)
     } catch (error) {
       console.warn('photo model cannot read images on this phone', error)
-      return basicReader // بی WebGL: در این گوشی همیشه همین می‌ماند
+      return basicReader('unsupported') // بی WebGL: در این گوشی همیشه همین می‌ماند
     }
   })()
   return reader
@@ -191,8 +231,9 @@ export interface PhotoSearchResult {
   matches: PhotoMatch[]
   /** بوت‌هایی که عکس ندارند — با عکس پیدا نمی‌شوند */
   withoutPhoto: number
-  /** basic یعنی این گوشی مدل را نتوانست به کار ببرد و با رنگ و شکل مقایسه شد */
+  /** basic یعنی با رنگ و شکل مقایسه شد؛ basicReason می‌گوید چرا */
   method: PhotoMethod
+  basicReason?: BasicReason
 }
 
 /**
@@ -227,5 +268,5 @@ export async function findByPhoto(
     onProgress?.(++done, withPhoto.length)
   }
   matches.sort((a, b) => b.score - a.score)
-  return { matches: matches.slice(0, limit), withoutPhoto: products.length - withPhoto.length, method: r.method }
+  return { matches: matches.slice(0, limit), withoutPhoto: products.length - withPhoto.length, method: r.method, basicReason: r.reason }
 }
