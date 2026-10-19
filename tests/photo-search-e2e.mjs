@@ -1,12 +1,24 @@
 // 📷 در میز فروش: عکس کفش → سه بوت شبیه → لمس فروشنده → سبد. پیش از لمس هیچ چیزی به سبد نمی‌رود.
 // عکس‌ها مصنوعی (کشیده‌شده روی canvas) اند؛ مدل واقعی MediaPipe در خود مرورگر اجرا می‌شود. هیچ درخواست بیرونی.
+// دو بار: یک بار با مدل، یک بار در گوشی‌ای که WebGL ندارد (مدل آن‌جا عکس نمی‌خواند؛ روش ساده باید همان بوت را بیابد).
 import assert from 'node:assert/strict'
 import { localApp } from './local-app.mjs'
 
+for (const noWebgl of [false, true]) {
 const app = await localApp()
 const { page } = app
 const errors = []
 page.on('pageerror', (error) => errors.push(error.message))
+if (noWebgl) {
+  await app.context.addInitScript(() => {
+    for (const C of [HTMLCanvasElement, globalThis.OffscreenCanvas].filter(Boolean)) {
+      const getContext = C.prototype.getContext
+      C.prototype.getContext = function (type, ...rest) { return /webgl/i.test(type) ? null : getContext.call(this, type, ...rest) }
+    }
+  })
+  await page.reload()
+  await page.locator('.app-nav').waitFor()
+}
 
 // همان کشیدن در صفحه و در آزمایش: jitter عکسِ «گرفته‌شده» را کمی با عکس گدام فرق می‌دهد
 const drawSource = `(hue, shape, jitter = 0) => {
@@ -54,6 +66,8 @@ try {
   assert.match(await matches.first().getAttribute('aria-label'), /^کتانی آبی — ۵ جوړه — ۹۰۰/)
   assert.equal(await cartLines(), 0, 'nothing goes into the cart before the seller taps')
   assert.ok(await results.getByText('۱ بوت در گدام عکس ندارد و با عکس پیدا نمی‌شود.').isVisible())
+  assert.equal(await results.getByText('این گوشی ابزار کامل شناختن عکس را ندارد', { exact: false }).count(), noWebgl ? 1 : 0, 'the simpler method says so')
+  assert.equal(await page.getByRole('alert').count(), 0)
   await matches.first().click()
   await page.locator('.sale-cart-line').filter({ hasText: 'کتانی آبی' }).waitFor()
   assert.equal(await cartLines(), 1)
@@ -99,7 +113,8 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 320), 'fits a 320px phone')
 
   assert.deepEqual(errors, [])
-  console.log('PASS: photo search finds the boot, adds only on the seller’s tap, opens sizes, reindexes only changed photos, fits 320px')
+  console.log(`PASS${noWebgl ? ' (no WebGL, colour and shape)' : ''}: photo search finds the boot, adds only on the seller’s tap, opens sizes, reindexes only changed photos, fits 320px`)
 } finally {
   await app.close()
+}
 }
