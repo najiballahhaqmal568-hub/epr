@@ -12,6 +12,7 @@ import MergeProductsModal from './inventory/MergeProductsModal'
 import { findDuplicateGroups } from '../lib/merge'
 import type { ProductDraft } from './inventory/helpers'
 import { pairsPerCartonOf, productReorderInfo, reorderProducts } from '../lib/reorder'
+import { searchScore } from '../lib/search'
 
 type SortKey = 'name' | 'added' | 'newest' | 'oldest' | 'value'
 
@@ -69,13 +70,9 @@ export default function Inventory({
   const filtered = products?.filter((p) => {
     if (!search.trim()) return true
     const vs = byProduct.get(p.id!) ?? []
-    const words = search.trim().split(/\s+/)
     return (
-      vs.some((v) => {
-        const hay = `${p.name} ${p.brand ?? ''} ${p.category ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`.toLowerCase()
-        return words.every((w) => hay.includes(w.toLowerCase()))
-      }) ||
-      (vs.length === 0 && words.every((w) => `${p.name} ${p.brand ?? ''}`.toLowerCase().includes(w.toLowerCase())))
+      vs.some((v) => searchScore(search, `${p.name} ${p.brand ?? ''} ${p.category ?? ''} ${v.size} ${v.color} ${v.sku ?? ''}`) > 0) ||
+      (vs.length === 0 && searchScore(search, `${p.name} ${p.brand ?? ''}`) > 0)
     )
   })
 

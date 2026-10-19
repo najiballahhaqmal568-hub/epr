@@ -5,6 +5,7 @@ import { correctPurchase, correctPurchasePrices } from '../../lib/ops'
 import { fmtMoney, fmtNum, parseNum } from '../../lib/format'
 import QtyControl from '../../components/QtyControl'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
+import { bestMatches } from '../../lib/search'
 
 export default function PurchasePriceCorrectionModal({ purchase, onClose }: { purchase: Purchase; onClose: () => void }) {
   const [lines, setLines] = useState<PurchaseLine[]>(() => purchase.lines.map((line) => ({ ...line })))
@@ -18,14 +19,10 @@ export default function PurchasePriceCorrectionModal({ purchase, onClose }: { pu
   products?.forEach((product) => productMap.set(product.id!, product))
   const matches =
     search.trim() && variants
-      ? variants
-          .filter((variant) => {
-            const product = productMap.get(variant.productId)
-            if (!product) return false
-            const haystack = `${product.name} ${product.brand ?? ''} ${variant.size} ${variant.color} ${variant.sku ?? ''}`
-            return search.trim().split(/\s+/).every((word) => haystack.includes(word))
-          })
-          .slice(0, 12)
+      ? bestMatches(variants, search, (variant) => {
+          const product = productMap.get(variant.productId)
+          return product ? `${product.name} ${product.brand ?? ''} ${variant.size} ${variant.color} ${variant.sku ?? ''}` : null
+        })
       : []
 
   const corrected = lines.map((line) => ({

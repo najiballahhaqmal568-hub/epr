@@ -100,6 +100,7 @@ import { SIDE_LABEL, SIDE_TONE, afterThis, changeWord, headline, netOfCreditor, 
 import { fmtMoney } from '../src/lib/format'
 import { runIntegrityCheck, fixMismatch, computeCustomerBalances } from '../src/lib/integrity'
 import { retailVsWholesale, byModel, byCustomer, byMonth, changePct } from '../src/lib/analytics'
+import { bestMatches } from '../src/lib/search'
 import { applyDocEffects, applyRemoteRow, encodeRefs, decodeRefs, shouldResetForGeneration } from '../src/lib/sync'
 import { dailyFlow } from '../src/lib/cashflow'
 import { mergeProducts, findDuplicateGroups, normalizeName } from '../src/lib/merge'
@@ -812,6 +813,26 @@ const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
       await deletePayment(paymentId)
       eq('حذف: پول از «خانه» رفت', await cashBalance('خانه'), 0)
       eq('حذف: «دکان» دست نخورد', await cashBalance(SHOP_BOX), 900)
+    }
+  },
+  {
+    name: 'جستجوی جنس — بدون نام کامل، بزرگ/کوچک، فاصله، ی/ي و یک حرف اشتباه',
+    run: async () => {
+      const names = ['Go pu بهاری — ۴۰ تا ۴۵ مکس', 'فوتبال مردانه 42', 'اسکچرز خاکی 40', 'بوت کوهی 41']
+      const find = (q: string) => bestMatches(names, q, (n) => n).join(' | ')
+      is('نیمهٔ نام', find('بها'), names[0])
+      is('لاتین کوچک', find('go pu'), names[0])
+      is('بدون فاصله', find('gopu'), names[0])
+      is('ی عربی', find('بهاري'), names[0])
+      is('نیم‌فاصله در نام یا جستجو', find('بها\u200Cری'), names[0])
+      is('یک حرف اشتباه', find('فوتبل'), names[1])
+      is('دو کلمه، هر کدام نیمه', find('اسک خاک'), names[2])
+      is('ارقام فارسی برای سایز', find('اسکچرز ۴۰'), names[2])
+      is('سایز عیناً — ۴۱ سایز ۴۰ را نمی‌گیرد', find('اسکچرز 41'), '')
+      is('کلمهٔ سه حرفی اشتباه بخشیده نمی‌شود', find('بوط'), '')
+      is('درست‌ترین اول', bestMatches(['کوهی بوت', 'بوت کوهی'], 'بوت', (n) => n).join(' | '), 'بوت کوهی | کوهی بوت')
+      is('عیناً پیش از حدسی', bestMatches(['مردانه فوتبل', 'فوتبال'], 'فوتبال', (n) => n).join(' | '), 'فوتبال | مردانه فوتبل')
+      is('جستجوی خالی هیچ', find('  '), '')
     }
   },
   {
