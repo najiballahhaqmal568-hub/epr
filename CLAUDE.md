@@ -97,6 +97,18 @@ on for the whole download, so anything the shop typed on that phone at the same 
 server» and never left the phone (Go pu بهاری: 83 pairs on one phone, −3 on the other). Never bring back a global
 flag. `pushUnsentRows()` in `sync.ts` sends, once per device, the rows that old flag stranded.
 
+### A document never takes another phone's row number
+
+The numeric ids inside a synced document (`variantId`, `customerId`, `partyId`, line `variantId`…) are row numbers on the
+phone that sent it. `decodeRefs()` (`src/lib/sync.ts`) maps each `…Uuid` to the local row and **refuses** the document
+(`RecoverableSyncReferenceError`, the cursor stays) when that uuid has not arrived yet. It used to keep the sender's
+number: a new size's opening stock that reached the second phone before the size itself landed on whichever size had
+that number there, or nowhere, and was stored so it never applied again («اسکچرز گوتکه»: 46 on one phone, −2 on the
+other, 48 extra pairs on another size). `repairMisplacedRefs()` points the documents stored that way back at their own
+uuid's row once per device and rebuilds the stock and balances of only the rows they touched, from documents.
+`tests/sync-early-document.mjs` holds it. A remote write that only changes a derived field (`stockQty`, `balance`,
+`purchasePrice`) keeps the row's unsent mark, so a price typed at that moment still goes out.
+
 ### Creating stock
 
 `ops.addVariant()` and `ops.setOpeningStock()` are the only ways a component may

@@ -788,6 +788,8 @@ function guardReadOnly(remote: boolean) {
   }
 }
 
+const DERIVED_FIELDS = new Set(['stockQty', 'balance', 'purchasePrice'])
+
 for (const t of SYNC_TABLES) {
   db.table(t).hook('creating', (_pk, obj: Record<string, unknown>, tx) => {
     const remote = fromRemote(tx)
@@ -799,6 +801,9 @@ for (const t of SYNC_TABLES) {
   db.table(t).hook('updating', (mods, _pk, obj: Record<string, unknown>, tx) => {
     const remote = fromRemote(tx)
     guardReadOnly(remote)
+    // اثر یک سند رسیده فقط عدد مشتق را می‌نویسد (موجودی، قرض، قیمت تمام‌شده) — مُهر «هنوز فرستاده نشده» ردیف
+    // را پاک نمی‌کند؛ ورنه قیمتی که همان لحظه در این موبایل نوشته شد هرگز فرستاده نمی‌شد
+    if (remote && Object.keys(mods as object).every((k) => DERIVED_FIELDS.has(k))) return undefined
     if (remote) return { ...(mods as object), localUpdatedAt: 0 }
     const deleting = (mods as Record<string, unknown>).deleted === true && !obj.deleted && accessFlags.actor && authored(t, obj)
     return { ...(mods as object), localUpdatedAt: Date.now(), ...(deleting ? { deletedBy: accessFlags.actor, deletedAt: Date.now() } : {}) }

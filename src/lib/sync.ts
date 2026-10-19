@@ -214,14 +214,30 @@ export async function encodeRefs(table: SyncTable, rec: Record<string, unknown>)
   return out
 }
 
-/** تبدیل uuid ها به id محلی هنگام دریافت */
-export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>): Promise<Record<string, unknown>> {
+const NOT_ARRIVED: Partial<Record<SyncTable, string>> = {
+  products: 'جنس', variants: 'سایز جنس', customers: 'حساب مشتری', suppliers: 'حساب', expenseCategories: 'نوع مصرف', purchases: 'خرید', sales: 'فروش'
+}
+
+/** سندی که به ردیفی اشاره دارد که هنوز این‌جا نرسیده: همگام‌سازی می‌ایستد و دفعهٔ بعد همان سند دوباره خوانده می‌شود */
+const notArrived = (refTable: SyncTable) =>
+  new RecoverableSyncReferenceError(`${NOT_ARRIVED[refTable] ?? 'ردیف'} هنوز از موبایل دیگر نرسیده است؛ موبایل دیگر را باز کنید تا همگام شود، بعد دوباره همگام کنید.`)
+
+/**
+ * تبدیل uuid ها به id محلی هنگام دریافت.
+ *
+ * id عددیِ داخل سند شمارهٔ ردیف در موبایلِ فرستنده است، نه این‌جا. پیش از این اگر uuid هنوز این‌جا نبود
+ * (سند زودتر از جنس یا مشتری‌اش رسید) همان شمارهٔ بیگانه می‌ماند: موجودی اولیهٔ «اسکچرز گوتکه» روی سایز دیگری
+ * نشست یا گم شد، و سند ذخیره شد و دیگر هرگز درست اعمال نشد (۴۶ در یک موبایل، ۲- در دیگری). حالا strict: uuid
+ * که این‌جا نیست سند را رد می‌کند تا دفعهٔ بعد، وقتی ردیفش رسید. سند حذف‌شده اثری ندارد و رد نمی‌شود.
+ */
+export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>, strict = true): Promise<Record<string, unknown>> {
   const out = { ...rec }
   const dec = async (target: string, refTable: SyncTable, field: string) => {
     const u = out[target]
     if (typeof u === 'string') {
       const local = (await uuidMap(refTable)).get(u)
       if (local !== undefined) out[field] = local
+      else if (strict) throw notArrived(refTable)
     }
   }
   if (table === 'variants') await dec('productUuid', 'products', 'productId')
@@ -313,6 +329,7 @@ export async function decodeRefs(table: SyncTable, rec: Record<string, unknown>)
     const vmap = await uuidMap('variants')
     out[field] = (out[field] as Array<Record<string, unknown>>).map((l) => {
       const local = typeof l.variantUuid === 'string' ? vmap.get(l.variantUuid) : undefined
+      if (local === undefined && typeof l.variantUuid === 'string' && strict) throw notArrived('variants')
       return { ...l, variantId: local ?? l.variantId }
     })
   }
@@ -435,6 +452,66 @@ async function pushUnsentRows(shopId: string, deviceId: string, generation: numb
   return sent
 }
 
+const ID_FIELDS = ['productId', 'customerId', 'lenderId', 'expenseCreditorId', 'supplierId', 'sarrafId', 'landingSarrafId', 'categoryId', 'creditorId', 'variantId', 'partyId', 'refId'] as const
+
+function pointers(rec: Record<string, unknown>): string {
+  const lines = (field: string) => Array.isArray(rec[field]) ? (rec[field] as Array<Record<string, unknown>>).map((l) => l.variantId) : null
+  return JSON.stringify([ID_FIELDS.map((f) => rec[f]), lines('lines'), lines('goodsLines')])
+}
+
+/**
+ * یک بار برای هر دستگاه: سندهایی که پیش از decodeRefs سخت‌گیر، زودتر از جنس یا حساب خود رسیده بودند و با شمارهٔ
+ * ردیفِ موبایل دیگر ذخیره شدند. هر سند uuid ردیف درست را با خود دارد؛ اشاره‌اش به همان برمی‌گردد (سند هیچ عدد دیگری
+ * عوض نمی‌کند)، و بعد موجودی و قرضِ فقط همان ردیف‌هایی که سند به آن‌ها اشاره داشت یا دارد از روی اسناد دوباره ساخته
+ * می‌شود — همان عددی که «کنترل حساب‌ها» می‌سازد. سندی که در این موبایل دستی اصلاح شده (مُهرش ۰ نیست) دست نمی‌خورد.
+ */
+async function repairMisplacedRefs(generation: number): Promise<number> {
+  const key = `refRepair:${generation}`
+  if (await getState(key)) return 0
+  const touched = { variant: new Set<number>(), customer: new Set<number>(), supplier: new Set<number>() }
+  const mark = (table: SyncTable, rec: Record<string, unknown>) => {
+    const add = (kind: keyof typeof touched, v: unknown) => { if (typeof v === 'number') touched[kind].add(v) }
+    if (table === 'adjustments') add('variant', rec.variantId)
+    for (const field of ['lines', 'goodsLines']) if (Array.isArray(rec[field])) for (const l of rec[field] as Array<Record<string, unknown>>) add('variant', l.variantId)
+    if (table === 'sales') { add('customer', rec.customerId); add('supplier', rec.lenderId); add('supplier', rec.expenseCreditorId) }
+    if (table === 'purchases') { add('supplier', rec.supplierId); add('supplier', rec.sarrafId); add('supplier', rec.landingSarrafId) }
+    if (table === 'expenses') add('supplier', rec.creditorId)
+    if (table === 'payments' || table === 'returns') add(((rec.partyType ?? rec.kind) === 'customer') ? 'customer' : 'supplier', rec.partyId)
+    if (table === 'payments') { add('supplier', rec.sarrafId); add('supplier', rec.lenderId) }
+  }
+  let fixed = 0
+  for (const table of ['variants', 'sales', 'purchases', 'payments', 'expenses', 'adjustments', 'returns'] as const) {
+    const rows = await db.table(table).where('localUpdatedAt').equals(0).toArray()
+    for (const row of rows) {
+      if (row.deleted) continue
+      let again: Record<string, unknown>
+      try {
+        again = await decodeRefs(table, row, false)
+      } catch {
+        continue // سند دریافت/تبادله که ردیفش هنوز نیست: دست نمی‌خورد
+      }
+      if (pointers(again) === pointers(row)) continue
+      mark(table, row)
+      mark(table, again)
+      const patch: Record<string, unknown> = {}
+      for (const f of ID_FIELDS) if (again[f] !== row[f]) patch[f] = again[f]
+      for (const f of ['lines', 'goodsLines']) if (Array.isArray(again[f])) patch[f] = again[f]
+      await writeAsRemote([table], () => db.table(table).update(row.id, patch))
+      fixed++
+    }
+  }
+  if (fixed) {
+    const { runIntegrityCheck, fixMismatch } = await import('./integrity')
+    const report = await runIntegrityCheck()
+    await writeAsRemote(['variants', 'customers', 'suppliers'], async () => {
+      for (const m of report.mismatches) if (m.kind !== 'cost' && touched[m.kind].has(m.id)) await fixMismatch(m)
+    })
+    await applyRebuiltCosts()
+  }
+  await setState(key, true)
+  return fixed
+}
+
 async function pullTable(table: SyncTable, deviceId: string, generation: number): Promise<number> {
   const supa = (await getSupa())!
   let cursor = ((await getState(`pull:${table}`)) as string | undefined) ?? '1970-01-01T00:00:00Z'
@@ -474,7 +551,7 @@ async function pullTable(table: SyncTable, deviceId: string, generation: number)
 }
 
 export async function applyRemoteRow(table: SyncTable, row: { uuid: string; deleted: boolean; data: Record<string, unknown> }) {
-  const rec = await decodeRefs(table, row.data)
+  const rec = await decodeRefs(table, row.data, !row.deleted)
   rec.uuid = row.uuid
   rec.deleted = row.deleted
   await writeAsRemote([...SYNC_TABLES, 'syncState'], async () => {
@@ -784,6 +861,7 @@ export async function syncNow(throwOnError = false): Promise<void> {
     await db.syncState.delete('restorePushMode')
     await pushUnsentRows(profile.shop_id, deviceId, generation)
     for (const t of SYNC_TABLES) await pullTable(t, deviceId, generation)
+    await repairMisplacedRefs(generation)
     const lastSync = Date.now()
     await setState('lastSuccessfulSync', lastSync)
     setStatus({ state: 'ok', lastSync, message: undefined })
