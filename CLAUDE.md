@@ -144,6 +144,10 @@ not backed up) and are rebuilt when a photo's hash changes. MediaPipe feeds ever
 without WebGL (or without the downloaded files) it fails; there `basicVector()` (colour + edge directions, plain 2D canvas)
 is used instead, its index rows are keyed `basic|<hash>` so the two kinds never mix, and the results say the comparison was
 simpler. Errors show the real message under the Dari one. `tests/photo-search-e2e.mjs` runs both, the second with WebGL off.
+The search never waits for the ~14 MB download (the shop's line is ~12 KB/s, so the first search used to sit on «در حال
+pیدا کردن بوت…» for twenty minutes): until the three files are in the service worker's `vision` cache it answers with
+`basicVector()` and says the full tool is still downloading, while the download carries on. `tests/photo-search-download-e2e.mjs`
+holds it (production build under /epr/, model held back by the test server).
 
 ### Change is never kept in the till
 
