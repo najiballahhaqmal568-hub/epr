@@ -161,6 +161,15 @@ pیدا کردن بوت…» for twenty minutes): until the three files are in t
 `basicVector()` and says the full tool is still downloading, while the download carries on. `tests/photo-search-download-e2e.mjs`
 holds it (production build under /epr/, model held back by the test server).
 
+### Shoes given for a job: «مصرف دکان» on the sale desk
+
+A worker (the carpenter who built the shop's counter) takes shoes as his wage. The fourth payment button «مصرف دکان»
+calls `ops.payExpenseWithGoods()`: in one transaction a business expense on credit to that person (an `expenseCreditor`
+account, created by name if new; category created by name too) and `payExpenseCreditorGoods()` paying it with the shoes.
+The till never moves, the person's account ends at 0 with both documents in its history, and profit drops by exactly the
+shoes' purchase cost. No discount (the per-pair price *is* the wage), no shipping, no customer — `expenseCheckoutRefusal()`
+in `checkout.ts`. `tests/sale-expense-e2e.mjs` and the scenario in `checks.ts` hold it.
+
 ### Change is never kept in the till
 
 A customer who hands over 1,000 for a 900 sale gets 100 back — the till gains 900. The sale screen
@@ -223,7 +232,7 @@ must carry a `partnerName`, or it silently comes out of everyone's share.
 
 ```bash
 npm run build     # tsc -b + vite build, must be clean
-npm test          # tests/checks.ts — currently 1580 checks in 155 scenarios
+npm test          # tests/checks.ts — currently 1605 checks in 156 scenarios
 ```
 
 ```bash

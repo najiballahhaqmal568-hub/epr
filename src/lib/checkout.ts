@@ -91,3 +91,27 @@ export function buildSale(form: CheckoutForm, facts: SaleFacts, now = Date.now()
     bookPage: remainder > 0 && facts.bookPage.trim() ? facts.bookPage.trim() : undefined
   }
 }
+
+export interface ExpenseCheckoutForm {
+  lines: readonly SaleLine[]
+  variants: readonly Variant[] | undefined
+  discount: number
+  shipping?: SaleShippingInput
+  categoryName: string
+  personName: string
+}
+
+/**
+ * «مصرف دکان»: کفش بابت مزد کار داده می‌شود (ops.payExpenseWithGoods). ارزش کفش همان مبلغ مصرف است، پس
+ * تخفیف جدا ندارد — قیمت فی جوړه همان مزد است. کرایه و قرض مشتری هم در این راه معنا ندارند.
+ */
+export function expenseCheckoutRefusal(form: ExpenseCheckoutForm): CheckoutRefusal | null {
+  if (!form.lines.length) return { message: 'حداقل یک جنس انتخاب کنید' }
+  if (stockProblem(form.lines, form.variants)) return { message: 'موجودی بعضی سایزها کافی نیست یا تعداد درست نیست؛ سبد را اصلاح کنید' }
+  if (form.lines.some((line) => !(line.unitPrice > 0))) return { message: 'قیمت فی جوړهٔ هر کفش باید بیشتر از صفر باشد' }
+  if (form.discount > 0) return { message: 'برای مصرف تخفیف نمی‌شود؛ قیمت فی جوړه را به اندازهٔ مزد کار بنویسید و تخفیف را بردارید.' }
+  if (form.shipping) return { message: 'کرایهٔ بار با مصرف یک‌جا نمی‌شود؛ کرایه را بردارید.' }
+  if (!form.categoryName.trim()) return { message: 'بنویسید این کفش بابت چه مصرفی داده شد (مثلاً دیکور دکان)' }
+  if (!form.personName.trim()) return { message: 'نام کسی که کفش را بابت کارش برد بنویسید' }
+  return null
+}
