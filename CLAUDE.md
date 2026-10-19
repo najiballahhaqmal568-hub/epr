@@ -140,7 +140,10 @@ are ranked, exact matches first. Don't write `search.split(/\s+/).every(hay.incl
 `vite.config.ts` and the model is `public/vision/`. It only **suggests** the three closest boots. Nothing enters the cart
 until the seller taps one: two similar boots with different prices are sometimes confused. If the tapped boot has exactly
 one size in stock, that size goes in. Otherwise its size card opens. Vectors live in the local `photoIndex` table (not synced,
-not backed up) and are rebuilt when a photo's hash changes. `tests/photo-search-e2e.mjs` holds it.
+not backed up) and are rebuilt when a photo's hash changes. MediaPipe feeds every image through WebGL, so on a phone
+without WebGL (or without the downloaded files) it fails; there `basicVector()` (colour + edge directions, plain 2D canvas)
+is used instead, its index rows are keyed `basic|<hash>` so the two kinds never mix, and the results say the comparison was
+simpler. Errors show the real message under the Dari one. `tests/photo-search-e2e.mjs` runs both, the second with WebGL off.
 
 ### Change is never kept in the till
 

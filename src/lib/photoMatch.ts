@@ -36,11 +36,133 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-async function vectorOf(src: string): Promise<Float32Array> {
-  const [model, img] = await Promise.all([loadEmbedder(), loadImage(src)])
-  const values = model.embed(img).embeddings[0]?.floatEmbedding
-  if (!values?.length) throw new Error('عکس خوانده نشد')
-  return Float32Array.from(values)
+/**
+ * MediaPipe عکس را از راه WebGL به مدل می‌دهد. گوشی‌ای که WebGL ندارد (یا WebGL آن خاموش است) مدل را باز می‌کند
+ * ولی هیچ عکسی را نمی‌خواند — همان «ابزار شناختن عکس باز نشد» که در گوشی دکان دیده شد. آن‌جا روش ساده‌تر
+ * به کار می‌رود: رنگ‌ها و شکل کلی کفش، فقط با canvas دوبعدی که در همهٔ گوشی‌ها هست.
+ */
+export type PhotoMethod = 'model' | 'basic'
+
+interface Reader {
+  method: PhotoMethod
+  read: (img: HTMLImageElement | HTMLCanvasElement) => Float32Array
+}
+
+const SIDE = 64
+
+function pixelsOf(img: HTMLImageElement | HTMLCanvasElement): Uint8ClampedArray {
+  const canvas = document.createElement('canvas')
+  canvas.width = SIDE
+  canvas.height = SIDE
+  const g = canvas.getContext('2d', { willReadFrequently: true })
+  if (!g) throw new Error('canvas دوبعدی باز نشد')
+  g.drawImage(img, 0, 0, SIDE, SIDE)
+  return g.getImageData(0, 0, SIDE, SIDE).data
+}
+
+function normalize(v: Float32Array): Float32Array {
+  let n = 0
+  for (const x of v) n += x * x
+  n = Math.sqrt(n) || 1
+  for (let i = 0; i < v.length; i++) v[i] /= n
+  return v
+}
+
+const HUES = 12
+const GRAYS = 4
+const CELLS = 4
+const ORIENTATIONS = 8
+
+/** رنگ (۱۲ رنگ + ۴ خاکستری، وسط عکس وزن بیشتر) و شکل (جهت لبه‌ها در ۴×۴ خانه) */
+export function basicVector(img: HTMLImageElement | HTMLCanvasElement): Float32Array {
+  const px = pixelsOf(img)
+  const colour = new Float32Array(HUES + GRAYS)
+  const gray = new Float32Array(SIDE * SIDE)
+  const mid = (SIDE - 1) / 2
+  for (let y = 0; y < SIDE; y++) {
+    for (let x = 0; x < SIDE; x++) {
+      const i = (y * SIDE + x) * 4
+      const r = px[i] / 255, g = px[i + 1] / 255, b = px[i + 2] / 255
+      gray[y * SIDE + x] = 0.299 * r + 0.587 * g + 0.114 * b
+      const max = Math.max(r, g, b), min = Math.min(r, g, b)
+      const sat = max ? (max - min) / max : 0
+      const weight = Math.exp(-((x - mid) ** 2 + (y - mid) ** 2) / (2 * (SIDE / 3) ** 2))
+      if (sat < 0.2 || max < 0.15) {
+        colour[HUES + Math.min(GRAYS - 1, Math.floor(max * GRAYS))] += weight
+      } else {
+        const d = max - min
+        let hue = max === r ? (g - b) / d : max === g ? 2 + (b - r) / d : 4 + (r - g) / d
+        hue = ((hue / 6) % 1 + 1) % 1
+        colour[Math.min(HUES - 1, Math.floor(hue * HUES))] += weight
+      }
+    }
+  }
+  const shape = new Float32Array(CELLS * CELLS * ORIENTATIONS)
+  const cell = SIDE / CELLS
+  for (let y = 1; y < SIDE - 1; y++) {
+    for (let x = 1; x < SIDE - 1; x++) {
+      const at = (dx: number, dy: number) => gray[(y + dy) * SIDE + x + dx]
+      const gx = at(1, -1) + 2 * at(1, 0) + at(1, 1) - at(-1, -1) - 2 * at(-1, 0) - at(-1, 1)
+      const gy = at(-1, 1) + 2 * at(0, 1) + at(1, 1) - at(-1, -1) - 2 * at(0, -1) - at(1, -1)
+      const magnitude = Math.hypot(gx, gy)
+      if (!magnitude) continue
+      const angle = (Math.atan2(gy, gx) + Math.PI) % Math.PI // جهت لبه، بی‌علامت
+      const bin = Math.min(ORIENTATIONS - 1, Math.floor((angle / Math.PI) * ORIENTATIONS))
+      shape[(Math.floor(y / cell) * CELLS + Math.floor(x / cell)) * ORIENTATIONS + bin] += magnitude
+    }
+  }
+  // ریشهٔ دوم: یک رنگ یا لبهٔ بزرگ همه‌چیز را نپوشاند
+  const root = (v: Float32Array) => normalize(v.map(Math.sqrt))
+  const c = root(colour), s = root(shape)
+  const out = new Float32Array(c.length + s.length)
+  out.set(c.map((x) => x * 0.6), 0)
+  out.set(s.map((x) => x * 0.8), c.length)
+  return normalize(out)
+}
+
+const basicReader: Reader = { method: 'basic', read: basicVector }
+
+function modelReader(model: ImageEmbedder): Reader {
+  return {
+    method: 'model',
+    read: (img) => {
+      const values = model.embed(img).embeddings[0]?.floatEmbedding
+      if (!values?.length) throw new Error('عکس خوانده نشد')
+      return Float32Array.from(values)
+    }
+  }
+}
+
+let reader: Promise<Reader> | null = null
+
+/** مدل اگر باز شود و یک عکس آزمایشی را بخواند؛ ورنه روش ساده. */
+function loadReader(): Promise<Reader> {
+  reader ??= (async () => {
+    let model: ImageEmbedder
+    try {
+      model = await loadEmbedder()
+    } catch (error) {
+      console.warn('photo model did not load', error)
+      reader = null // فایل‌ها شاید بار بعد برسند
+      return basicReader
+    }
+    const probe = document.createElement('canvas')
+    probe.width = 16
+    probe.height = 16
+    probe.getContext('2d')?.fillRect(0, 0, 8, 8)
+    try {
+      modelReader(model).read(probe)
+      return modelReader(model)
+    } catch (error) {
+      console.warn('photo model cannot read images on this phone', error)
+      return basicReader // بی WebGL: در این گوشی همیشه همین می‌ماند
+    }
+  })()
+  return reader
+}
+
+async function vectorOf(r: Reader, src: string): Promise<Float32Array> {
+  return r.read(await loadImage(src))
 }
 
 /** FNV-1a — فقط برای فهمیدن اینکه عکس یک بوت عوض شده یا نه */
@@ -69,6 +191,8 @@ export interface PhotoSearchResult {
   matches: PhotoMatch[]
   /** بوت‌هایی که عکس ندارند — با عکس پیدا نمی‌شوند */
   withoutPhoto: number
+  /** basic یعنی این گوشی مدل را نتوانست به کار ببرد و با رنگ و شکل مقایسه شد */
+  method: PhotoMethod
 }
 
 /**
@@ -82,16 +206,18 @@ export async function findByPhoto(
   limit = 3
 ): Promise<PhotoSearchResult> {
   const withPhoto = products.filter((p) => p.id !== undefined && p.photo)
-  const query = await vectorOf(shot)
+  const r = await loadReader()
+  const query = await vectorOf(r, shot)
   const cached = new Map((await db.photoIndex.bulkGet(withPhoto.map((p) => p.id!))).filter(Boolean).map((row) => [row!.productId, row!]))
   const matches: PhotoMatch[] = []
   let done = 0
   for (const p of withPhoto) {
-    const hash = photoHash(p.photo!)
+    // بردار مدل و بردار ساده با هم مقایسه نمی‌شوند؛ نشان روش جزء نشانی عکس است
+    const hash = r.method === 'model' ? photoHash(p.photo!) : `basic|${photoHash(p.photo!)}`
     let vector = cached.get(p.id!)?.photoHash === hash ? cached.get(p.id!)!.vector : undefined
     if (!vector) {
       try {
-        vector = await vectorOf(p.photo!)
+        vector = await vectorOf(r, p.photo!)
         await db.photoIndex.put({ productId: p.id!, photoHash: hash, vector })
       } catch {
         vector = undefined // عکس خراب یک بوت جستجوی بقیه را متوقف نمی‌کند
@@ -101,5 +227,5 @@ export async function findByPhoto(
     onProgress?.(++done, withPhoto.length)
   }
   matches.sort((a, b) => b.score - a.score)
-  return { matches: matches.slice(0, limit), withoutPhoto: products.length - withPhoto.length }
+  return { matches: matches.slice(0, limit), withoutPhoto: products.length - withPhoto.length, method: r.method }
 }
