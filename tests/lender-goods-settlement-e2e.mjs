@@ -17,8 +17,13 @@ try {
   await page.getByRole('group', { name: 'نوع حساب خرید' }).getByRole('button', { name: 'قرض‌دهنده‌ها' }).click()
   await page.getByRole('region', { name: 'فهرست قرض‌دهندگان' }).getByRole('button', { name: /اجمل/ }).click()
   await page.getByRole('button', { name: 'کفش دادیم', exact: true }).click()
-  const picker = page.locator('select').filter({ hasText: 'انتخاب کنید...' })
-  await picker.selectOption(await picker.locator('option', { hasText: 'Go pu' }).getAttribute('value'))
+  // انتخاب جنس با جستجو: «gopu» (بی‌فاصله) هم «Go pu» را پیدا می‌کند
+  const search = page.getByRole('textbox', { name: 'جستجوی مدل، سایز و رنگ' })
+  await search.fill('xyzq')
+  await page.getByText('چیزی پیدا نشد').waitFor()
+  await search.fill('gopu 44')
+  await page.getByRole('button', { name: /Go pu.*سایز 44.*موجودی ۳/ }).click()
+  await page.getByRole('button', { name: 'تغییر جنس', exact: true }).waitFor()
   await page.getByPlaceholder('قیمت توافق‌شده').fill('1500')
   await page.getByRole('button', { name: '＋ افزودن به سند' }).click()
 

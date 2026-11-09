@@ -10,6 +10,7 @@ import {
 } from '../../lib/ops'
 import { fmtDate, fmtMoney, fmtNum, parseNum } from '../../lib/format'
 import { SIDE_LABEL, SIDE_TONE, afterThis, changeWord, headline, netOfCreditor, sideOf, withAfter } from '../../lib/accountWords'
+import VariantSearchPicker from '../../components/VariantSearchPicker'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../components/ui'
 
 export default function ExpenseCreditors() {
@@ -150,14 +151,12 @@ export function CreditorDetail({ creditor, onClose }: { creditor: Supplier; onCl
         <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
           <p className="mb-2 text-xs text-amber-800">قیمت توافقی از قرض کم می‌شود و فایدهٔ کفش در راپور امروز، ماه و سال می‌آید.</p>
           <Field label="کفش موجود در گدام *">
-            <select className={inputCls} value={variantId} onChange={(e) => { setVariantId(e.target.value ? Number(e.target.value) : ''); setQty('1'); setPrice('') }}>
-              <option value="">انتخاب کنید...</option>
-              {options?.map((option) => (
-                <option key={option.variantId} value={option.variantId}>
-                  {option.productName} — {option.size} — {option.color} ({fmtNum(option.stockQty)} موجود)
-                </option>
-              ))}
-            </select>
+            <VariantSearchPicker
+              options={options}
+              value={variantId}
+              showStock
+              onChange={(id) => { setVariantId(id); setQty('1'); setPrice('') }}
+            />
           </Field>
           {variantId && (
             <>
