@@ -26,6 +26,7 @@ import { buildLenderLedger, summarizeLenderAccount } from '../../lib/ledger'
 import { SIDE_LABEL, SIDE_TONE, afterThis, headline, netOfCreditor, sideOf, standing } from '../../lib/accountWords'
 import { afn } from '../../lib/financialPosting'
 import CorrectLenderPaymentModal from './CorrectLenderPaymentModal'
+import VariantSearchPicker from '../../components/VariantSearchPicker'
 
 /** «سند قبلی»: همهٔ کارهای پیش از اپ در یک جا — اولش «او قبلاً به ما پول قرض داد» (addLoan با 'opening'). */
 type OpeningChoice = 'loanOpening' | LenderAction
@@ -606,22 +607,16 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               : 'قیمت توافقی را او به ما بدهکار می‌شود.'}
           </p>
           <Field label="مدل، سایز و رنگ *">
-            <select
-              className={inputCls}
+            <VariantSearchPicker
+              options={stockOptions}
               value={variantId}
-              onChange={(e) => {
-                setVariantId(e.target.value ? Number(e.target.value) : '')
+              showStock
+              onChange={(id) => {
+                setVariantId(id)
                 setQty('1')
                 setAgreedPrice('')
               }}
-            >
-              <option value="">انتخاب کنید...</option>
-              {stockOptions?.map((v) => (
-                <option key={v.variantId} value={v.variantId}>
-                  {v.productName} — سایز {v.size} — {v.color} — موجودی {fmtNum(v.stockQty)}
-                </option>
-              ))}
-            </select>
+            />
           </Field>
           {variantId && (
             <>
@@ -853,22 +848,15 @@ export function LenderDetailModal({ lender, onClose }: { lender: Supplier; onClo
               ) : (
                 <>
                   <Field label="مدل، سایز و رنگ موجود">
-                    <select
-                      className={inputCls}
+                    <VariantSearchPicker
+                      options={allOptions}
                       value={variantId}
-                      onChange={(e) => {
-                        setVariantId(e.target.value ? Number(e.target.value) : '')
+                      onChange={(id) => {
+                        setVariantId(id)
                         setQty('1')
                         setAgreedPrice('')
                       }}
-                    >
-                      <option value="">انتخاب کنید...</option>
-                      {allOptions?.map((v) => (
-                        <option key={v.variantId} value={v.variantId}>
-                          {v.productName} — سایز {v.size} — {v.color}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </Field>
                   {variantId && (
                     <>
