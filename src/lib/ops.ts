@@ -7,7 +7,7 @@ import { calculateShipping, type ShippingAmounts } from './shipping'
 import { checkPurchaseReturn, checkReturn, priorReturnsOf, priorSupplierReturnsOf } from './returns'
 import { fmtMoney } from './format'
 import { afn, boxOf, postCashMovement as movement, SHOP_BOX } from './financialPosting'
-import { db, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
+import { db, isVendor, makeSku, newUuid, SYNC_TABLES, landingUnpaidOf, landingSarrafOwed, saleCashPaid, saleCreditAmount, DEFAULT_EXPENSE_CATEGORIES, type Customer, type Variant, type Sale, type SaleLine, type HistoricalGoodsLine, type Purchase, type PurchaseLine, type Payment, type Expense, type Adjustment, type ReturnDoc, type CashMovement, type Supplier, type LenderAction } from '../db'
 
 // خوانندهٔ مشترک، در db.ts زندگی می‌کند تا sync و integrity هم بتوانند بخوانند
 export { landingUnpaidOf }
@@ -335,6 +335,10 @@ export async function addPurchase(purchase: Purchase): Promise<number> {
     // «رسیده» فقط با receivePurchase ساخته می‌شود، نه در لحظهٔ ثبت خرید.
     // اگر اینجا اجازه داده شود، موجودی‌اش نه از سند خرید می‌آید و نه از سند رسید.
     if (purchase.received === true) throw new Error('خرید نو نمی‌تواند «رسیده» ثبت شود')
+    // خرید فقط از تأمین‌کننده: قرض‌دهنده، صراف، شریک یا طلبکار مصرف فروشندهٔ جنس نیستند و
+    // باقی خرید روی حساب آن‌ها به‌عنوان «قرض ما» می‌نشست.
+    const vendor = await db.suppliers.get(purchase.supplierId)
+    if (vendor && !isVendor(vendor)) throw new Error('این شخص تأمین‌کننده نیست (قرض‌دهنده، صراف، شریک یا طلبکار مصرف است). خرید را به نام تأمین‌کننده ثبت کنید.')
     for (const line of purchase.lines) {
       const v = await db.variants.get(line.variantId)
       if (!v) throw new Error('جنس یافت نشد')

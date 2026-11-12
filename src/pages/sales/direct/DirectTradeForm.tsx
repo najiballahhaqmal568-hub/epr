@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { accessFlags, db, newUuid } from '../../../db'
+import { accessFlags, db, isVendor, newUuid } from '../../../db'
 import { Field, inputCls, Modal, PrimaryBtn } from '../../../components/ui'
 import { fmtMoney, fromDateInput, toDateInput } from '../../../lib/format'
 import { createDirectTrade } from '../../../lib/directTradeOps'
@@ -26,7 +26,7 @@ export default function DirectTradeForm({ onClose, onSaved, onPendingChange }: {
   const busy = useRef(false)
   const enabled = useLiveQuery(directFeatureEnabled, [])
   const customers = useLiveQuery(() => db.customers.filter(c => !c.deleted).toArray(), [])
-  const suppliers = useLiveQuery(() => db.suppliers.filter(s => !s.deleted && (!s.kind || s.kind === 'supplier')).toArray(), [])
+  const suppliers = useLiveQuery(() => db.suppliers.filter(s => !s.deleted && isVendor(s)).toArray(), [])
   let preview: { cost: number; sale: number; profit: number; customer: number; supplier: number; cash: number } | undefined
   let invalid = ''
   const snapshots = lines.map(line => ({ ...line, qty: numberInput(line.qty), unitCost: numberInput(line.unitCost), unitPrice: numberInput(line.unitPrice) }))

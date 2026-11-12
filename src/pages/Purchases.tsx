@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type Purchase, type Supplier } from '../db'
+import { db, isVendor, type Purchase, type Supplier } from '../db'
 import { receivePurchase, payLanding, landingUnpaidOf } from '../lib/ops'
 import { fmtNum, fmtMoney, fmtDate } from '../lib/format'
 import { inputCls, Empty } from '../components/ui'
@@ -75,7 +75,7 @@ export default function Purchases({
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
-  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner' && s.kind !== 'lender' && s.kind !== 'expenseCreditor')
+  const vendors = suppliers?.filter(isVendor)
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
   const lenders = suppliers?.filter((s) => s.kind === 'lender')
   const reorderCount = reorderProducts(products ?? [], variants ?? []).length
