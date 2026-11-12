@@ -6,7 +6,7 @@
  *
  * این فایل جزو اپ نیست — فقط با `npm test` اجرا می‌شود و در نسخهٔ نصبی نمی‌آید.
  */
-import { db, accessFlags, writeAsRemote, saleCashPaid, saleCreditAmount, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
+import { db, isVendor, accessFlags, writeAsRemote, saleCashPaid, saleCreditAmount, type Payment, type Sale, type Purchase, type Expense, type ReturnDoc, type Product, type Variant } from '../src/db'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import LendersView from '../src/pages/purchases/LendersView'
@@ -281,6 +281,31 @@ async function settlement() {
 
 // ── سناریوها ────────────────────────────────────────────────────
 const SCENARIOS: { name: string; run: () => Promise<void> }[] = [
+  {
+    name: 'خرید فقط از تأمین‌کننده — قرض‌دهنده، صراف، شریک و طلبکار مصرف در لیست خرید نیستند',
+    run: async () => {
+      await fresh()
+      const vId = await makeVariant()
+      const plain = (await db.suppliers.add({ name: 'داد الله', balance: 0 })) as number
+      const marked = (await db.suppliers.add({ name: 'حبیبی', balance: 0, kind: 'supplier' })) as number
+      const lender = (await db.suppliers.add({ name: 'نورالله', balance: 0, kind: 'lender' })) as number
+      const sarraf = (await db.suppliers.add({ name: 'صراف', balance: 0, kind: 'sarraf' })) as number
+      const partner = (await db.suppliers.add({ name: 'شریک', balance: 0, kind: 'partner' })) as number
+      const creditor = (await db.suppliers.add({ name: 'استاد فیروز', balance: 0, kind: 'expenseCreditor' })) as number
+      const listed = (await db.suppliers.toArray()).filter(isVendor).map((s) => s.name).sort().join('،')
+      is('لیست تأمین‌کننده فقط فروشنده‌های جنس', listed, ['داد الله', 'حبیبی'].sort().join('،'))
+      for (const [label, id] of [['قرض‌دهنده', lender], ['صراف', sarraf], ['شریک', partner], ['طلبکار مصرف', creditor]] as const) {
+        await throws(`خرید به نام ${label} رد می‌شود`, () => addPurchase(buy(id, vId, 2, 500, { paid: 0 })))
+        eq(`حساب ${label} دست نخورد`, (await db.suppliers.get(id))!.balance, 0)
+      }
+      eq('خرید رد‌شده جنسی به گدام نیاورد', (await db.variants.get(vId))!.stockQty, 0)
+      await addPurchase(buy(plain, vId, 2, 500, { paid: 0 }))
+      await addPurchase(buy(marked, vId, 1, 500, { paid: 0 }))
+      eq('تأمین‌کنندهٔ بی‌نوع: قرض ما ۱٬۰۰۰', (await db.suppliers.get(plain))!.balance, 1000)
+      eq('تأمین‌کنندهٔ نشان‌دار: قرض ما ۵۰۰', (await db.suppliers.get(marked))!.balance, 500)
+      eq('گدام ۳ جوړه', (await db.variants.get(vId))!.stockQty, 3)
+    }
+  },
   {
     name: 'یادآوری بکاپ — فقط وقتی چیزی برای محافظت هست و بکاپ کهنه است',
     run: async () => {

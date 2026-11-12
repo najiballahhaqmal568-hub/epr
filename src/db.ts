@@ -79,6 +79,12 @@ export interface Customer extends Synced {
   bookPage?: string
 }
 
+/** فروشندهٔ جنس (تأمین‌کننده) — نه صراف، نه شریک، نه قرض‌دهنده، نه طلبکار مصرف.
+ *  لیست «تأمین‌کننده» در فورم خرید و هر جای دیگر از همین یک قاعده می‌خواند. */
+export function isVendor(s: Pick<Supplier, 'kind'>): boolean {
+  return s.kind === undefined || s.kind === 'supplier'
+}
+
 export interface Supplier extends Synced {
   id?: number
   name: string

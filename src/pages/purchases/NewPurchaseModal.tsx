@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSubmitOnce } from '../../lib/useSubmitOnce'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type PurchaseLine, type Product } from '../../db'
+import { db, isVendor, type PurchaseLine, type Product } from '../../db'
 import { addPurchase } from '../../lib/ops'
 import { fmtNum, fmtMoney, parseNum } from '../../lib/format'
 import QtyControl from '../../components/QtyControl'
@@ -27,7 +27,7 @@ export function NewPurchaseModal({ onClose }: { onClose: () => void }) {
   const suppliers = useLiveQuery(() => db.suppliers.orderBy('name').filter((x) => !x.deleted).toArray(), [])
   const products = useLiveQuery(() => db.products.filter((p) => !p.deleted).toArray(), [])
   const variants = useLiveQuery(() => db.variants.filter((v) => !v.deleted).toArray(), [])
-  const vendors = suppliers?.filter((s) => s.kind !== 'sarraf' && s.kind !== 'partner')
+  const vendors = suppliers?.filter(isVendor)
   const sarrafs = suppliers?.filter((s) => s.kind === 'sarraf')
 
   const productMap = new Map<number, Product>()
